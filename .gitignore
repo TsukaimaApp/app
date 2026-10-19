@@ -1,2 +1,8 @@
 .local/
 *.env
+local.properties
+.gradle/
+build/
+*.apk
+.kotlin/
+.idea/
