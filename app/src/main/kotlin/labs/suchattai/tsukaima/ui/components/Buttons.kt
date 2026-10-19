@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -114,34 +115,41 @@ private fun PillButton(
     val border = if (variant == ButtonVariant.Secondary) colors.hairline else Color.Transparent
     val shape = TsukaimaShapes.pill
 
-    Row(
+    // The visual pill is 36dp (sm) / 44dp (md); the wrapper guarantees a 44dp touch target.
+    Box(
         modifier = modifier
             .alpha(if (enabled) 1f else 0.45f)
-            .defaultMinSize(minHeight = if (sm) 36.dp else 44.dp)
-            .clip(shape)
-            .background(fill)
-            .border(1.dp, border, shape)
-            // Primary swaps its fill on press instead of washing over it.
-            .then(if (variant == ButtonVariant.Primary) Modifier else Modifier.pressWash(source, shape))
+            .sizeIn(minHeight = Dimens.hit)
             .clickable(
                 interactionSource = source,
                 indication = null,
                 enabled = enabled,
                 role = Role.Button,
                 onClick = onClick,
-            )
-            .padding(if (sm) PaddingValues(horizontal = 16.dp, vertical = 8.dp) else PaddingValues(horizontal = 22.dp, vertical = 12.dp)),
-        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-        verticalAlignment = Alignment.CenterVertically,
+            ),
+        contentAlignment = Alignment.Center,
     ) {
-        if (icon != null) TsukaimaIcon(icon, size = if (sm) 18.dp else 20.dp, tint = content)
-        val fontSize = if (sm) 13.sp else 14.5.sp
-        Text(
-            text = text,
-            style = TsukaimaType.ui.copy(fontSize = fontSize, lineHeight = fontSize, fontWeight = FontWeight.SemiBold),
-            color = content,
-            maxLines = 1,
-        )
+        Row(
+            modifier = Modifier
+                .defaultMinSize(minHeight = if (sm) 36.dp else 44.dp)
+                .clip(shape)
+                .background(fill)
+                .border(1.dp, border, shape)
+                // Primary swaps its fill on press instead of washing over it.
+                .then(if (variant == ButtonVariant.Primary) Modifier else Modifier.pressWash(source, shape))
+                .padding(if (sm) PaddingValues(horizontal = 16.dp, vertical = 8.dp) else PaddingValues(horizontal = 22.dp, vertical = 12.dp)),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (icon != null) TsukaimaIcon(icon, size = if (sm) 18.dp else 20.dp, tint = content)
+            val fontSize = if (sm) 13.sp else 14.5.sp
+            Text(
+                text = text,
+                style = TsukaimaType.ui.copy(fontSize = fontSize, lineHeight = fontSize, fontWeight = FontWeight.SemiBold),
+                color = content,
+                maxLines = 1,
+            )
+        }
     }
 }
 

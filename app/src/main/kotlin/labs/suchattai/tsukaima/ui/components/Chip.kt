@@ -7,7 +7,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
@@ -25,6 +27,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import labs.suchattai.tsukaima.ui.theme.Dimens
 import labs.suchattai.tsukaima.ui.theme.Motion
 import labs.suchattai.tsukaima.ui.theme.TsukaimaShapes
 import labs.suchattai.tsukaima.ui.theme.TsukaimaTheme
@@ -36,7 +39,7 @@ import labs.suchattai.tsukaima.ui.theme.tsukaima
  * `accentSelected` and switches the label to ink1; [borderless] drops the hairline (the top-bar
  * model chip).
  *
- * Height follows `Chip.jsx` (min 36dp, 7/12 padding); the brief's "32dp" was superseded by it.
+ * Visual height follows `Chip.jsx` (min 36dp, 7/12 padding); the touch target is 44dp.
  */
 @Composable
 fun Chip(
@@ -59,22 +62,29 @@ fun Chip(
     val content = if (selected) colors.ink1 else colors.ink2
     val border = if (selected || borderless) Color.Transparent else colors.hairline
 
-    Row(
+    // The visual pill is 36dp; the clickable wrapper guarantees the 44dp touch target.
+    Box(
         modifier = modifier
-            .defaultMinSize(minHeight = 36.dp)
-            .clip(shape)
-            .background(fill)
-            .border(1.dp, border, shape)
-            .pressWash(source, shape)
+            .sizeIn(minHeight = Dimens.hit)
             .semantics { this.selected = selected }
-            .clickable(interactionSource = source, indication = null, role = Role.Button, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 7.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .clickable(interactionSource = source, indication = null, role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
-        if (leading != null) TsukaimaIcon(leading, size = 18.dp, tint = content)
-        Text(label, style = TsukaimaType.ui, color = content, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (trailing != null) TsukaimaIcon(trailing, size = 18.dp, tint = content)
+        Row(
+            modifier = Modifier
+                .defaultMinSize(minHeight = 36.dp)
+                .clip(shape)
+                .background(fill)
+                .border(1.dp, border, shape)
+                .pressWash(source, shape)
+                .padding(horizontal = 12.dp, vertical = 7.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (leading != null) TsukaimaIcon(leading, size = 18.dp, tint = content)
+            Text(label, style = TsukaimaType.ui, color = content, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (trailing != null) TsukaimaIcon(trailing, size = 18.dp, tint = content)
+        }
     }
 }
 

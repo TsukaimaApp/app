@@ -160,9 +160,9 @@ fun iconFor(name: IconName): ImageVector = when (name) {
 @Composable
 fun TsukaimaIcon(
     name: IconName,
-    modifier: Modifier = Modifier,
     size: Dp = 24.dp,
     tint: Color = MaterialTheme.tsukaima.ink2,
+    modifier: Modifier = Modifier,
     contentDescription: String? = null,
 ) {
     Icon(

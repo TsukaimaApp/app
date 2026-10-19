@@ -33,7 +33,6 @@ import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.withTimeout
 import labs.suchattai.tsukaima.ui.theme.Motion
 import labs.suchattai.tsukaima.ui.theme.TsukaimaShapes
 import labs.suchattai.tsukaima.ui.theme.TsukaimaTheme
@@ -88,6 +87,7 @@ fun Modifier.longPressMenu(onLongPress: () -> Unit): Modifier = this
         awaitEachGesture {
             awaitFirstDown(requireUnconsumed = false)
             try {
+                // Member of AwaitPointerEventScope (throws PointerEventTimeoutCancellationException).
                 // Null (cancelled or consumed by a scroll) or an early up: not a long press.
                 withTimeout(Motion.longPressMs.toLong()) { waitForUpOrCancellation() }
             } catch (_: PointerEventTimeoutCancellationException) {

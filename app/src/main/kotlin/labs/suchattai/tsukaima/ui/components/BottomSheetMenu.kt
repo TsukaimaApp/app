@@ -11,11 +11,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.launch
 import labs.suchattai.tsukaima.ui.theme.TsukaimaShapes
 import labs.suchattai.tsukaima.ui.theme.TsukaimaTheme
@@ -33,7 +35,8 @@ data class MenuItem(
 /**
  * Bottom-sheet context menu (long-press on a row, model/workspace pickers). Destructive items
  * should be last. Choosing an item hides the sheet, then calls [onDismiss] followed by the
- * item's `onClick`.
+ * item's `onClick`, exactly once per visibility (further taps while hiding are ignored, and a
+ * cancelled hide fires nothing).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,6 +49,7 @@ fun MenuSheet(
     val colors = MaterialTheme.tsukaima
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
+    val fired = remember { AtomicBoolean(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -57,9 +61,16 @@ fun MenuSheet(
         dragHandle = { SheetHandle() },
     ) {
         MenuSheetItems(items) { item ->
-            scope.launch { sheetState.hide() }.invokeOnCompletion {
-                onDismiss()
-                item.onClick()
+            // One-shot per sheet visibility: taps during the hide animation are ignored.
+            if (!fired.compareAndSet(false, true)) return@MenuSheetItems
+            scope.launch { sheetState.hide() }.invokeOnCompletion { cause ->
+                if (cause == null && !sheetState.isVisible) {
+                    onDismiss()
+                    item.onClick()
+                } else {
+                    // Hide was cancelled: let the user pick again.
+                    fired.set(false)
+                }
             }
         }
     }

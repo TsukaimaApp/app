@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +16,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +42,7 @@ fun TsukaimaSwitch(
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.tsukaima
+    val source = remember { MutableInteractionSource() }
     val spec = tween<Color>(Motion.base, easing = Motion.easing)
     val track by animateColorAsState(if (checked) colors.accent else colors.surfaceSunken, spec, label = "track")
     val border by animateColorAsState(if (checked) colors.accent else colors.hairline, spec, label = "border")
@@ -54,7 +57,13 @@ fun TsukaimaSwitch(
     Box(
         modifier = modifier
             .size(Dimens.hit)
-            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange),
+            .toggleable(
+                value = checked,
+                interactionSource = source,
+                indication = null,
+                role = Role.Switch,
+                onValueChange = onCheckedChange,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Box(
@@ -62,7 +71,8 @@ fun TsukaimaSwitch(
                 .size(width = 44.dp, height = 26.dp)
                 .clip(TsukaimaShapes.pill)
                 .background(track)
-                .border(1.dp, border, TsukaimaShapes.pill),
+                .border(1.dp, border, TsukaimaShapes.pill)
+                .pressWash(source, TsukaimaShapes.pill),
         ) {
             Box(
                 Modifier
