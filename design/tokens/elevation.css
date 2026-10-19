@@ -1,0 +1,9 @@
+:root{
+  /* shadows only on composer + approval card */
+  --shadow-float:0 2px 12px rgba(60,50,40,.10);
+  --shadow-float-dark:0 2px 14px rgba(0,0,0,.45);
+  --ring-focus:0 0 0 2px var(--accent);
+  --ease-quiet:cubic-bezier(.25,.1,.25,1); /* @kind other */
+  --dur-quick:150ms; /* @kind other */
+  --dur-base:200ms; /* @kind other */
+}

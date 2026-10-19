@@ -1,0 +1,192 @@
+<!-- @dsCard group="Tsukaima Site" viewport="1280x800" name="Landing page" subtitle="Project site — editorial, cream, serif" -->
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Tsukaima — a familiar for Hermes Agent</title>
+<link rel="stylesheet" href="../../styles.css">
+<style>
+html,body{margin:0}body{background:var(--surface-page);color:var(--text-body);font:var(--type-body);-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}a:hover{color:var(--accent-pressed)}
+.wrap{max-width:1080px;margin:0 auto;padding:0 var(--sp-6)}
+nav{display:flex;align-items:center;justify-content:space-between;padding:22px 0}
+.lock{display:flex;align-items:center;gap:10px;font:var(--type-wordmark);font-size:22px;color:var(--text-body)}.lock img{height:24px}.lock .k{font-family:var(--font-kanji);font-size:11px;color:var(--text-tertiary)}
+.links{display:flex;gap:28px;font:var(--type-ui);color:var(--text-secondary)}.links a{color:inherit}.links a:hover{color:var(--text-body)}
+.hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:48px;align-items:center;padding:56px 0 72px}
+h1{font:600 52px/1.08 var(--font-serif);letter-spacing:-.01em;margin:0 0 18px;text-wrap:pretty}
+.lede{font:var(--type-body);font-size:18px;color:var(--text-secondary);max-width:46ch;margin:0 0 30px;text-wrap:pretty}
+.cta{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.cta small{font:var(--type-caption);color:var(--text-tertiary);margin-left:6px}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;box-sizing:border-box;padding:12px 22px;border-radius:var(--radius-pill);font:600 14.5px/1 var(--font-sans);border:1px solid transparent}
+.btn.p{background:var(--accent);color:#fff}.btn.p:hover{background:var(--accent-pressed);color:#fff}
+.btn.s{background:var(--surface-raised);color:var(--text-body);border-color:var(--border-hairline)}.btn.s:hover{background:var(--surface-sunken);color:var(--text-body)}
+.phone{justify-self:center;width:min(360px,100%);aspect-ratio:412/824;border-radius:32px;border:1px solid var(--border-hairline);background:var(--surface-raised);overflow:hidden;box-shadow:var(--shadow-float)}
+.phone iframe{width:412px;height:824px;border:0;transform:scale(var(--s,1));transform-origin:0 0;display:block}
+.status{display:inline-flex;align-items:center;gap:8px;font:var(--type-status);color:var(--text-secondary);margin-bottom:22px}.dot{width:7px;height:7px;border-radius:99px;background:var(--accent);animation:p 2s infinite}@keyframes p{0%,100%{opacity:1}50%{opacity:.35}}
+.rule{border:0;border-top:1px solid var(--border-hairline);margin:0}
+h2{font:var(--type-title);font-size:30px;margin:0 0 14px;text-wrap:pretty}
+.sub{font:var(--type-body);font-size:17px;color:var(--text-secondary);max-width:58ch;margin:0 0 40px;text-wrap:pretty}
+.label{font:var(--type-label);letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:12px}
+section{padding:72px 0}
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:32px;counter-reset:s}
+.step{border-top:1px solid var(--border-hairline);padding-top:18px}.step::before{counter-increment:s;content:counter(s,decimal-leading-zero);display:block;font:600 13px/1 var(--font-serif);color:var(--accent);margin-bottom:14px;letter-spacing:.06em}
+.step h3{font:600 20px/1.3 var(--font-serif);margin:0 0 8px}.step p{margin:0;color:var(--text-secondary);text-wrap:pretty}
+.feat{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:56px;align-items:center;padding:56px 0}.feat.r{grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr)}.feat.r .copy{order:2}
+.feat h3{font:600 26px/1.25 var(--font-serif);margin:0 0 12px;text-wrap:pretty}.feat p{margin:0 0 10px;color:var(--text-secondary);text-wrap:pretty}
+.demo{background:var(--surface-raised);border:1px solid var(--border-hairline);border-radius:var(--radius-card);padding:20px 0;overflow:hidden}
+.demo .stack{display:flex;flex-direction:column;gap:6px}
+.frame{border-radius:var(--radius-card);border:1px solid var(--border-hairline);overflow:hidden;background:var(--surface-raised);aspect-ratio:1280/800}.frame iframe{width:1280px;height:800px;border:0;transform:scale(var(--s,1));transform-origin:0 0;display:block}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px}
+.fact{background:var(--surface-raised);border:1px solid var(--border-hairline);border-radius:var(--radius-card);padding:22px}.fact b{display:block;font:600 19px/1.3 var(--font-serif);margin-bottom:6px}.fact span{color:var(--text-secondary);text-wrap:pretty}
+.self{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:48px;align-items:center}
+pre.term{margin:0;background:var(--code-bg);color:var(--code-ink);font:var(--type-code);border-radius:var(--radius-code);padding:18px 20px;overflow-x:auto}pre.term .c{color:rgba(216,211,232,.5)}
+.faq{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px 48px}
+details{border-top:1px solid var(--border-hairline);padding:16px 0}details summary{cursor:pointer;list-style:none;font:600 16.5px/1.35 var(--font-serif);display:flex;justify-content:space-between;gap:16px}details summary::after{content:"+";color:var(--text-tertiary);font:400 20px/1 var(--font-sans)}details[open] summary::after{content:"–"}details p{margin:10px 0 0;color:var(--text-secondary);text-wrap:pretty}
+.quiet{display:flex;align-items:center;gap:28px;padding:56px 0 72px}.quiet img{width:220px;flex-shrink:0;opacity:.8}.quiet p{margin:0;font:var(--type-status);font-size:18px;color:var(--text-secondary);max-width:52ch}
+.final{text-align:center;padding:80px 0}.final h2{font-size:38px}.final .cta{justify-content:center}
+footer{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;padding:28px 0 40px;font:var(--type-caption);color:var(--text-tertiary)}
+@media (max-width:860px){.hero,.self,.feat,.feat.r{grid-template-columns:1fr}.feat.r .copy{order:0}.phone{width:min(300px,100%)}h1{font-size:40px}.links{display:none}.quiet{flex-direction:column;align-items:flex-start}section{padding:56px 0}}
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+</head><body>
+<div class="wrap">
+<nav><a class="lock" href="#"><img src="../../assets/mark.svg" alt="">Tsukaima<span class="k">使い魔</span></a><div class="links"><a href="#how">How it works</a><a href="#features">Features</a><a href="#selfhost">Self-hosted</a><a href="#faq">FAQ</a><a href="#">GitHub</a></div></nav>
+
+<section class="hero" style="padding-top:40px">
+<div>
+<div class="status"><span class="dot"></span>Running shell command…</div>
+<h1>A familiar for your Hermes Agent.</h1>
+<p class="lede">Tsukaima is a native Android client for Hermes Agent, the open-source autonomous agent by Nous Research. Chat with your agent, watch it work, approve tool calls and switch models — from your pocket, talking straight to your own instance.</p>
+<div class="cta"><a class="btn p" href="#">Download APK</a><a class="btn s" href="#">View source</a><small>Android 10+ · ~6 MB · no account</small></div>
+</div>
+<div class="phone"><iframe src="../tsukaima/index.html?demo=1" title="Tsukaima app preview" loading="lazy"></iframe></div>
+</section>
+
+<hr class="rule">
+<section id="how">
+<div class="label">How it works</div>
+<h2>Three steps, then it's yours.</h2>
+<p class="sub">Hermes keeps running wherever you host it. Tsukaima is just the hand you reach in with.</p>
+<div class="steps">
+<div class="step"><h3>Point it at your instance.</h3><p>Paste the server URL and an access token from Hermes. Over LAN, Tailscale, or any tunnel you already trust.</p></div>
+<div class="step"><h3>Pick a profile and a model.</h3><p>Every Hermes profile shows up with its own conversations. Switch the model from the chip in the top bar, mid-conversation if you like.</p></div>
+<div class="step"><h3>Talk, watch, approve.</h3><p>Send a message, see the status line change as the agent thinks and runs tools, and sign off on anything risky before it happens.</p></div>
+</div>
+</section>
+
+<hr class="rule">
+<section id="features" style="padding-bottom:0">
+<div class="label">Features</div>
+<h2>Built for watching an agent work.</h2>
+<p class="sub">Most chat apps assume the other side is a person typing. Tsukaima assumes it's a process — so presence, tools and permission are in the design, not bolted on.</p>
+</section>
+
+<div class="feat">
+<div class="copy"><h3>The status line is the app.</h3><p>Idle, thinking, running a tool, waiting on you — a single serif line under the top bar, with a lavender dot that breathes while the agent is busy. Glanceable from across the room.</p><p>While it thinks, the line cycles through quiet verbs instead of a spinner.</p></div>
+<div class="demo"><div id="d-status" class="stack"></div></div>
+</div>
+
+<div class="feat r">
+<div class="copy"><h3>Nothing runs without you.</h3><p>Hermes pauses on tool calls you've marked as sensitive. Tsukaima shows the full command in an inline card — approve or deny in one tap, and the agent carries on either way.</p><p>Approvals also arrive as notifications, so you can sign off from the lock screen.</p></div>
+<div class="demo" id="d-approval"></div>
+</div>
+
+<div class="feat">
+<div class="copy"><h3>Prose, not bubbles.</h3><p>Your agent's replies sit flush on the page like a document. Markdown and code render inline, with a copy action on every block. Tool calls and thinking collapse into a slim row — there when you want the detail, quiet when you don't.</p></div>
+<div class="demo" id="d-chat"></div>
+</div>
+
+<div class="feat r">
+<div class="copy"><h3>One agent, many hats.</h3><p>Conversations group by Hermes profile, not just by date — so your ops agent and your research agent stay separate even though they share a server. The drawer is the whole navigation; there's no tab bar.</p></div>
+<div class="demo" id="d-drawer" style="padding:0;height:380px;display:flex"></div>
+</div>
+
+<hr class="rule">
+<section>
+<div class="label">Unfolded · tablet · web</div>
+<h2>Same app, more room.</h2>
+<p class="sub">Open a foldable and the drawer becomes a permanent pane; the chat stays a readable column. The web build is the same code at desktop width.</p>
+<div class="frame"><iframe src="../tsukaima/web.html" title="Tsukaima wide layout" loading="lazy"></iframe></div>
+</section>
+
+<hr class="rule">
+<section id="selfhost">
+<div class="self">
+<div><div class="label">Self-hosted</div><h2>No account. No middleman.</h2><p class="sub" style="margin-bottom:0">Tsukaima talks directly to one Hermes instance over your own network or tunnel. There's no Tsukaima server, no analytics, no sync service. The token lives in Android's encrypted keystore and never leaves the device except to your Hermes.</p></div>
+<pre class="term"><span class="c"># on the box running Hermes</span>
+$ hermes token create --name pixel
+hm_3f9a…c21e
+
+<span class="c"># in Tsukaima → Settings</span>
+Server URL   https://hermes.local:8000
+Token        hm_••••••••••••
+→ Connected · Hermes 4 · 405B</pre>
+</div>
+<div class="facts" style="margin-top:48px">
+<div class="fact"><b>Single user</b><span>One phone, one Hermes. No teams, no sharing, no roles to manage.</span></div>
+<div class="fact"><b>Streams over SSE</b><span>Tokens, tool events and approval requests arrive live on Hermes's own API — nothing is polled.</span></div>
+<div class="fact"><b>Material 3, warm by default</b><span>Fixed cream palette out of the box. Material You dynamic color is a switch away if you want it to match your wallpaper.</span></div>
+<div class="fact"><b>Open source</b><span>Kotlin + Jetpack Compose. Build it yourself or install the signed release from GitHub.</span></div>
+</div>
+</section>
+
+<hr class="rule">
+<section id="faq">
+<div class="label">FAQ</div>
+<h2>Questions people ask.</h2>
+<div class="faq" style="margin-top:32px">
+<details><summary>Does it work without a Hermes instance?</summary><p>No. Tsukaima is a client, not an agent. It needs a running Hermes Agent to connect to — on a home server, a VPS, or your laptop.</p></details>
+<details><summary>Can I reach it from outside my network?</summary><p>Yes, however you'd reach Hermes itself: Tailscale, WireGuard, a reverse proxy with TLS. Tsukaima just needs a URL and a token.</p></details>
+<details><summary>Is anything sent to Nous or to the Tsukaima author?</summary><p>No. There's no telemetry and no third-party service. All traffic is between your phone and your Hermes.</p></details>
+<details><summary>Which tool calls need approval?</summary><p>Whatever your Hermes profile marks as requiring confirmation. Tsukaima surfaces every one of those as an approval card; it doesn't decide for you.</p></details>
+<details><summary>Will there be an iOS version?</summary><p>Not planned. Tsukaima is Android-first and leans on Material 3. The web build covers everything else.</p></details>
+<details><summary>Why the name?</summary><p>A tsukaima (使い魔) is a familiar — a spirit bound to its master and sent out to do the work. The agent runs elsewhere; this is the thing in your hand that's bound to it.</p></details>
+</div>
+</section>
+
+<hr class="rule">
+<section class="quiet"><img src="../../assets/resting-wisp.svg" alt=""><p style="white-space:pre-line">Cream, one lavender,
+a serif where it matters —
+the agent is loud.</p></section>
+
+<hr class="rule">
+<section class="final">
+<h2>Bind your familiar.</h2>
+<p class="sub" style="margin:0 auto 30px">Free, open source, no account. Install, paste a token, start talking.</p>
+<div class="cta"><a class="btn p" href="#">Download APK</a><a class="btn s" href="#">Read the setup guide</a></div>
+</section>
+
+<footer><span>Tsukaima · an open-source client for Hermes Agent by Nous Research · not affiliated with Nous</span><span><a href="#">Source</a> · <a href="#">Releases</a> · <a href="#">Issues</a></span></footer>
+</div>
+<script>document.querySelectorAll('.phone,.frame').forEach(el=>{const w=el.classList.contains('phone')?412:1280;const ro=new ResizeObserver(()=>el.style.setProperty('--s',el.clientWidth/w));ro.observe(el);});</script>
+<script type="text/babel">
+const DS = window.TsukaimaDesignSystem_17565f;
+const mount = (id, el) => ReactDOM.createRoot(document.getElementById(id)).render(el);
+mount('d-status', <>
+  <DS.StatusLine state="idle" />
+  <DS.StatusLine state="thinking" />
+  <DS.StatusLine state="tool" label="Running shell command" />
+  <DS.StatusLine state="approval" />
+</>);
+function ApprovalDemo() {
+  const [done, setDone] = React.useState(null);
+  if (done) return <div style={{ padding: '0 0 4px' }}><DS.ToolRow name="shell" detail="systemctl restart hermes-agent" status={done === 'ok' ? 'done' : 'error'} /><DS.AssistantMessage>{done === 'ok' ? 'Restarted. I\u2019ll flag it if the 3am run fails.' : 'Understood — I left it running.'}</DS.AssistantMessage><div style={{ padding: '8px 20px 0' }}><DS.Button variant="ghost" size="sm" onClick={() => setDone(null)}>Reset</DS.Button></div></div>;
+  return <DS.ApprovalCard toolName="shell" command="systemctl restart hermes-agent" onApprove={() => setDone('ok')} onDeny={() => setDone('no')} />;
+}
+mount('d-approval', <ApprovalDemo />);
+mount('d-chat', <>
+  <DS.UserBubble>Why did the backup fail last night?</DS.UserBubble>
+  <DS.ToolRow kind="thinking" name="Thought for 9s">Check the cron log first, then the service token.</DS.ToolRow>
+  <DS.ToolRow name="shell" detail="tail -n 50 /var/log/cron.log" status="done"><DS.CodeBlock lang="log" code={'Oct 19 03:00:01 CRON[8812]: backup.sh exited 401'} /></DS.ToolRow>
+  <DS.AssistantMessage>The storage token expired on the 16th. Rotate it with:<DS.CodeBlock lang="bash" code={'hermes token rotate storage'} /></DS.AssistantMessage>
+</>);
+mount('d-drawer', <DS.Drawer width="100%" style={{ borderRight: 'none', borderRadius: 'var(--radius-card)' }}
+  header={<div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><img src="../../assets/mark.svg" alt="" style={{ height: 22 }} /><span style={{ font: 'var(--type-wordmark)', fontSize: 20 }}>Tsukaima</span></div>}
+  footer={<DS.ConversationItem icon="settings" title="Settings" />}>
+  <DS.DrawerLabel>Ops profile</DS.DrawerLabel>
+  <DS.ConversationItem title="Fix the cron job" meta="2h" selected />
+  <DS.ConversationItem title="Backup rotation plan" meta="3d" />
+  <DS.DrawerLabel>Research profile</DS.DrawerLabel>
+  <DS.ConversationItem title="Paper triage" meta="4d" />
+  <DS.ConversationItem title="Dataset licence check" meta="1w" />
+</DS.Drawer>);
+</script>
+</body></html>

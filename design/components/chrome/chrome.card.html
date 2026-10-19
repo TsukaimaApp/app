@@ -1,0 +1,24 @@
+<!-- @dsCard group="Components" viewport="700x400" name="Chrome" subtitle="Top bar, drawer, conversation rows" -->
+<!DOCTYPE html><html><head><link rel="stylesheet" href="../../styles.css"><style>body{margin:0;background:var(--surface-page)}a{color:var(--accent)}a:hover{color:var(--accent-pressed)}</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script></head><body>
+<div id="root"></div>
+<script type="text/babel">
+const { TopBar, Drawer, DrawerLabel, ConversationItem } = window.TsukaimaDesignSystem_17565f;
+const App = () => <div style={{display:'flex',height:380}}>
+  <Drawer width={280}
+    header={<div style={{display:'flex',alignItems:'center',gap:10}}><img src="../../assets/mark.svg" alt="" style={{height:24}} /><span style={{font:'var(--type-wordmark)',fontSize:22,color:'var(--text-body)'}}>Tsukaima</span><span style={{fontFamily:'var(--font-kanji)',fontSize:11,color:'var(--text-tertiary)'}}>使い魔</span></div>}
+    footer={<ConversationItem icon="settings" title="Settings" />}>
+    <DrawerLabel>Default profile</DrawerLabel>
+    <ConversationItem title="Fix the cron job" meta="2h" selected />
+    <ConversationItem title="Summarize server logs" meta="1d" />
+    <DrawerLabel>Research profile</DrawerLabel>
+    <ConversationItem title="Paper triage" meta="3d" />
+  </Drawer>
+  <div style={{flex:1}}><TopBar model="Hermes 4 · 405B" /></div>
+</div>;
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body></html>

@@ -1,0 +1,25 @@
+<!-- @dsCard group="Components" viewport="700x600" name="Core" subtitle="Button, IconButton, Chip, TextField, Switch, Card, Row, Dialog, Skeleton" -->
+<!DOCTYPE html><html><head><link rel="stylesheet" href="../../styles.css"><style>body{margin:0;background:var(--surface-page);padding:18px 22px;font:var(--type-ui);color:var(--text-secondary)}.row{display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}a{color:var(--accent)}a:hover{color:var(--accent-pressed)}</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script></head><body>
+<div id="root"></div>
+<script type="text/babel">
+const { Button, IconButton, Chip, TextField, Switch, Card, Row, Dialog, Menu, Skeleton } = window.TsukaimaDesignSystem_17565f;
+const App = () => <div>
+  <div className="row"><Button variant="primary" icon="check">Approve</Button><Button>Save</Button><Button danger>Deny</Button><Button variant="ghost">Cancel</Button><Button size="sm">Connect</Button><Button disabled>Save</Button></div>
+  <div className="row"><IconButton icon="arrow_upward" label="Send" accent /><IconButton icon="add" label="Attach" /><IconButton icon="more_vert" label="More" /><Chip label="Hermes 4 · 405B" trailingIcon="expand_more" /><Chip label="Default profile" selected /><Switch label="Dynamic color" checked onChange={()=>{}} /></div>
+  <div className="row" style={{alignItems:'flex-start'}}>
+    <TextField label="Server URL" mono value="https://hermes.local:8000" onChange={()=>{}} style={{flex:1}} />
+    <Card style={{flex:1}} padding={14}>Raised card — hairline, no shadow</Card>
+  </div>
+  <div className="row" style={{alignItems:'flex-start'}}>
+    <div style={{flex:1,background:'var(--surface-raised)',border:'1px solid var(--border-hairline)',borderRadius:16,padding:'4px'}}><Row icon="schedule" title="Nightly backup" subtitle="Every day at 03:00 · 0 3 * * *" meta="in 9h" onClick={()=>{}} /><Row title="Dynamic color" trailing={<Switch checked={false} onChange={()=>{}} />} /></div>
+    <div style={{flex:1,position:'relative',height:150,borderRadius:16,overflow:'hidden',border:'1px solid var(--border-hairline)'}}><Dialog open title="Delete session?" body="This can’t be undone." confirmLabel="Delete" danger /></div>
+  </div>
+  <div className="row" style={{alignItems:'flex-start'}}><div style={{flex:1,display:'flex',flexDirection:'column',gap:10}}><Skeleton width="80%" /><Skeleton width="55%" /><Skeleton height={44} radius={12} /></div><div style={{flex:1}}></div></div>
+</div>;
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body></html>
