@@ -183,7 +183,7 @@ class AppContainer(context: Context) {
      * owns its own platform recogniser and reads the voice language) or Hermes' transcription relay.
      */
     fun speechInput(): SpeechInput = when (settings.value?.voiceRecognition) {
-        VoiceRecognition.Server -> ServerSpeechInput(appContext, transcribe = { repository.transcribe(it) })
+        VoiceRecognition.Server -> ServerSpeechInput(appContext, transcribe = { audio, mime -> repository.transcribe(audio, mime) })
         else -> AndroidSpeechInput(appContext) { settings.value?.voiceLanguage }
     }
 

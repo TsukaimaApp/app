@@ -373,14 +373,15 @@ class HermesApi(
     // ---- audio ---------------------------------------------------------------------------
 
     /**
-     * `POST /api/audio/transcribe`: one recorded utterance, sent as a base64 `data:` URL; Hermes relays it to its
+     * `POST /api/audio/transcribe`: one recorded utterance ([mime]: `audio/wav`, or `audio/ogg` for Opus), sent as a
+     * base64 `data:` URL labelled with [mime]; Hermes relays it to its
      * configured STT provider (the request carries no language: the server's setting or auto-detection applies).
      * 400 (bad payload, provider error, STT not configured) and 413 (over 25 MB) keep the server's `detail` on the
      * [ApiException]. Uses [transcribeClient]: a long utterance on a slow uplink outlasts the shared timeouts.
      */
-    suspend fun transcribe(wav: ByteArray, mime: String = "audio/wav"): TranscriptionDto {
+    suspend fun transcribe(audio: ByteArray, mime: String = "audio/wav"): TranscriptionDto {
         val body = buildJsonObject {
-            put("data_url", "data:$mime;base64," + Base64.getEncoder().encodeToString(wav))
+            put("data_url", "data:$mime;base64," + Base64.getEncoder().encodeToString(audio))
             put("mime_type", mime)
         }
         val request = newRequest("POST", "api/audio/transcribe", body, true, false, emptyArray())

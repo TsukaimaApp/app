@@ -154,8 +154,9 @@ class HermesRepository(
     /** An image a reply shows (`![alt](url)`): bearer only on the server's own origin, at most 8 MB. */
     suspend fun fetchImage(url: String): Result<ByteArray> = call { api.fetchImage(url) }
 
-    /** One utterance (WAV) through the server's speech-to-text relay. */
-    suspend fun transcribe(wav: ByteArray): Result<TranscriptionDto> = call { api.transcribe(wav) }
+    /** One utterance ([mime]: WAV, or Opus in Ogg) through the server's speech-to-text relay. */
+    suspend fun transcribe(audio: ByteArray, mime: String = "audio/wav"): Result<TranscriptionDto> =
+        call { api.transcribe(audio, mime) }
     suspend fun voiceConfig(): Result<VoiceConfigDto> = call { api.voiceConfig() }
 
     /** One sentence through the server's text-to-speech relay. */

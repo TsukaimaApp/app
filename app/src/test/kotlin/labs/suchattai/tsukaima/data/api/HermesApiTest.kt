@@ -520,6 +520,17 @@ class HermesApiTest {
     }
 
     @Test
+    fun transcribeLabelsTheDataUrlWithTheMime() = runBlocking {
+        json("""{"ok":true,"transcript":"hi"}""")
+        val ogg = byteArrayOf(79, 103, 103, 83)
+        api().transcribe(ogg, "audio/ogg")
+        val body = HermesJson.parseToJsonElement(server.takeRequest(1, TimeUnit.SECONDS)!!.body!!.utf8()).jsonObject
+        val expected = "data:audio/ogg;base64," + java.util.Base64.getEncoder().encodeToString(ogg)
+        assertEquals(expected, body["data_url"]!!.jsonPrimitive.content)
+        assertEquals("audio/ogg", body["mime_type"]!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun transcribeIsCancellable() = runBlocking {
         server.enqueue(MockResponse.Builder().code(200).body("""{"ok":true,"transcript":"x"}""").headersDelay(5, TimeUnit.SECONDS).build())
         val started = System.nanoTime()

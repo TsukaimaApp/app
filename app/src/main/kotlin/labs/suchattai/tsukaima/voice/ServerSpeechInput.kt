@@ -25,23 +25,26 @@ import java.nio.ByteOrder
 
 /**
  * [SpeechInput] through Hermes' speech-to-text relay: each [listen] run records 16 kHz mono PCM from the microphone,
- * lets an [UtteranceDetector] decide where the utterance ends, then uploads it as one WAV ([transcribe], the
- * `/api/audio/transcribe` call) and reports the server's text as the [SpeechEvent.Final]. There are no live
- * partials: the provider does not stream, so the run reports [SpeechEvent.Transcribing] while the upload is in
- * flight.
+ * lets an [UtteranceDetector] decide where the utterance ends, then uploads it ([transcribe], the
+ * `/api/audio/transcribe` call, given the bytes and their MIME type) as Opus from the encoder, or as a WAV when
+ * encoding fails, and reports the server's text as the [SpeechEvent.Final]. There are no live partials: the provider
+ * does not stream, so the run reports [SpeechEvent.Transcribing] while the upload is in flight.
  *
- * The audio stays in memory for one utterance only (trimmed to [LEAD_IN_MS] before the first speech frame) and is
- * never written to disk or logged; neither is the transcript. The voice language setting does not apply: the
- * request carries no language, so the server's STT setting (Whisper auto-detection) decides.
+ * The audio stays in memory for one utterance only (trimmed to [LEAD_IN_MS] before the first speech frame; the Opus
+ * encoder's temporary file is deleted as soon as it is read back) and is never logged; neither is the transcript.
+ * The voice language setting does not apply: the request carries no language, so the server's STT setting (Whisper
+ * auto-detection) decides.
  *
  * RECORD_AUDIO is granted before voice mode opens; a recorder that cannot start is reported as a fatal error.
  */
 class ServerSpeechInput(
     private val context: Context,
-    private val transcribe: suspend (ByteArray) -> Result<TranscriptionDto>,
+    transcribe: suspend (ByteArray, String) -> Result<TranscriptionDto>,
     private val detector: () -> UtteranceDetector = { UtteranceDetector() },
+    encoder: AudioEncoder = OpusEncoder(context.cacheDir),
 ) : SpeechInput {
     override val available: Boolean = true
+    private val uploader = Uploader(encoder, transcribe)
 
     @SuppressLint("MissingPermission") // granted before voice mode opens; a refusal fails initialisation below
     override fun listen(): Flow<SpeechEvent> = callbackFlow {
@@ -98,14 +101,37 @@ class ServerSpeechInput(
                 val from = ((vad.speechStartFrame ?: 0) - leadFrames).coerceAtLeast(0) * frameSamples * 2
                 val all = pcm.toByteArray()
                 pcm.reset()
-                val wav = Pcm.wav(all.copyOfRange(from, all.size), SAMPLE_RATE)
+                val utterance = all.copyOfRange(from, all.size)
                 send(SpeechEvent.Transcribing)
-                send(outcome(transcribe(wav)))
+                send(uploader.upload(utterance))
             }
             else -> Unit // cancelled, or the recorder failed (reported above)
         }
         close()
     }.flowOn(Dispatchers.IO)
+
+    private companion object {
+        /** Audio kept before the first speech frame, so a soft onset is not clipped. */
+        const val LEAD_IN_MS = 300
+
+        const val MIC_UNAVAILABLE = "Microphone isn’t available"
+        const val NO_SPEECH = "No speech heard"
+    }
+}
+
+/**
+ * One utterance from PCM to the run's last event: encode it with [encoder] (falling back to [Pcm.wav] as `audio/wav`
+ * when that yields null), upload it through [transcribe] with its MIME type, and map the relay's answer.
+ */
+internal class Uploader(
+    private val encoder: AudioEncoder,
+    private val transcribe: suspend (ByteArray, String) -> Result<TranscriptionDto>,
+) {
+    /** [pcm16kMono] transcribed: a [SpeechEvent.Final], or the [SpeechEvent.Error] that ends the run. */
+    suspend fun upload(pcm16kMono: ByteArray): SpeechEvent {
+        val audio = encoder.encode(pcm16kMono) ?: EncodedAudio(Pcm.wav(pcm16kMono, SAMPLE_RATE), WAV)
+        return outcome(transcribe(audio.bytes, audio.mime))
+    }
 
     /** The run's result from the relay's answer; nothing of the transcript is logged. */
     private fun outcome(result: Result<TranscriptionDto>): SpeechEvent {
@@ -130,14 +156,7 @@ class ServerSpeechInput(
     }
 
     private companion object {
-        const val TAG = "Tsukaima"
-        const val SAMPLE_RATE = 16_000
-
-        /** Audio kept before the first speech frame, so a soft onset is not clipped. */
-        const val LEAD_IN_MS = 300
-
-        const val MIC_UNAVAILABLE = "Microphone isn’t available"
-        const val NO_SPEECH = "No speech heard"
+        const val WAV = "audio/wav"
         const val NOTHING = "Nothing recognised"
         const val UNREACHABLE = "Couldn’t reach Hermes to transcribe"
         const val REFUSED = "Hermes couldn’t transcribe that"
@@ -146,3 +165,6 @@ class ServerSpeechInput(
         val FATAL_HINTS = listOf("not available", "disabled")
     }
 }
+
+private const val TAG = "Tsukaima"
+private const val SAMPLE_RATE = 16_000
