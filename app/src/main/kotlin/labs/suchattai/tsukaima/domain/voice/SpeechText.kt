@@ -45,11 +45,16 @@ object SpeechText {
     }
 }
 
-/** A sentence ready to speak; [end] is the index in the original text the transcript may reveal up to. */
+/**
+ * A sentence ready to speak. [end] is the index in the original text the transcript may reveal
+ * up to: just past the sentence terminator, or just past the `\n` when the terminator is
+ * followed by one. The boundary space is not consumed, so the next chunk starts at [end].
+ * A fenced code block arrives as one chunk (fence to fence); `SpeechText.plain` of it is empty.
+ */
 data class SpokenChunk(val text: String, val end: Int)
 
 /**
- * Splits a streaming reply into sentences. Feed it the reply's full text so far; it remembers
+ * Splits a streaming reply into sentences, never inside a ``` fence. Feed it the reply's full text so far; it remembers
  * how much it already emitted, so repeated calls on a growing prefix are idempotent.
  */
 class SentenceChunker {
@@ -64,9 +69,16 @@ class SentenceChunker {
         val out = ArrayList<SpokenChunk>()
         if (text.length < cursor) return out
         var i = cursor
+        var inFence = false
         while (i < text.length) {
             val c = text[i]
+            if (i == cursor || text[i - 1] == '\n') {
+                var j = i
+                while (j < text.length && text[j] != '\n' && text[j].isWhitespace()) j++
+                if (text.startsWith("```", j)) inFence = !inFence
+            }
             val end = when {
+                inFence -> -1
                 c == '\n' && i + 1 < text.length -> i + 1
                 c in TERMINATORS && i + 1 < text.length && text[i + 1].isWhitespace() ->
                     if (text[i + 1] == '\n') i + 2 else i + 1
