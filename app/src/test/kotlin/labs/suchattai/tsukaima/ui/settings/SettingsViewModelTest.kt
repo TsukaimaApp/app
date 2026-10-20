@@ -301,4 +301,14 @@ class SettingsViewModelTest {
         assertEquals("1.2M tokens · 318 sessions · \$4.50", usageSummary(totals))
         assertNull(usageSummary(null))
     }
+
+    @Test
+    fun setModelSavesTheProvider() = runBlocking<Unit> {
+        store.update { it.copy(model = "old", modelProvider = "stale-provider") }
+        val vm = vm()
+        vm.setModel("openrouter", "hermes-4-70b")
+        val s = withTimeout(5_000) { store.settings.first { it.model == "hermes-4-70b" } }
+        assertEquals("openrouter", s.modelProvider)
+        assertEquals("hermes-4-70b", vm.await { it.model == "hermes-4-70b" }.model)
+    }
 }

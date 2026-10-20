@@ -251,7 +251,7 @@ class SettingsViewModel(
         val previous = profileWrite
         val write = viewModelScope.launch {
             previous?.join()
-            settings.update { it.copy(profile = name, model = null) }
+            settings.update { it.copy(profile = name, model = null, modelProvider = null) }
         }
         profileWrite = write
         loadJob?.cancel()
@@ -264,9 +264,10 @@ class SettingsViewModel(
     /** The latest profile write; never cancelled with [loadJob]. */
     private var profileWrite: Job? = null
 
-    fun setModel(@Suppress("UNUSED_PARAMETER") provider: String, model: String) {
+    /** Saves the model with its provider: a new chat sends both, so a stale provider must not ride along. */
+    fun setModel(provider: String, model: String) {
         _state.update { it.copy(model = model) }
-        viewModelScope.launch { settings.update { it.copy(model = model) } }
+        viewModelScope.launch { settings.update { it.copy(model = model, modelProvider = provider) } }
     }
 
     /** Optimistic; reverted if the server refuses. Toolsets have no counterpart: they are read-only. */
