@@ -7,6 +7,11 @@ on:
 permissions:
   contents: read
 
+# One run per ref: a newer push cancels the run still going for the same branch or PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -25,10 +30,23 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Unit tests and debug APK
-        run: ./gradlew testDebugUnitTest assembleDebug
+      - name: Unit tests, lint, debug and release (R8) APKs
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
 
       - uses: actions/upload-artifact@v4
         with:
           name: tsukaima-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      # Release build type (R8 + resource shrinking), signed with the debug keystore until a release key exists.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsukaima-release-debugsigned
+          path: app/build/outputs/apk/release/app-release.apk
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
