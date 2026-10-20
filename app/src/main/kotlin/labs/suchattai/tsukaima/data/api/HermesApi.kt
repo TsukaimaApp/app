@@ -6,6 +6,7 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -61,10 +62,11 @@ class HermesApi(
         client.newCall(request).execute().use { response ->
             when (response.code) {
                 401 -> throw AuthException("Invalid username or password (401)")
-                429 -> throw AuthException("Login rate limited by server (429)")
-                503 -> throw AuthException("Login unavailable on server (503)")
+                // Transient: not a credentials verdict, so no re-login latch and no sign-in prompt.
+                429 -> throw ApiException(429, "Login rate limited by server (429)")
+                503 -> throw ApiException(503, "Login unavailable on server (503)")
             }
-            if (!response.isSuccessful) throw apiException(response.code, response.body.string())
+            if (!response.isSuccessful) throw ApiException.fromResponse(response.code, response.body.string())
             return response.headers("Set-Cookie").firstNotNullOfOrNull { parseSessionCookie(it) }
                 ?: throw ApiException(response.code, "Login response carried no $SESSION_COOKIE cookie")
         }
@@ -75,15 +77,32 @@ class HermesApi(
 
     // ---- sessions ------------------------------------------------------------------------
 
-    suspend fun sessions(limit: Int = 200): List<SessionDto> =
-        get("api/sessions", "sessions", SessionDto.serializer(), "limit" to limit.toString())
+    /**
+     * `GET /api/sessions`. [limit] is clamped to the server's `0..100` (it answers 422 outside it).
+     * [archived] is `exclude` (server default) / `only` / `include`; [excludeSources] is a comma list.
+     */
+    suspend fun sessions(
+        limit: Int = MAX_SESSIONS,
+        archived: String? = null,
+        excludeSources: String? = null,
+    ): List<SessionDto> =
+        get(
+            "api/sessions", "sessions", SessionDto.serializer(),
+            "limit" to limit.coerceIn(0, MAX_SESSIONS).toString(),
+            "archived" to archived,
+            "exclude_sources" to excludeSources,
+        )
+
+    /** The drawer's list: archived ones too (split client-side), without cron-run sessions. */
+    suspend fun drawerSessions(): List<SessionDto> =
+        sessions(MAX_SESSIONS, archived = "include", excludeSources = "cron")
 
     suspend fun renameSession(id: String, title: String) {
-        sendUnit("PATCH", "api/sessions", id, body = buildJsonObject { put("title", title) })
+        sendUnit("PATCH", "api/sessions", id, body = withProfile { put("title", title) })
     }
 
     suspend fun archiveSession(id: String, archived: Boolean) {
-        sendUnit("PATCH", "api/sessions", id, body = buildJsonObject { put("archived", archived) })
+        sendUnit("PATCH", "api/sessions", id, body = withProfile { put("archived", archived) })
     }
 
     suspend fun deleteSession(id: String) {
@@ -139,7 +158,7 @@ class HermesApi(
     suspend fun approvePairing(platform: String, requestId: String) {
         sendUnit(
             "POST", "api/pairing/approve",
-            body = buildJsonObject {
+            body = withProfile {
                 put("platform", platform)
                 put("request_id", requestId)
             },
@@ -149,7 +168,7 @@ class HermesApi(
     suspend fun revokePairing(platform: String, userId: String) {
         sendUnit(
             "POST", "api/pairing/revoke",
-            body = buildJsonObject {
+            body = withProfile {
                 put("platform", platform)
                 put("user_id", userId)
             },
@@ -238,7 +257,7 @@ class HermesApi(
             client.newCall(request).execute().use { response ->
                 val text = response.body.string()
                 if (response.code == 401) throw AuthException()
-                if (!response.isSuccessful) throw apiException(response.code, text)
+                if (!response.isSuccessful) throw ApiException.fromResponse(response.code, text)
                 try {
                     decode(text)
                 } catch (e: SerializationException) {
@@ -276,10 +295,16 @@ class HermesApi(
         return builder.build()
     }
 
-    private fun apiException(code: Int, body: String): ApiException {
-        val snippet = body.trim().take(MAX_BODY_IN_MESSAGE)
-        return ApiException(code, if (snippet.isEmpty()) "HTTP $code" else "HTTP $code: $snippet")
-    }
+    /**
+     * A JSON body plus `"profile"` when the active profile is not "default": PATCH /api/sessions/{id} and the
+     * pairing mutations read the profile from the body only (the `?profile=` query is ignored there).
+     */
+    private fun withProfile(block: JsonObjectBuilder.() -> Unit): JsonObject =
+        buildJsonObject {
+            block()
+            val profile = settings().profile
+            if (profile != DEFAULT_PROFILE) put("profile", profile)
+        }
 
     private fun parseSessionCookie(header: String): String? {
         val pair = header.substringBefore(';').trim()
@@ -289,7 +314,8 @@ class HermesApi(
     private companion object {
         const val SESSION_COOKIE = "hermes_session_at"
         const val DEFAULT_PROFILE = "default"
-        const val MAX_BODY_IN_MESSAGE = 300
+        /** `le=100` on the server's `limit` query. */
+        const val MAX_SESSIONS = 100
         val JSON = "application/json; charset=utf-8".toMediaType()
         val EMPTY_BODY = JsonObject(emptyMap())
     }

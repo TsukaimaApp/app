@@ -197,7 +197,78 @@ class HermesApiTest {
     }
 
     @Test
-    fun rateLimitedReloginThrowsAuthException() {
+    fun sessionsLimitClampedToServerMax() = runBlocking {
+        val api = api()
+        json("""{"sessions":[]}""")
+        api.sessions(limit = 200)
+        assertEquals("/api/sessions?limit=100", server.takeRequest(1, TimeUnit.SECONDS)!!.target)
+        json("""{"sessions":[]}""")
+        api.sessions(limit = -3)
+        assertEquals("/api/sessions?limit=0", server.takeRequest(1, TimeUnit.SECONDS)!!.target)
+    }
+
+    @Test
+    fun drawerRequestIncludesArchivedAndExcludesCron() = runBlocking {
+        json("""{"sessions":[]}""")
+        api().drawerSessions()
+        assertEquals(
+            "/api/sessions?limit=100&archived=include&exclude_sources=cron",
+            server.takeRequest(1, TimeUnit.SECONDS)!!.target,
+        )
+    }
+
+    @Test
+    fun patchAndPairingBodiesIncludeProfile() = runBlocking {
+        settings = Settings(profile = "ops")
+        val api = api()
+        repeat(4) { json("""{"ok":true}""") }
+        api.renameSession("s1", "New")
+        api.archiveSession("s1", true)
+        api.approvePairing("telegram", "r1")
+        api.revokePairing("telegram", "u1")
+        val rename = server.takeRequest(1, TimeUnit.SECONDS)!!
+        assertEquals("/api/sessions/s1?profile=ops", rename.target)
+        assertEquals("""{"title":"New","profile":"ops"}""", rename.body!!.utf8())
+        assertEquals("""{"archived":true,"profile":"ops"}""", server.takeRequest(1, TimeUnit.SECONDS)!!.body!!.utf8())
+        assertEquals(
+            """{"platform":"telegram","request_id":"r1","profile":"ops"}""",
+            server.takeRequest(1, TimeUnit.SECONDS)!!.body!!.utf8(),
+        )
+        assertEquals(
+            """{"platform":"telegram","user_id":"u1","profile":"ops"}""",
+            server.takeRequest(1, TimeUnit.SECONDS)!!.body!!.utf8(),
+        )
+
+        settings = Settings()
+        json("""{"ok":true}""")
+        api.approvePairing("telegram", "r1")
+        assertEquals("""{"platform":"telegram","request_id":"r1"}""", server.takeRequest(1, TimeUnit.SECONDS)!!.body!!.utf8())
+    }
+
+    @Test
+    fun transient503DoesNotLatchOrRequireAuth() {
+        val creds = labs.suchattai.tsukaima.data.prefs.InMemoryCredentialStore().apply { save("pw", "old", server.url("/").toString().trimEnd('/')) }
+        settings = Settings(serverUrl = server.url("/").toString().trimEnd('/'), username = "u")
+        lateinit var api: HermesApi
+        val client = OkHttpClient.Builder()
+            .addInterceptor(AuthInterceptor(creds, { settings }) { _, u, p -> api.loginBlocking(u, p) })
+            .build()
+        api = HermesApi(client, { server.url("/").toString().trimEnd('/') }, { settings })
+        server.enqueue(MockResponse.Builder().code(401).build())
+        server.enqueue(MockResponse.Builder().code(503).body("""{"detail":"down"}""").build())
+        val e = assertThrows(ApiException::class.java) { runBlocking { api.cronJobs() } }
+        assertEquals(503, e.code)
+        // Not latched: the next 401 re-logs in again, and this time succeeds.
+        server.enqueue(MockResponse.Builder().code(401).build())
+        server.enqueue(MockResponse.Builder().code(200).addHeader("Set-Cookie", "hermes_session_at=new; Path=/").body("{}").build())
+        json("[]")
+        runBlocking { api.cronJobs() }
+        assertEquals("new", creds.accessToken())
+        assertEquals(5, server.requestCount)
+    }
+
+    @Test
+    fun rateLimitedReloginThrowsTransientApiException() {
         val creds = labs.suchattai.tsukaima.data.prefs.InMemoryCredentialStore().apply { save("pw", "old", server.url("/").toString().trimEnd('/')) }
         settings = Settings(serverUrl = server.url("/").toString().trimEnd('/'), username = "u")
         lateinit var api: HermesApi
@@ -207,8 +278,8 @@ class HermesApiTest {
         api = HermesApi(client, { server.url("/").toString().trimEnd('/') }, { settings })
         server.enqueue(MockResponse.Builder().code(401).build())
         server.enqueue(MockResponse.Builder().code(429).body("slow down").build())
-        val e = assertThrows(AuthException::class.java) { runBlocking { api.cronJobs() } }
-        assertEquals(true, e.message!!.contains("429"))
+        val e = assertThrows(ApiException::class.java) { runBlocking { api.cronJobs() } }
+        assertEquals(429, e.code)
         assertEquals(2, server.requestCount)
     }
 

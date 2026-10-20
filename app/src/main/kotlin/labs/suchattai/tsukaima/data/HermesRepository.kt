@@ -102,7 +102,8 @@ class HermesRepository(
     suspend fun archiveSession(id: String, archived: Boolean): Result<Unit> = call { api.archiveSession(id, archived) }
     suspend fun deleteSession(id: String): Result<Unit> = call { api.deleteSession(id) }
 
-    override suspend fun sessions(): Result<List<SessionDto>> = sessions(limit = 200)
+    /** The drawer's list (archived included, cron runs excluded); see [HermesApi.drawerSessions]. */
+    override suspend fun sessions(): Result<List<SessionDto>> = call { api.drawerSessions() }
     override suspend fun rename(id: String, title: String): Result<Unit> = renameSession(id, title)
     override suspend fun archive(id: String, archived: Boolean): Result<Unit> = archiveSession(id, archived)
     override suspend fun delete(id: String): Result<Unit> = deleteSession(id)
