@@ -1,4 +1,5 @@
 """Tsukaima e2e smoke: login, REST contract (the app's exact GETs), WS session, one prompt,
+config.set model round trip (same model, session scope), session detail `archived` flag,
 file.attach + /api/files/download round trip, cron create/list/delete, session cleanup."""
 import asyncio, base64, http.cookiejar, json, os, sys, time, urllib.error, urllib.parse, urllib.request
 
@@ -44,6 +45,7 @@ async def ws_part(token):
     ticket = http_json("POST", "/api/auth/ws-ticket", token=token)["ticket"]
     url = BASE.replace("http", "ws", 1) + "/api/ws?ticket=" + ticket
     pending, complete = {}, asyncio.get_running_loop().create_future()
+    infos = []  # session.info payloads, in order
     n = 0
     async with websockets.connect(url, max_size=None) as ws:
         async def reader():
@@ -58,6 +60,8 @@ async def ws_part(token):
                         p = m["params"]
                         if p.get("type") == "message.complete" and not complete.done():
                             complete.set_result(p.get("payload", {}).get("text", ""))
+                        elif p.get("type") == "session.info":
+                            infos.append(p.get("payload", {}))
                     elif "method" in m and "id" in m:  # server request: deny anything unexpected
                         await ws.send(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {"choice": "deny"}}))
 
@@ -86,6 +90,11 @@ async def ws_part(token):
             if "pong" not in text.lower():
                 fail(f"reply lacks 'pong': {text!r}")
             step(f"message.complete: {text.strip()[:60]!r}")
+            await model_switch_part(rpc, sid, infos)
+            detail = http_json("GET", f"/api/sessions/{stored}", token=token)
+            if "archived" not in detail:
+                fail(f"GET /api/sessions/{{id}} lacks 'archived': {sorted(detail)[:20]}")
+            step(f"GET /api/sessions/{{id}} (archived={detail['archived']!r})")
             await download_part(rpc, sid, token)
         finally:
             if stored:  # session.delete takes the stored id, not the live one
@@ -96,6 +105,29 @@ async def ws_part(token):
                 except (Exception, SystemExit) as e:  # noqa: BLE001
                     print(f"warn: session.delete failed: {e!r}", file=sys.stderr)
             rt.cancel()
+
+
+async def model_switch_part(rpc, sid, infos):
+    """The chat's live model switch: `config.set key=model` with the model the session already runs (so nothing
+    changes), `--provider` and `--session` exactly as ChatViewModel sends it; the reply is session-scoped and the
+    next `session.info` still names that model."""
+    current = next((i for i in reversed(infos) if i.get("model") and i.get("provider")), None)
+    if current is None:
+        opts = await rpc("model.options", {"session_id": sid})
+        current = {"model": opts.get("model"), "provider": opts.get("provider")}
+    model, provider = current["model"], current["provider"]
+    seen = len(infos)
+    r = await rpc("config.set", {"session_id": sid, "key": "model", "value": f"{model} --provider {provider} --session"})
+    if r.get("value") != model or r.get("scope") != "session" or r.get("confirm_required"):
+        fail(f"config.set model: unexpected result {r!r}")
+    for _ in range(50):
+        if len(infos) > seen:
+            break
+        await asyncio.sleep(0.1)
+    after = infos[seen:] or infos
+    if not after or after[-1].get("model") != model:
+        fail(f"session.info after config.set does not name {model!r}: {after[-1:]!r}")
+    step(f"config.set model round trip ({model} via {provider}, scope=session)")
 
 
 async def download_part(rpc, sid, token):
@@ -135,6 +167,7 @@ REST_CONTRACT = [
     "/api/pairing",
     "/api/skills",
     "/api/tools/toolsets",
+    "/api/sessions/search?q=tsukaima&limit=20",  # drawer search
     "/api/profiles",
     "/api/profiles/active",
     "/api/logs?file=gateway&lines=300",
