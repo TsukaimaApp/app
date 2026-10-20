@@ -17,6 +17,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -38,6 +40,10 @@ import labs.suchattai.tsukaima.di.AppContainer
 import labs.suchattai.tsukaima.ui.chat.ChatScreen
 import labs.suchattai.tsukaima.ui.chat.ChatViewModel
 import labs.suchattai.tsukaima.ui.chat.ContainerChatBackend
+import labs.suchattai.tsukaima.ui.cron.CronEditScreen
+import labs.suchattai.tsukaima.ui.cron.CronScreen
+import labs.suchattai.tsukaima.ui.cron.CronViewModel
+import labs.suchattai.tsukaima.ui.cron.HermesCronSource
 import labs.suchattai.tsukaima.ui.onboarding.OnboardingScreen
 import labs.suchattai.tsukaima.ui.settings.SettingsScreen
 import labs.suchattai.tsukaima.ui.settings.SettingsViewModel
@@ -117,7 +123,13 @@ fun TsukaimaNavHost(
                 onDeleted = { navController.navigateTop(Route.Chat.create()) },
             )
         }
-        composable(Route.Cron.path) { PlaceholderScreen("Cron", onBack = back) }
+        composable(Route.Cron.path) {
+            CronScreen(
+                vm = cronViewModel(container),
+                onBack = back,
+                onEdit = { navController.navigate(Route.CronEdit.create(it?.id)) },
+            )
+        }
         composable(
             Route.CronEdit.path,
             arguments = listOf(
@@ -127,8 +139,10 @@ fun TsukaimaNavHost(
                     defaultValue = null
                 },
             ),
-        ) {
-            PlaceholderScreen("Edit job", onBack = back)
+        ) { entry ->
+            // Shares the list's ViewModel (the open draft lives there); falls back to its own, which closes at once.
+            val owner = remember(entry) { runCatching { navController.getBackStackEntry(Route.Cron.path) }.getOrDefault(entry) }
+            CronEditScreen(vm = cronViewModel(container, owner), onClose = back)
         }
         composable(Route.Settings.path) {
             val context = LocalContext.current
@@ -166,6 +180,14 @@ fun TsukaimaNavHost(
         }
         composable(Route.Logs.path) { PlaceholderScreen("Logs", onBack = back) }
     }
+}
+
+@Composable
+private fun cronViewModel(container: AppContainer, owner: ViewModelStoreOwner? = null): CronViewModel {
+    val factory = viewModelFactory {
+        initializer { CronViewModel(HermesCronSource(container.repository)) { container.toastState.show(it) } }
+    }
+    return if (owner == null) viewModel(factory = factory) else viewModel(owner, factory = factory)
 }
 
 /**

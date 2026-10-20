@@ -40,7 +40,7 @@ import labs.suchattai.tsukaima.ui.theme.tsukaima
 /**
  * Settings-style input: tiny uppercase [label], raised field with a hairline border and a 2dp
  * accent focus ring (drawn outside the border, as the design's `0 0 0 2px` shadow), optional
- * [helper] caption. [mono] switches to Plex Mono for URLs and tokens; for a textarea pass
+ * [helper] caption, replaced by a danger-coloured [error] (with a danger border) while it is non-null. [mono] switches to Plex Mono for URLs and tokens; for a textarea pass
  * `singleLine = false` and [minLines].
  */
 @Composable
@@ -50,6 +50,7 @@ fun TsukaimaTextField(
     label: String? = null,
     placeholder: String? = null,
     helper: String? = null,
+    error: String? = null,
     mono: Boolean = false,
     singleLine: Boolean = true,
     minLines: Int = 1,
@@ -91,7 +92,7 @@ fun TsukaimaTextField(
                     }
                 }
                 .background(colors.surfaceRaised, TsukaimaShapes.input)
-                .border(1.dp, colors.hairline, TsukaimaShapes.input)
+                .border(1.dp, if (error != null) colors.danger else colors.hairline, TsukaimaShapes.input)
                 .defaultMinSize(minHeight = 44.dp),
             textStyle = textStyle,
             singleLine = singleLine,
@@ -109,7 +110,9 @@ fun TsukaimaTextField(
                 }
             },
         )
-        if (helper != null) {
+        if (error != null) {
+            Text(error, style = TsukaimaType.caption, color = colors.danger)
+        } else if (helper != null) {
             Text(helper, style = TsukaimaType.caption, color = colors.ink3)
         }
     }
