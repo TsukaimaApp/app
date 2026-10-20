@@ -162,4 +162,28 @@ class NotificationCoordinatorTest {
         assertEquals(listOf("srq-1".hashCode()), c.onBackground(listOf(approval("srq-1"))).map { it.id })
         assertNotNull(c.approvalSpec("srq-1"))
     }
+
+    @Test
+    fun requestCancelledInForegroundNotReplayedOnBackground() {
+        val req = approval("srq-1")
+        assertNull(c.onServerRequest(req, foreground = true))
+        c.onEvent(event("request.cancel", payload = buildJsonObject { put("id", "srq-1") }), foreground = true)
+        assertTrue(c.onBackground(listOf(req)).isEmpty())
+        assertNull(c.onServerRequest(req, foreground = false))
+    }
+
+    @Test
+    fun approvalCancelledInForegroundNotReplayedOnBackground() {
+        val req = approval("srq-2", requestId = "r-x")
+        val other = approval("srq-3", requestId = "r-y")
+        assertNull(c.onServerRequest(req, foreground = true))
+        assertNull(c.onServerRequest(other, foreground = true))
+        val withdrawn = event(
+            "approval.cancelled",
+            payload = JsonObject(mapOf("request_ids" to JsonArray(listOf(JsonPrimitive("r-x"))))),
+        )
+        c.onEvent(withdrawn, foreground = true)
+        // Only the withdrawn one stays quiet; the still-open one is notified on the hand-off.
+        assertEquals(listOf("srq-3".hashCode()), c.onBackground(listOf(req, other)).map { it.id })
+    }
 }

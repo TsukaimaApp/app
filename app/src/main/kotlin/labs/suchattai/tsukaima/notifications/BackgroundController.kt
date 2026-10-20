@@ -14,7 +14,8 @@ import labs.suchattai.tsukaima.data.ConnectionControl
  * - [onBackground] (ON_STOP): if [shouldHandOff] allows, the running connection switches to background
  *   polling (same socket, no disconnect), the service starts and [onHandOff] notifies open approvals. If the
  *   policy says no, or the service start is refused, the connection stops and [onQuiet] clears approvals.
- * - [onServiceEnded]: the service died while backgrounded: stop and go quiet.
+ * - [onServiceEnded]: the service died while backgrounded: stop and go quiet, unless a newer hand-off
+ *   ([generation]) has started since that service instance was started (a stale `onDestroy`).
  *
  * All transitions run under one lock with the [inForeground] check, so a quick return to the app can never
  * be followed by a background stop.
@@ -29,6 +30,10 @@ class BackgroundController(
     private val onQuiet: () -> Unit,
 ) {
     private val lock = Any()
+
+    /** Bumped by each hand-off before it starts the service; a service instance records the latest it saw. */
+    @Volatile var generation = 0L
+        private set
 
     fun onForeground() {
         synchronized(lock) {
@@ -45,6 +50,7 @@ class BackgroundController(
             synchronized(lock) {
                 if (inForeground.value) return@launch // the user came back first: nothing to do
                 if (handOff) {
+                    generation++
                     connection.startBackground()
                     if (startService()) {
                         onHandOff()
@@ -57,9 +63,10 @@ class BackgroundController(
         }
     }
 
-    fun onServiceEnded() {
+    /** [startedGeneration] is the [generation] the ending service instance was last started for. */
+    fun onServiceEnded(startedGeneration: Long) {
         synchronized(lock) {
-            if (inForeground.value) return
+            if (inForeground.value || startedGeneration != generation) return
             connection.stop()
             onQuiet()
         }

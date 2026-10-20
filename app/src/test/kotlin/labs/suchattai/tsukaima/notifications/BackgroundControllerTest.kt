@@ -55,7 +55,7 @@ class BackgroundControllerTest {
         c.onForeground() // back: same connection, foreground polling, still no disconnect
         assertEquals(0, h.connection.disconnects)
         assertEquals("start", h.connection.calls.last())
-        c.onServiceEnded() // the service stops itself after the return: must not drop the connection
+        c.onServiceEnded(c.generation) // the service stops itself after the return: must not drop the connection
         assertEquals(0, h.connection.disconnects)
     }
 
@@ -83,7 +83,7 @@ class BackgroundControllerTest {
         val h = Harness()
         val c = h.controller(this)
         c.onBackground().join()
-        c.onServiceEnded()
+        c.onServiceEnded(c.generation)
         assertEquals(1, h.connection.disconnects)
         assertEquals("quiet", h.events.last())
     }
@@ -100,5 +100,21 @@ class BackgroundControllerTest {
         decision.join()
         assertEquals(listOf("start"), h.connection.calls)
         assertTrue(h.events.isEmpty())
+    }
+
+    @Test
+    fun staleServiceEndDoesNotStopNewHandOff() = runTest(UnconfinedTestDispatcher()) {
+        val h = Harness()
+        val c = h.controller(this)
+        c.onBackground().join()
+        val first = c.generation
+        c.onForeground()
+        c.onBackground().join() // a fresh hand-off while the old instance is still being destroyed
+        val second = c.generation
+        assertTrue(second != first)
+        c.onServiceEnded(first) // the old instance's late onDestroy
+        assertEquals(0, h.connection.disconnects)
+        c.onServiceEnded(second)
+        assertEquals(1, h.connection.disconnects)
     }
 }

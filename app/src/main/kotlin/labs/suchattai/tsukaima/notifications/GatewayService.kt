@@ -25,7 +25,15 @@ class GatewayService : Service() {
     private val container get() = (application as TsukaimaApp).container
     private var scope: CoroutineScope? = null
 
+    /** Latest start of this instance: a stale stop request cannot end a newer start. */
+    private var lastStartId = 0
+
+    /** The hand-off generation this instance was last started for ([BackgroundController.generation]). */
+    private var generation = 0L
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        lastStartId = startId
+        generation = container.background.generation
         val notification = AndroidNotificationPoster(this).build(ApprovalNotifier.forService())
         try {
             ServiceCompat.startForeground(
@@ -33,14 +41,14 @@ class GatewayService : Service() {
             )
         } catch (e: RuntimeException) { // ForegroundServiceStartNotAllowedException and friends
             Log.w(TAG, "gateway service: cannot go foreground", e)
-            stopSelf()
+            stopSelf(startId)
             return START_NOT_STICKY
         }
         if (scope == null) {
             scope = MainScope().also { s ->
                 s.launch {
                     container.background.inForeground.first { it }
-                    stopSelf() // back in the foreground: the connection already polls normally
+                    stopSelf(lastStartId) // back in the foreground: the connection already polls normally
                 }
             }
         }
@@ -50,7 +58,7 @@ class GatewayService : Service() {
 
     /** Android 15 caps `dataSync` time; when it runs out, stop and let the app go quiet. */
     override fun onTimeout(startId: Int, fgsType: Int) {
-        stopSelf()
+        stopSelf() // the system's limit: end this instance whatever its starts
     }
 
     override fun onDestroy() {
@@ -58,7 +66,7 @@ class GatewayService : Service() {
         scope = null
         container.notifications.stopBackground()
         // Only while backgrounded: disconnect and clear approval buttons that can no longer work.
-        container.background.onServiceEnded()
+        container.background.onServiceEnded(generation)
         super.onDestroy()
     }
 

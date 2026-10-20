@@ -25,6 +25,9 @@ class RecentIds(val capacity: Int = 64) {
     fun add(id: String): Boolean = ids.put(id, Unit) == null
 
     @Synchronized
+    fun contains(id: String): Boolean = ids.containsKey(id)
+
+    @Synchronized
     fun remove(id: String) {
         ids.remove(id)
     }
@@ -50,6 +53,12 @@ class RecentIds(val capacity: Int = 64) {
 class NotificationCoordinator(private val answered: Set<String>, capacity: Int = 64) {
     private val notified = RecentIds(capacity)
 
+    /**
+     * Requests the server withdrew (`request.cancel` / `approval.cancelled`), recorded in the foreground too:
+     * the server-request replay still holds them, and they must never be notified later.
+     */
+    private val closedIds = RecentIds(capacity)
+
     /** Server-request id by the approval's `request_id`, for `approval.cancelled` (which names the latter). */
     private val srqByRequestId = bounded<String>(capacity)
     private val titles = bounded<String>(capacity)
@@ -64,9 +73,10 @@ class NotificationCoordinator(private val answered: Set<String>, capacity: Int =
     @Synchronized
     fun onServerRequest(req: Frame.ServerRequest, foreground: Boolean): NotificationSpec? {
         if (!ApprovalNotifier.isApproval(req)) return null
-        if (foreground || req.id in answered) return null
-        if (!notified.add(req.id)) return null
+        // Recorded even when suppressed, so a foreground `approval.cancelled` can close it.
         req.params.str("request_id")?.let { srqByRequestId[it] = req.id }
+        if (foreground || req.id in answered || closedIds.contains(req.id)) return null
+        if (!notified.add(req.id)) return null
         return ApprovalNotifier.forApproval(req).also { postedApprovals[req.id] = it }
     }
 
@@ -109,12 +119,19 @@ class NotificationCoordinator(private val answered: Set<String>, capacity: Int =
         } else {
             listOf(NotificationCommand.Post(ApprovalNotifier.forTaskDone(titles[ev.sessionId], ev.sessionId)))
         }
-        "request.cancel" -> listOfNotNull(ev.payload.str("id")?.let { postedApprovals.remove(it); onAnswered(it) })
+        "request.cancel" -> listOfNotNull(ev.payload.str("id")?.let(::close))
         "approval.cancelled" -> (ev.payload["request_ids"] as? JsonArray).orEmpty()
             .mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
             .mapNotNull { srqByRequestId.remove(it) }
-            .map { postedApprovals.remove(it); onAnswered(it) }
+            .map(::close)
         else -> emptyList()
+    }
+
+    /** The server withdrew [srqId]: never notify it again, and cancel it if it is showing. */
+    private fun close(srqId: String): NotificationCommand.Cancel {
+        closedIds.add(srqId)
+        postedApprovals.remove(srqId)
+        return onAnswered(srqId)
     }
 
     /** [status] is [labs.suchattai.tsukaima.data.gatewayStatus] of the latest poll. */
