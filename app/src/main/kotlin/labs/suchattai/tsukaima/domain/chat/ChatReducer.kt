@@ -1,5 +1,6 @@
 package labs.suchattai.tsukaima.domain.chat
 
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -84,7 +85,11 @@ object ChatReducer {
 
     private fun reduceEvent(state: ChatState, ev: Frame.Event, flair: () -> String): ChatState {
         if (!isForUs(state, ev.sessionId)) return state
-        val s = if (ev.seq != null && ev.seq > state.lastSeq) state.copy(lastSeq = ev.seq) else state
+        // Only events bound to the live session carry a comparable seq; replays at or below the
+        // watermark are dropped. Global (empty-id) events and unbound states never touch lastSeq.
+        val bound = state.liveSessionId != null && ev.sessionId == state.liveSessionId
+        if (bound && ev.seq != null && ev.seq <= state.lastSeq) return state
+        val s = if (bound && ev.seq != null) state.copy(lastSeq = ev.seq) else state
         val p = ev.payload
         return when (ev.type) {
             "message.start" -> onMessageStart(s, ev.seq, flair)
@@ -113,7 +118,7 @@ object ChatReducer {
                 val message = p.string("message") ?: "unknown error"
                 val (counted, id) = nextId(s, ev.seq, "e")
                 counted.copy(
-                    items = finalizeStreaming(counted.items) +
+                    items = abortTurn(counted.items) +
                         ChatItem.AssistantMessage(id, "Something went wrong: $message", streaming = false, reasoning = null),
                     status = AgentStatus.Idle,
                 )
@@ -128,6 +133,13 @@ object ChatReducer {
                 val items = s.items - card
                 s.copy(items = items, status = statusAfterApproval(s.status, items, flair))
             }
+            "approval.cancelled" -> {
+                val ids = (p["request_ids"] as? JsonArray).orEmpty()
+                    .mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.toSet()
+                val items = s.items.filterNot { it is ChatItem.Approval && it.requestId in ids }
+                if (items.size == s.items.size) s
+                else s.copy(items = items, status = statusAfterApproval(s.status, items, flair))
+            }
             else -> s
         }
     }
@@ -136,7 +148,7 @@ object ChatReducer {
         val (counted, id) = nextId(s, seq, "a")
         val status = s.status as? AgentStatus.Thinking ?: AgentStatus.Thinking(flair())
         return counted.copy(
-            items = counted.items.filterNot { it is ChatItem.Thinking } +
+            items = finalizeStreaming(counted.items).filterNot { it is ChatItem.Thinking } +
                 ChatItem.AssistantMessage(id, text = "", streaming = true, reasoning = null),
             status = status,
         )
@@ -144,21 +156,18 @@ object ChatReducer {
 
     private fun onMessageComplete(s: ChatState, p: JsonObject, seq: Long?): ChatState {
         val final = p.string("text").orEmpty()
-        val current = currentStreaming(s.items)
-        val items = when {
-            current != null -> s.items.replace(current) {
-                current.copy(text = final.ifEmpty { current.text }, streaming = false)
-            }
-            final.isNotEmpty() -> {
-                val (counted, id) = nextId(s, seq, "a")
-                return counted.copy(
-                    items = counted.items + ChatItem.AssistantMessage(id, final, streaming = false, reasoning = null),
-                    status = AgentStatus.Idle,
-                )
-            }
-            else -> s.items
+        val current = liveAssistant(s.items)
+        if (current != null) {
+            val items = s.items.replace(current) { current.copy(text = final.ifEmpty { current.text }, streaming = false) }
+            return s.copy(items = items, status = AgentStatus.Idle)
         }
-        return s.copy(items = items, status = AgentStatus.Idle)
+        // The streaming bubble (if any) sits above a tool/approval: close it and put the reply below.
+        if (final.isEmpty()) return s.copy(items = finalizeStreaming(s.items), status = AgentStatus.Idle)
+        val (opened, fresh) = ensureStreamingAssistant(s, seq)
+        return opened.copy(
+            items = opened.items.replace(fresh) { fresh.copy(text = final, streaming = false) },
+            status = AgentStatus.Idle,
+        )
     }
 
     private fun onToolStart(s: ChatState, p: JsonObject): ChatState {
@@ -235,15 +244,42 @@ object ChatReducer {
             else -> current
         }
 
-    private fun currentStreaming(items: List<ChatItem>): ChatItem.AssistantMessage? =
-        items.lastOrNull { it is ChatItem.AssistantMessage && it.streaming } as ChatItem.AssistantMessage?
+    /**
+     * The streaming assistant item that new text may still flow into: the last streaming one,
+     * provided no tool call or approval card was appended after it (that would reorder the turn).
+     */
+    private fun liveAssistant(items: List<ChatItem>): ChatItem.AssistantMessage? {
+        val index = items.indexOfLast { it is ChatItem.AssistantMessage && it.streaming }
+        if (index < 0) return null
+        val blocked = items.subList(index + 1, items.size).any { it is ChatItem.ToolCall || it is ChatItem.Approval }
+        return if (blocked) null else items[index] as ChatItem.AssistantMessage
+    }
 
+    /**
+     * The item new assistant output goes into. When the streaming bubble is blocked by a later tool
+     * or approval, it is closed and a fresh one is appended below. A blocked bubble with no text
+     * (reasoning only) is removed and its reasoning carried into the fresh one, so the live order
+     * matches history (User, Tool, Assistant) without losing the reasoning.
+     */
     private fun ensureStreamingAssistant(s: ChatState, seq: Long?): Pair<ChatState, ChatItem.AssistantMessage> {
-        currentStreaming(s.items)?.let { return s to it }
-        val (counted, id) = nextId(s, seq, "a")
-        val item = ChatItem.AssistantMessage(id, text = "", streaming = true, reasoning = null)
+        liveAssistant(s.items)?.let { return s to it }
+        val stale = s.items.lastOrNull { it is ChatItem.AssistantMessage && it.streaming } as ChatItem.AssistantMessage?
+        val carried = stale?.takeIf { it.text.isEmpty() }?.reasoning
+        val remaining = if (carried != null) s.items - stale else s.items
+        val (counted, id) = nextId(s.copy(items = finalizeStreaming(remaining)), seq, "a")
+        val item = ChatItem.AssistantMessage(id, text = "", streaming = true, reasoning = carried)
         return counted.copy(items = counted.items + item) to item
     }
+
+    /** Abnormal turn end: close streams, fail running tools, drop approvals nobody answered. */
+    private fun abortTurn(items: List<ChatItem>): List<ChatItem> =
+        finalizeStreaming(items).mapNotNull { item ->
+            when {
+                item is ChatItem.ToolCall && item.status == ToolStatus.Running -> item.copy(status = ToolStatus.Failed)
+                item is ChatItem.Approval && !item.answered -> null
+                else -> item
+            }
+        }
 
     /** Ends every in-flight assistant item, dropping ones that never received any content. */
     private fun finalizeStreaming(items: List<ChatItem>): List<ChatItem> =

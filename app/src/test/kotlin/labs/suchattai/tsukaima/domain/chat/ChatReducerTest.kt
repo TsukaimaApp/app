@@ -237,6 +237,106 @@ class ChatReducerTest {
         assertEquals(5L, s3.lastSeq)
         val s4 = s3.feed(ev("session.info", seq = 9))
         assertEquals(9L, s4.lastSeq)
+        // Global events and other sessions never touch lastSeq.
+        assertEquals(9L, s4.feed(ev("sessions.changed", seq = 50, session = "")).lastSeq)
+        assertEquals(9L, s4.feed(ev("session.info", seq = 60, session = "other")).lastSeq)
+        // Without a live session, nothing advances the watermark (session.title still applies).
+        val unbound = ChatState().feed(ev("session.title", """{"title":"T"}""", 4))
+        assertEquals(0L, unbound.lastSeq)
+        assertEquals("T", unbound.title)
+    }
+
+    @Test
+    fun fullTurnSequenceOrdersUserToolAssistant() {
+        val final = "The kernel version is **6.17.2-1-pve** on this Proxmox box."
+        val s = ChatReducer.onSubmitted(live, "what kernel?", "local-1", flair).feed(
+            ev("session.info", """{"model":"m","running":true}""", 1),
+            ev("message.start", seq = 2),
+            ev("session.title", """{"session_id":"20261020_101500_ab12cd","title":"Kernel"}""", 3),
+            ev("thinking.delta", """{"text":""}""", 4),
+            ev("reasoning.delta", """{"text":"I should run uname."}""", 5),
+            ev("tool.generating", """{"name":"terminal"}""", 6),
+            ev("tool.start", """{"tool_id":"terminal:0","name":"terminal","context":"uname -a","args":{"command":"uname -a"}}""", 7),
+            ev(
+                "tool.complete",
+                """{"tool_id":"terminal:0","name":"terminal","args":{"command":"uname -a"},"duration_s":0.186,
+                   "result":{"output":"Linux claude 6.17.2-1-pve","exit_code":0,"error":null}}""",
+                8,
+            ),
+            ev("session.usage", """{"usage":{}}""", 9),
+            ev("message.delta", """{"text":"The kernel version "}""", 10),
+            ev("message.delta", """{"text":"is **6.17.2-1-pve**"}""", 11),
+            ev("reasoning.available", """{"text":"I should run uname."}""", 12),
+            ev("message.complete", """{"text":"$final","usage":{}}""", 13),
+            ev("session.info", """{"running":false}""", 14),
+            ev("sessions.changed", session = ""),
+        )
+        assertEquals(3, s.items.size)
+        assertTrue(s.items[0] is ChatItem.UserMessage)
+        assertEquals(ToolStatus.Done, (s.items[1] as ChatItem.ToolCall).status)
+        val a = s.items[2] as ChatItem.AssistantMessage
+        assertFalse(a.streaming)
+        assertEquals(final, a.text)
+        assertEquals("I should run uname.", a.reasoning)
+        assertEquals(AgentStatus.Idle, s.status)
+    }
+
+    @Test
+    fun messageStartFinalizesOrphanStream() {
+        val s = live.feed(
+            ev("message.start", seq = 1),
+            ev("message.delta", """{"text":"partial"}""", 2),
+            ev("message.start", seq = 3),
+        )
+        val assistants = s.items.filterIsInstance<ChatItem.AssistantMessage>()
+        assertEquals(2, assistants.size)
+        assertEquals("partial", assistants[0].text)
+        assertFalse(assistants[0].streaming)
+        assertTrue(assistants[1].streaming)
+    }
+
+    @Test
+    fun approvalCancelledRemovesCardsAndRestoresStatus() {
+        val pending = live.feed(ev("message.start", seq = 1), approvalRequest)
+        assertEquals(AgentStatus.Approval, pending.status)
+        val s = pending.feed(
+            ev(
+                "approval.cancelled",
+                """{"session_id":"$sid","reason":"interrupt","cancelled_count":1,"request_ids":["req-9"]}""",
+                2,
+            ),
+        )
+        assertTrue(s.items.none { it is ChatItem.Approval })
+        assertTrue(s.status is AgentStatus.Thinking)
+    }
+
+    @Test
+    fun turnErrorFailsRunningToolsAndClearsApprovals() {
+        val s = live.feed(
+            ev("message.start", seq = 1),
+            ev("tool.start", """{"tool_id":"terminal:0","name":"terminal","context":"sleep 99"}""", 2),
+            approvalRequest,
+            ev("turn.error", """{"message":"interrupted"}""", 3),
+        )
+        assertEquals(ToolStatus.Failed, s.items.filterIsInstance<ChatItem.ToolCall>().single().status)
+        assertTrue(s.items.none { it is ChatItem.Approval })
+        assertEquals(AgentStatus.Idle, s.status)
+        assertEquals("Something went wrong: interrupted", (s.items.last() as ChatItem.AssistantMessage).text)
+    }
+
+    @Test
+    fun replayedEventsAreIgnored() {
+        val s = live.feed(
+            ev("message.start", seq = 2),
+            ev("message.delta", """{"text":"a"}""", 3),
+            ev("message.start", seq = 2),
+            ev("message.delta", """{"text":"a"}""", 3),
+            ev("message.delta", """{"text":"b"}""", 4),
+        )
+        val assistants = s.items.filterIsInstance<ChatItem.AssistantMessage>()
+        assertEquals(1, assistants.size)
+        assertEquals("ab", assistants[0].text)
+        assertEquals(4L, s.lastSeq)
     }
 
     // --- extra coverage for the delegated decisions ---
@@ -255,9 +355,9 @@ class ChatReducerTest {
             ev("message.delta", """{"text":"x"}""", 8, session = "someone-else"),
         )
         assertEquals(live, s)
-        // Global events (empty session id) still pass through.
+        // Global events (empty session id) pass through but never move the watermark.
         val g = live.feed(ev("sessions.changed", seq = 2, session = ""))
-        assertEquals(2L, g.lastSeq)
+        assertEquals(0L, g.lastSeq)
     }
 
     @Test
