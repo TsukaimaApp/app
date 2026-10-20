@@ -64,6 +64,7 @@ data class StatusUiState(
     val pairing: PairingDto? = null,
     val lastSession: SessionDto? = null,
     val busy: Boolean = false,
+    val refreshing: Boolean = false,
     val confirm: Confirm? = null,
 ) {
     val offline: Boolean get() = !hermes.reachable
@@ -126,6 +127,7 @@ class StatusViewModel(
     val state: StateFlow<StatusUiState> = _state.asStateFlow()
 
     private var actionJob: Job? = null
+    private var refreshJob: Job? = null
 
     init {
         viewModelScope.launch { source.hermes.collect { h -> _state.update { it.copy(hermes = h) } } }
@@ -136,7 +138,20 @@ class StatusViewModel(
 
     /** Re-polls the status and reloads stats, the last session and pairing. A failed piece keeps its old value. */
     fun refresh() {
-        viewModelScope.launch {
+        // Ignored while one is in flight: repeated Retry taps must not stack parallel refreshes.
+        if (refreshJob?.isActive == true) return
+        _state.update { it.copy(refreshing = true) }
+        refreshJob = viewModelScope.launch {
+            try {
+                loadAll()
+            } finally {
+                _state.update { it.copy(refreshing = false) }
+            }
+        }
+    }
+
+    private suspend fun loadAll() {
+        run {
             coroutineScope {
                 listOf(
                     async { source.refreshNow() },
@@ -167,22 +182,24 @@ class StatusViewModel(
     }
 
     fun startGateway(): Job = gatewayAction("running") { source.gatewayStart() }
-    fun restartGateway(): Job = gatewayAction("running", settleFirst = true) { source.gatewayRestart() }
+    fun restartGateway(): Job = gatewayAction("running", requireNewUpdatedAt = true) { source.gatewayRestart() }
     fun stopGateway(): Job = gatewayAction("stopped") { source.gatewayStop() }
 
-    private fun gatewayAction(target: String, settleFirst: Boolean = false, call: suspend () -> Result<Unit>): Job {
+    private fun gatewayAction(target: String, requireNewUpdatedAt: Boolean = false, call: suspend () -> Result<Unit>): Job {
         actionJob?.takeIf { it.isActive }?.let { return it }
         _state.update { it.copy(busy = true) }
+        // A restart reads "running" before and after, so it is only done once gateway_updated_at moves.
+        val before = source.hermes.value.status?.gatewayUpdatedAt
         val job = viewModelScope.launch {
             try {
                 if (call().isSuccess) {
-                    // A restart reads "running" before and after; give it one poll before trusting the state.
                     var polls = 0
                     while (polls < maxPolls) {
                         delay(pollMs)
                         source.refreshNow()
                         polls++
-                        if (source.hermes.value.status?.gatewayState == target && !(settleFirst && polls < 2)) break
+                        val status = source.hermes.value.status
+                        if (status?.gatewayState == target && !(requireNewUpdatedAt && status.gatewayUpdatedAt == before)) break
                     }
                 }
             } finally {

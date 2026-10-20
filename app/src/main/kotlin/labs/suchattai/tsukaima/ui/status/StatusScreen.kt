@@ -197,7 +197,12 @@ private fun OnlineBody(
             .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 20.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             PrimaryButton("New chat", actions.onNewChat, Modifier.weight(1f), icon = IconName.Add)
             SecondaryButton("Cron", actions.onCron, Modifier.weight(1f), icon = IconName.Schedule)
         }
@@ -246,7 +251,7 @@ private fun OfflineBody(state: StatusUiState, lastKnownLabel: String, actions: S
                     modifier = Modifier.padding(top = 6.dp, bottom = 16.dp),
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    PrimaryButton("Retry", onRetry, icon = IconName.Refresh)
+                    PrimaryButton(if (state.refreshing) "Retrying…" else "Retry", onRetry, icon = IconName.Refresh, enabled = !state.refreshing)
                     GhostButton("Settings", actions.onSettings)
                 }
             }

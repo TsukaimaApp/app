@@ -6,7 +6,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -80,7 +82,9 @@ class SettingsViewModelTest {
 
     @After
     fun tearDown() {
-        vms.forEach { it.viewModelScope.cancel() } // before resetMain: nothing may resume on Main afterwards
+        // Cancel AND join before resetMain: a cancelled coroutine still resumes through Dispatchers.Main when its
+        // in-flight IO returns, and doing that after resetMain throws into the next runTest in the JVM.
+        runBlocking { vms.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() } }
         Dispatchers.resetMain()
         scope.cancel()
         server.close()

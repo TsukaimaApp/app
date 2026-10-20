@@ -1,11 +1,16 @@
 package labs.suchattai.tsukaima.ui.status
 
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -55,8 +60,13 @@ class StatusViewModelTest {
         var pairing = PairingDto()
         val actions = mutableListOf<String>()
 
+        var gate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+        var onRefresh: (Int) -> Unit = {}
+
         override suspend fun refreshNow() {
             statusCalls++
+            onRefresh(statusCalls)
+            gate?.await()
             if (statusCalls >= flipOnCall) hermes.value = hermes.value.copy(status = flipTo)
         }
         override suspend fun systemStats() = stats?.let { Result.success(it) } ?: Result.failure(IllegalStateException())
@@ -69,10 +79,18 @@ class StatusViewModelTest {
         override suspend fun gatewayRestart() = Result.success(Unit).also { actions += "restart" }
     }
 
-    @Before fun setUp() = Dispatchers.setMain(StandardTestDispatcher())
-    @After fun tearDown() = Dispatchers.resetMain()
+    private val created = mutableListOf<StatusViewModel>()
 
-    private fun vm(src: StatusSource, now: Long = 0L) = StatusViewModel(src, clock = { now }, pollMs = 1_000)
+    @Before fun setUp() = Dispatchers.setMain(StandardTestDispatcher())
+
+    @After
+    fun tearDown() {
+        created.forEach { it.viewModelScope.cancel() } // nothing may outlive the test and touch Main after resetMain
+        Dispatchers.resetMain()
+    }
+
+    private fun vm(src: StatusSource, now: Long = 0L) =
+        StatusViewModel(src, clock = { now }, pollMs = 1_000).also { created += it }
 
     @Test
     fun factsShowDangerWhenStopped() = runTest {
@@ -132,5 +150,41 @@ class StatusViewModelTest {
         advanceUntilIdle()
         assertEquals("LAST KNOWN STATUS", vm.lastKnownLabel())
         assertNull(vm.state.value.confirm)
+    }
+
+    @Test
+    fun restartWaitsForUpdatedAtChange() = runTest {
+        val src = FakeSource(HermesState(status = running().copy(gatewayUpdatedAt = "t0"), lastSeenAt = 0L))
+        val vm = vm(src)
+        advanceUntilIdle()
+        val before = src.statusCalls
+        src.onRefresh = { n ->
+            if (n == before + 3) src.hermes.value = HermesState(status = running().copy(gatewayUpdatedAt = "t1"), lastSeenAt = 0L)
+        }
+        vm.restartGateway()
+        repeat(2) { advanceTimeBy(1_001) } // polls 1 and 2: still "running" with the old timestamp
+        runCurrent()
+        assertTrue(vm.state.value.busy)
+        advanceUntilIdle()
+        assertEquals(3, src.statusCalls - before)
+        assertFalse(vm.state.value.busy)
+    }
+
+    @Test
+    fun refreshIgnoredWhileInFlight() = runTest {
+        val src = FakeSource(HermesState(status = running())).apply { gate = CompletableDeferred() }
+        val vm = vm(src)
+        runCurrent()
+        assertTrue(vm.state.value.refreshing)
+        vm.refresh()
+        vm.refresh()
+        runCurrent()
+        assertEquals(1, src.statusCalls)
+        src.gate!!.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(vm.state.value.refreshing)
+        vm.refresh()
+        advanceUntilIdle()
+        assertEquals(2, src.statusCalls)
     }
 }

@@ -24,6 +24,7 @@ data class StatusDto(
     val version: String? = null,
     @SerialName("gateway_running") val gatewayRunning: Boolean? = null,
     @SerialName("gateway_state") val gatewayState: String? = null,
+    @SerialName("gateway_updated_at") val gatewayUpdatedAt: String? = null,
     @SerialName("gateway_platforms") val gatewayPlatforms: Map<String, JsonElement> = emptyMap(),
     @SerialName("active_sessions") val activeSessions: Int? = null,
     @SerialName("active_agents") val activeAgents: Int? = null,
