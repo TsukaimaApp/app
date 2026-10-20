@@ -3,6 +3,7 @@ package labs.suchattai.tsukaima.ui.drawer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -20,9 +21,10 @@ import org.junit.Test
 class DrawerViewModelTest {
     private class FakeSessions(var list: List<SessionDto>) : SessionsSource {
         val calls = mutableListOf<String>()
+        var failLoads = false
         override suspend fun sessions(): Result<List<SessionDto>> {
             calls += "sessions"
-            return Result.success(list)
+            return if (failLoads) Result.failure(java.io.IOException("down")) else Result.success(list)
         }
         override suspend fun rename(id: String, title: String): Result<Unit> {
             calls += "rename:$id:$title"
@@ -115,5 +117,60 @@ class DrawerViewModelTest {
             listOf("rename:a:New title", "sessions", "archive:b:true", "sessions", "delete:c", "sessions"),
             fake.calls,
         )
+    }
+
+    @Test
+    fun deletingOpenSessionReportsNavigation() = runTest {
+        val vm = vm()
+        val removed = mutableListOf<String>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.openSessionRemoved.collect { removed += it } }
+        vm.select("a")
+        vm.delete("b") // not the open one
+        vm.archive("c", archived = false) // unarchiving never removes
+        assertEquals(emptyList<String>(), removed)
+        vm.delete("a")
+        assertEquals(listOf("a"), removed)
+        vm.select("f")
+        vm.archive("f", archived = true)
+        assertEquals(listOf("a", "f"), removed)
+    }
+
+    @Test
+    fun repeatedLoadFailuresToastOnce() = runTest {
+        val fake = FakeSessions(sessions).apply { failLoads = true }
+        var reachable = true
+        val vm = DrawerViewModel(fake, settings, isReachable = { reachable })
+        val toasts = mutableListOf<String>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.errors.collect { toasts += it } }
+        // The init load failed before collection started; the Channel buffered its one toast.
+        vm.refresh()
+        vm.refresh()
+        assertEquals(listOf("Couldn't load sessions"), toasts)
+
+        fake.failLoads = false
+        vm.refresh() // success resets
+        fake.failLoads = true
+        vm.refresh()
+        vm.refresh()
+        assertEquals(2, toasts.size)
+
+        // Never while Hermes is unreachable: the status line already says so.
+        fake.failLoads = false
+        vm.refresh()
+        reachable = false
+        fake.failLoads = true
+        vm.refresh()
+        assertEquals(2, toasts.size)
+
+        // Mutation failures always toast.
+        val failing = object : SessionsSource by fake {
+            override suspend fun delete(id: String): Result<Unit> = Result.failure(java.io.IOException("x"))
+        }
+        val vm2 = DrawerViewModel(failing, settings, isReachable = { false })
+        val toasts2 = mutableListOf<String>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm2.errors.collect { toasts2 += it } }
+        vm2.delete("a")
+        vm2.delete("a")
+        assertEquals(listOf("Couldn't delete the session", "Couldn't delete the session"), toasts2)
     }
 }

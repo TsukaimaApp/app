@@ -61,11 +61,14 @@ data class DrawerUiState(
 /**
  * Sessions drawer state: the session list, search, archived view and session mutations. Reloads whenever the
  * server URL in [settings] changes (and once DataStore has loaded); [refresh] reloads on demand. Each mutation
- * is followed by a [refresh]. Failures are reported on [errors] as toast text.
+ * is followed by a [refresh]. Failures are reported on [errors] as toast text: every mutation failure, but a
+ * load failure only for the first failure since the last successful load, and never while [isReachable] is
+ * false (the status line already says Hermes is unreachable).
  */
 class DrawerViewModel(
     private val repo: SessionsSource,
     settings: StateFlow<Settings?>,
+    private val isReachable: () -> Boolean = { true },
 ) : ViewModel() {
     private val _state = MutableStateFlow(DrawerUiState())
     val state: StateFlow<DrawerUiState> = _state.asStateFlow()
@@ -74,6 +77,17 @@ class DrawerViewModel(
 
     /** One-shot error messages for the shell's toast. */
     val errors: Flow<String> = _errors.receiveAsFlow()
+
+    private val _openSessionRemoved = Channel<String>(Channel.BUFFERED)
+
+    /**
+     * One-shot: the session open in the main pane ([DrawerUiState.selectedId]) was deleted or archived from the
+     * drawer. The shell moves to a new chat.
+     */
+    val openSessionRemoved: Flow<String> = _openSessionRemoved.receiveAsFlow()
+
+    /** A load failure has been toasted since the last successful load. */
+    private var loadFailureReported = false
 
     private var serverUrl: String = ""
     private var refreshJob: Job? = null
@@ -111,14 +125,18 @@ class DrawerViewModel(
     fun rename(id: String, title: String) = mutate("Couldn't rename the session") { repo.rename(id, title) }
 
     fun archive(id: String, archived: Boolean) = mutate(
-        if (archived) "Couldn't archive the session" else "Couldn't unarchive the session",
+        failure = if (archived) "Couldn't archive the session" else "Couldn't unarchive the session",
+        removes = id.takeIf { archived },
     ) { repo.archive(id, archived) }
 
-    fun delete(id: String) = mutate("Couldn't delete the session") { repo.delete(id) }
+    fun delete(id: String) = mutate("Couldn't delete the session", removes = id) { repo.delete(id) }
 
-    private fun mutate(failure: String, block: suspend () -> Result<Unit>) {
+    /** Runs [block]; on success, if it removed the open session ([removes]), says so on [openSessionRemoved]. */
+    private fun mutate(failure: String, removes: String? = null, block: suspend () -> Result<Unit>) {
         viewModelScope.launch {
-            block().onFailure { _errors.trySend(failure) }
+            block()
+                .onSuccess { if (removes != null && removes == _state.value.selectedId) _openSessionRemoved.trySend(removes) }
+                .onFailure { _errors.trySend(failure) }
             refreshJob?.cancel()
             load()
         }
@@ -126,10 +144,16 @@ class DrawerViewModel(
 
     private suspend fun load() {
         repo.sessions()
-            .onSuccess { list -> _state.update { it.copy(sessions = list, loading = false) } }
+            .onSuccess { list ->
+                loadFailureReported = false
+                _state.update { it.copy(sessions = list, loading = false) }
+            }
             .onFailure {
                 _state.update { it.copy(loading = false) }
-                _errors.trySend("Couldn't load sessions")
+                if (!loadFailureReported && isReachable()) {
+                    loadFailureReported = true
+                    _errors.trySend("Couldn't load sessions")
+                }
             }
     }
 }

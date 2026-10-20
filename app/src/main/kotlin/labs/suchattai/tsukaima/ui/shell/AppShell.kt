@@ -91,7 +91,8 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
     val startRoute = rememberSaveable { if (firstSettings.onboarded) Route.Status.path else Route.Onboarding.path }
     val navController = rememberNavController()
     val drawerVm: DrawerViewModel = viewModel(
-        factory = viewModelFactory { initializer { DrawerViewModel(container.repository, container.settings) } },
+        factory = viewModelFactory { initializer { DrawerViewModel(container.repository, container.settings) { container.connection.hermes.value.reachable }
+        } },
     )
     val drawerState by drawerVm.state.collectAsStateWithLifecycle()
     val drawerOpen by vm.drawerOpen.collectAsStateWithLifecycle()
@@ -109,6 +110,16 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
     LaunchedEffect(drawerOpen) { if (drawerOpen) drawerVm.refresh() }
     LaunchedEffect(wide, entry?.id) { if (wide && entry != null) drawerVm.refresh() }
     LaunchedEffect(drawerVm) { drawerVm.errors.collect { container.toastState.show(it) } }
+    LaunchedEffect(drawerVm, navController) {
+        // The open chat was deleted or archived from the drawer: don't leave it on a dead id.
+        drawerVm.openSessionRemoved.collect { id ->
+            val entryNow = navController.currentBackStackEntry
+            val openId = entryNow?.arguments?.getString(Route.ARG_SESSION)
+            if (entryNow?.destination?.route == Route.Chat.path && openId == id) {
+                navController.navigateTop(Route.Chat.create())
+            }
+        }
+    }
     LaunchedEffect(vm, navController) {
         vm.authPrompts.collect {
             navController.navigate(Route.Settings.path) { launchSingleTop = true }
@@ -151,9 +162,17 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
         )
     }
 
-    if (wide) {
+    // One composition tree for both layouts: the NavHost keeps the same position (hence the same saveable
+    // keys) whether the window is wide or not, so a fold/unfold recreate restores every screen's saved state.
+    // Wide just disables the overlay and shows the pane beside the content.
+    ShellDrawer(
+        open = drawerOpen && !wide,
+        enabled = !wide && !onboarding,
+        onOpenChange = { if (it) vm.openDrawer() else vm.closeDrawer() },
+        drawer = { if (!wide) drawer(Dimens.drawerWidth) },
+    ) {
         Row(Modifier.fillMaxSize()) {
-            if (!onboarding) drawer(Dimens.paneWidth)
+            if (wide && !onboarding) drawer(Dimens.paneWidth)
             Box(
                 Modifier
                     .weight(1f)
@@ -162,29 +181,22 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
             ) {
                 screens(
                     Modifier
-                        .widthIn(max = Dimens.contentMax)
+                        .then(if (wide) Modifier.widthIn(max = Dimens.contentMax) else Modifier)
                         .fillMaxWidth()
                         .fillMaxHeight(),
                 )
             }
         }
-    } else {
-        PhoneDrawer(
-            open = drawerOpen,
-            enabled = !onboarding,
-            onOpenChange = { if (it) vm.openDrawer() else vm.closeDrawer() },
-            drawer = { drawer(Dimens.drawerWidth) },
-            content = { screens(Modifier.fillMaxSize()) },
-        )
     }
 }
 
 /**
  * [ModalNavigationDrawer] driven by [open], reporting user dismissals (scrim tap, swipe, back) through
  * [onOpenChange]. Gestures are off when not [enabled] (unless it is open, so it can still be swiped shut).
+ * Used in both layouts so [content] never moves in the tree; on wide it stays closed with an empty sheet.
  */
 @Composable
-private fun PhoneDrawer(
+private fun ShellDrawer(
     open: Boolean,
     enabled: Boolean,
     onOpenChange: (Boolean) -> Unit,
