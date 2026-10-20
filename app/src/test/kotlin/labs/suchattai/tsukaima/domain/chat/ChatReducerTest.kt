@@ -650,7 +650,11 @@ class ChatReducerTest {
         val l = login.items.single() as ChatItem.SecretPrompt
         assertEquals(SecretKind.VaultSaveLogin, l.kind)
         assertEquals("github.com", l.subject)
+        assertEquals("https://github.com", l.origin) // both kept: the card shows the scheme
         assertEquals(null, l.prompt)
+        // Kinds without an origin leave it null.
+        assertEquals(null, c.origin)
+        assertEquals(null, (live.feed(prompt("srq-u", "sudo", """"command":"sudo -v","origin":"https://x"""")).items.single() as ChatItem.SecretPrompt).origin)
         assertEquals("Waiting for a login", login.status.label)
         // No site: the origin names it.
         val originOnly = live.feed(prompt("srq-l2", "vault.save_login", """"origin":"https://x.test","site":"""""))

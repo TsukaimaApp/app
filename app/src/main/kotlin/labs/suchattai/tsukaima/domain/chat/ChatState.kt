@@ -94,8 +94,9 @@ sealed interface ChatItem {
      * A `sudo`, `secret`, `vault.unlock_prompt`, `vault.code` or `vault.save_login` server request: the agent wants
      * a value typed by the user. [id] is the server-request id (`srq-…`) to answer; [subject] is what the value is
      * for (the command, the env var, the password manager's name, or the site; agent-controlled), [prompt] the
-     * `secret` request's own wording or the `vault.code` hint. The value itself is never stored here: once
-     * [answered], [declined] says whether an empty value (skip) was sent.
+     * `secret` request's own wording or the `vault.code` hint. [origin] is the `vault.save_login` page's full origin
+     * (scheme included; null for every other kind). The value itself is never stored here: once [answered],
+     * [declined] says whether an empty value (skip) was sent.
      */
     data class SecretPrompt(
         override val id: String,
@@ -104,6 +105,7 @@ sealed interface ChatItem {
         val prompt: String?,
         val answered: Boolean,
         val declined: Boolean = false,
+        val origin: String? = null,
     ) : ChatItem
 
     /**

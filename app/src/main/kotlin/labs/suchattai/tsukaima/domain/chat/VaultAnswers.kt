@@ -15,6 +15,13 @@ object VaultAnswers {
             put("password", password)
         }.toString()
 
-    /** Whether the `vault.code` [hint] asks for digits, so the card offers the number keyboard. */
-    fun numericCode(hint: String?): Boolean = hint?.contains("digit", ignoreCase = true) == true
+    /**
+     * Whether the `vault.code` [hint] asks for digits only, so the card offers the number keyboard: it mentions
+     * digits or numbers and no letters, backup / recovery codes, phrases or words (which a number pad would lock out).
+     */
+    fun numericCode(hint: String?): Boolean =
+        hint != null && NUMERIC.containsMatchIn(hint) && !NOT_NUMERIC.containsMatchIn(hint)
+
+    private val NUMERIC = Regex("digit|number", RegexOption.IGNORE_CASE)
+    private val NOT_NUMERIC = Regex("letter|backup|recovery|phrase|word", RegexOption.IGNORE_CASE)
 }

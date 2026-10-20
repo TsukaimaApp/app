@@ -51,7 +51,8 @@ internal fun SecretKind.title(): String = when (this) {
  * - `sudo` / `secret` / `vault.unlock_prompt`: a masked field with a show/hide toggle; Send / Cancel.
  * - `vault.code`: a plain "Enter the code" field (number keyboard when the hint asks for digits) with the hint as
  *   helper text; Send / Decline.
- * - `vault.save_login`: "Username or email" and a masked "Password"; "Save login" (both filled) sends
+ * - `vault.save_login`: the full origin under the site (so http vs https shows), "Username or email" and a masked
+ *   "Password"; "Save login" (both filled) sends
  *   [VaultAnswers.saveLogin], "Don’t save" declines.
  *
  * Send hands the value to [onSend] and clears the fields; the secondary button declines ([onCancel], answered with
@@ -70,6 +71,10 @@ fun SecretCard(
         CardHeader(IconName.Key, item.kind.title())
         val subject = remember(item.subject) { CommandText.reveal(item.subject) }
         val prompt = remember(item.prompt) { item.prompt?.let { CommandText.reveal(it).text } }
+        // The save-login page's full origin, when it says more than the subject (the scheme: http vs https).
+        val origin = remember(item.origin, item.subject) {
+            item.origin?.takeIf { it.isNotBlank() && it != item.subject }?.let(CommandText::reveal)
+        }
         if (prompt != null && item.kind != SecretKind.VaultCode) {
             Text(prompt, style = TsukaimaType.ui, color = colors.ink1, modifier = Modifier.padding(bottom = 8.dp))
         }
@@ -96,7 +101,16 @@ fun SecretCard(
                     )
                 }
             }
-            if (subject.hadHiddenChars) {
+            if (origin != null) {
+                Text(
+                    text = origin.text,
+                    style = TsukaimaType.ui,
+                    color = colors.ink2,
+                    softWrap = true, // never truncated: the end of the host is what the user checks
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            if (subject.hadHiddenChars || origin?.hadHiddenChars == true) {
                 Text(
                     text = "This contains hidden characters.",
                     style = TsukaimaType.caption,
@@ -255,7 +269,10 @@ private fun SecretPreview(dark: Boolean) = PreviewPage(dark) {
         ChatItem.SecretPrompt("srq-5", SecretKind.VaultCode, "github.com", "6-digit code from your authenticator app", answered = false),
         {}, {},
     )
-    SecretCard(ChatItem.SecretPrompt("srq-6", SecretKind.VaultSaveLogin, "github.com", null, answered = false), {}, {})
+    SecretCard(
+        ChatItem.SecretPrompt("srq-6", SecretKind.VaultSaveLogin, "github.com", null, answered = false, origin = "https://github.com"),
+        {}, {},
+    )
 }
 
 @Preview(name = "SecretCard light", heightDp = 1700)

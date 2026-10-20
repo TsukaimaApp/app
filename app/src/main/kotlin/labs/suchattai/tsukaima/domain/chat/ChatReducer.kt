@@ -486,6 +486,7 @@ object ChatReducer {
                 subject = subject.orEmpty(),
                 prompt = prompt?.takeIf { it.isNotBlank() },
                 answered = false,
+                origin = if (secret == SecretKind.VaultSaveLogin) req.params.string("origin")?.takeIf { it.isNotBlank() } else null,
             )
             return state.copy(items = state.items + card, status = statusFor(state.items + card) ?: AgentStatus.Secret(secret))
         }

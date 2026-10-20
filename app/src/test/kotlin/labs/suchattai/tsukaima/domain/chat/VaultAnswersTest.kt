@@ -33,5 +33,11 @@ class VaultAnswersTest {
         assertTrue(VaultAnswers.numericCode("Enter the DIGITS sent by SMS"))
         assertFalse(VaultAnswers.numericCode("Code from the email"))
         assertFalse(VaultAnswers.numericCode(null))
+        assertTrue(VaultAnswers.numericCode("6 digits"))
+        assertTrue(VaultAnswers.numericCode("The number from the SMS"))
+        assertFalse(VaultAnswers.numericCode("6 digits or a backup code"))
+        assertFalse(VaultAnswers.numericCode("8 digits or recovery phrase"))
+        assertFalse(VaultAnswers.numericCode("Letters and numbers"))
+        assertFalse(VaultAnswers.numericCode(""))
     }
 }
