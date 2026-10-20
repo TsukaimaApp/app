@@ -96,9 +96,9 @@ class GatewaySession(private val transport: RpcTransport) {
             put("last_seen", lastSeen)
         })
 
-    fun respondApproval(requestId: String, choice: ApprovalChoice) {
+    /** Returns whether the answer was enqueued on a live connection ([RpcTransport.respond]). */
+    fun respondApproval(requestId: String, choice: ApprovalChoice): Boolean =
         transport.respond(requestId, buildJsonObject { put("choice", JsonPrimitive(choice.wire)) })
-    }
 
     /**
      * Answers an approval by its `request_id` rather than a server-request id: for the `pending_approval` a

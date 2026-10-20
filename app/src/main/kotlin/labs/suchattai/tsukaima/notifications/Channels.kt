@@ -2,11 +2,14 @@ package labs.suchattai.tsukaima.notifications
 
 import android.annotation.SuppressLint
 import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.util.Log
-import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import labs.suchattai.tsukaima.MainActivity
@@ -19,19 +22,23 @@ object Channels {
     const val GATEWAY = "gateway"
     const val SERVICE = "service"
 
+    /** Channels whose content (commands, names, titles) stays off the lock screen. */
+    val PRIVATE = setOf(APPROVALS, PAIRING, AGENT)
+
     /** Creates (or updates the names of) every channel; idempotent, call at process start. */
     fun register(context: Context) {
-        val high = NotificationManagerCompat.IMPORTANCE_HIGH
-        val default = NotificationManagerCompat.IMPORTANCE_DEFAULT
-        val low = NotificationManagerCompat.IMPORTANCE_LOW
+        fun channel(id: String, name: String, importance: Int) = NotificationChannel(id, name, importance).apply {
+            if (id in PRIVATE) lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+            if (id == SERVICE) setShowBadge(false)
+        }
         val channels = listOf(
-            NotificationChannelCompat.Builder(APPROVALS, high).setName("Tool approvals").build(),
-            NotificationChannelCompat.Builder(PAIRING, high).setName("Pairing requests").build(),
-            NotificationChannelCompat.Builder(AGENT, default).setName("Agent activity").build(),
-            NotificationChannelCompat.Builder(GATEWAY, default).setName("Gateway").build(),
-            NotificationChannelCompat.Builder(SERVICE, low).setName("Connection").setShowBadge(false).build(),
+            channel(APPROVALS, "Tool approvals", NotificationManager.IMPORTANCE_HIGH),
+            channel(PAIRING, "Pairing requests", NotificationManager.IMPORTANCE_HIGH),
+            channel(AGENT, "Agent activity", NotificationManager.IMPORTANCE_DEFAULT),
+            channel(GATEWAY, "Gateway", NotificationManager.IMPORTANCE_DEFAULT),
+            channel(SERVICE, "Connection", NotificationManager.IMPORTANCE_LOW),
         )
-        NotificationManagerCompat.from(context).createNotificationChannelsCompat(channels)
+        context.getSystemService(NotificationManager::class.java)?.createNotificationChannels(channels)
     }
 }
 
@@ -47,11 +54,7 @@ class AndroidNotificationPoster(context: Context) : NotificationPoster {
     private val manager = NotificationManagerCompat.from(this.context)
 
     fun build(spec: NotificationSpec): Notification {
-        val open = PendingIntent.getActivity(
-            context, 0,
-            Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
+        val open = openApp(spec.openScreen, spec.id, "content")
         val builder = NotificationCompat.Builder(context, spec.channel)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentTitle(spec.title)
@@ -62,19 +65,47 @@ class AndroidNotificationPoster(context: Context) : NotificationPoster {
             .setAutoCancel(!spec.ongoing)
             .setOnlyAlertOnce(true)
             .setPriority(priority(spec.channel))
+        if (spec.channel in Channels.PRIVATE) {
+            builder.setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                .setPublicVersion(
+                    NotificationCompat.Builder(context, spec.channel)
+                        .setSmallIcon(android.R.drawable.stat_notify_chat)
+                        .setContentTitle(ApprovalNotifier.PUBLIC_TITLE)
+                        .build(),
+                )
+        }
+        val canRequireAuth = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
         spec.actions.forEachIndexed { index, action ->
-            val intent = Intent(action.intentAction)
-                .setClass(context, NotificationActionReceiver::class.java) // explicit component
-            action.extras.forEach { (k, v) -> intent.putExtra(k, v) }
-            // Distinct request code per (notification, button): extras are not part of intent equality.
-            val pending = PendingIntent.getBroadcast(
-                context, spec.id * 31 + index, intent,
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-            )
-            builder.addAction(0, action.label, pending)
+            val pending = when {
+                action.intentAction == ApprovalNotifier.ACTION_OPEN_CHAT ->
+                    openApp(ApprovalNotifier.SCREEN_CHAT, spec.id, index.toString())
+                // API 29–30 cannot demand an unlock for a button: open the app instead of acting.
+                action.requiresAuth && !canRequireAuth ->
+                    openApp(ApprovalNotifier.fallbackScreen(action.intentAction), spec.id, index.toString())
+                else -> {
+                    val intent = Intent(action.intentAction)
+                        .setClass(context, NotificationActionReceiver::class.java) // explicit component
+                        .setData(uri(spec.id, index.toString())) // distinct intent per (notification, button)
+                    action.extras.forEach { (k, v) -> intent.putExtra(k, v) }
+                    PendingIntent.getBroadcast(context, spec.id * 31 + index, intent, FLAGS)
+                }
+            }
+            val built = NotificationCompat.Action.Builder(0, action.label, pending)
+            if (action.requiresAuth && canRequireAuth) built.setAuthenticationRequired(true)
+            builder.addAction(built.build())
         }
         return builder.build()
     }
+
+    private fun openApp(screen: String?, id: Int, slot: String): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .setData(uri(id, slot))
+        if (screen != null) intent.putExtra(ApprovalNotifier.EXTRA_OPEN_SCREEN, screen)
+        return PendingIntent.getActivity(context, id * 31 + slot.hashCode(), intent, FLAGS)
+    }
+
+    private fun uri(id: Int, slot: String): Uri = Uri.parse("tsukaima://n/$id/$slot")
 
     @SuppressLint("MissingPermission") // checked: areNotificationsEnabled covers POST_NOTIFICATIONS on API 33+
     override fun post(spec: NotificationSpec) {
@@ -87,6 +118,10 @@ class AndroidNotificationPoster(context: Context) : NotificationPoster {
     }
 
     override fun cancel(id: Int) = manager.cancel(id)
+
+    private companion object {
+        const val FLAGS = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+    }
 
     private fun priority(channel: String) = when (channel) {
         Channels.APPROVALS, Channels.PAIRING -> NotificationCompat.PRIORITY_HIGH

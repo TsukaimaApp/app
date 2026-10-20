@@ -199,7 +199,10 @@ class ChatViewModel(
         _state.update {
             it.copy(chat = ChatReducer.onApprovalAnswered(it.chat, id, flair), decisions = it.decisions + (id to approved))
         }
-        if (!id.startsWith(ChatSync.PENDING_PREFIX)) return session.respondApproval(id, choice)
+        if (!id.startsWith(ChatSync.PENDING_PREFIX)) {
+            session.respondApproval(id, choice) // not sent offline: the server re-offers it on resume
+            return
+        }
         val live = chat.liveSessionId ?: return
         launch {
             if (!attempt("Couldn’t send the answer") { session.approvalRespond(live, card.requestId, choice) }) {

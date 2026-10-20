@@ -5,6 +5,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -48,14 +49,17 @@ class AnsweredRequestIds private constructor(
 /**
  * Answers an approval from a notification button: only by its server-request id through
  * [RpcTransport.respond], only with `once` or `deny`, and only if this call wins the claim in [answered].
+ * If the frame was not enqueued on a live socket, the claim is released and [repost] puts the
+ * notification back so the user can try again.
  */
 class ApprovalAnswerer(
     private val transport: RpcTransport,
     private val answered: MutableSet<String>,
     private val connected: () -> Boolean,
     private val cancel: (Int) -> Unit,
+    private val repost: (String) -> Unit = {},
 ) {
-    enum class Outcome { Sent, AlreadyAnswered, NotConnected, Invalid }
+    enum class Outcome { Sent, NotSent, AlreadyAnswered, NotConnected, Invalid }
 
     fun answer(srqId: String?, choice: String?): Outcome {
         if (srqId == null || !ApprovalNotifier.isAnswerableSrqId(srqId)) return Outcome.Invalid
@@ -67,8 +71,12 @@ class ApprovalAnswerer(
             cancel(id)
             return Outcome.AlreadyAnswered
         }
-        transport.respond(srqId, buildJsonObject { put("choice", choice) })
         cancel(id)
+        if (!transport.respond(srqId, buildJsonObject { put("choice", choice) })) {
+            answered.remove(srqId) // not sent: the server still waits, so let the user (or chat) answer again
+            repost(srqId)
+            return Outcome.NotSent
+        }
         return Outcome.Sent
     }
 }
@@ -81,7 +89,7 @@ class ApprovalAnswerer(
  */
 class NotificationHub(
     private val scope: CoroutineScope,
-    private val serverRequests: Flow<Frame.ServerRequest>,
+    private val serverRequests: SharedFlow<Frame.ServerRequest>,
     private val events: Flow<Frame.Event>,
     private val hermes: Flow<HermesState>,
     private val answered: AnsweredRequestIds,
@@ -132,6 +140,25 @@ class NotificationHub(
             backgroundJob?.cancel()
             backgroundJob = null
         }
+    }
+
+    /**
+     * The app went to the background and kept its connection: notify approvals still open from the
+     * server-request replay (suppressed while in the foreground).
+     */
+    fun onBackground() {
+        coordinator.onBackground(serverRequests.replayCache).forEach(poster::post)
+    }
+
+    /** The background connection is gone: approval buttons cannot work without it, so clear them. */
+    fun onConnectionEnded() {
+        coordinator.onConnectionEnded().forEach(::apply)
+    }
+
+    /** Puts an approval notification back after its answer could not be sent. */
+    fun repostApproval(srqId: String) {
+        if (srqId in answered) return
+        coordinator.approvalSpec(srqId)?.let(poster::post)
     }
 
     fun post(spec: NotificationSpec) = poster.post(spec)

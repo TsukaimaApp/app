@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -19,6 +20,7 @@ import labs.suchattai.tsukaima.data.api.PairingDto
 import labs.suchattai.tsukaima.data.gateway.Frame
 import labs.suchattai.tsukaima.data.gateway.RpcTransport
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -35,12 +37,83 @@ class NotificationHubTest {
         }
     }
 
-    private class FakeTransport : RpcTransport {
+    private class FakeTransport(var live: Boolean = true) : RpcTransport {
         val responses = mutableListOf<Pair<String, JsonObject>>()
         override suspend fun request(method: String, params: JsonObject): JsonObject = JsonObject(emptyMap())
-        override fun respond(id: String, result: JsonObject) {
-            responses += id to result
+        override fun respond(id: String, result: JsonObject): Boolean {
+            if (live) responses += id to result
+            return live
         }
+    }
+
+    private fun TestScope.hub(
+        requests: MutableSharedFlow<Frame.ServerRequest>,
+        answered: AnsweredRequestIds,
+        poster: FakePoster,
+        job: Job,
+        foreground: () -> Boolean,
+    ) = NotificationHub(
+        scope = this + job,
+        serverRequests = requests,
+        events = MutableSharedFlow(),
+        hermes = MutableStateFlow(HermesState()),
+        answered = answered,
+        cronJobs = { Result.success(emptyList()) },
+        pairing = { Result.success(PairingDto()) },
+        poster = poster,
+        foreground = foreground,
+    )
+
+    @Test
+    fun openApprovalSeenInForegroundIsNotifiedOnBackground() = runTest(UnconfinedTestDispatcher()) {
+        val requests = MutableSharedFlow<Frame.ServerRequest>(replay = 16)
+        val answered = AnsweredRequestIds()
+        val poster = FakePoster()
+        var foreground = true
+        val job = Job()
+        val hub = hub(requests, answered, poster, job) { foreground }
+        hub.start()
+        requests.emit(approval("srq-1"))
+        requests.emit(approval("srq-2"))
+        answered.add("srq-2") // chat answered this one before the user left
+        assertTrue("suppressed in the foreground", poster.posted.isEmpty())
+
+        foreground = false
+        hub.onBackground()
+        assertEquals(listOf("srq-1".hashCode()), poster.posted.map { it.id })
+        hub.onBackground() // a second hand-off does not repeat it
+        assertEquals(1, poster.posted.size)
+
+        // The background connection ends: the dead buttons go, and the next hand-off may notify again.
+        hub.onConnectionEnded()
+        assertTrue("srq-1".hashCode() in poster.cancelled)
+        hub.onBackground()
+        assertEquals(2, poster.posted.size)
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun respondNotEnqueuedReArmsAndReposts() = runTest(UnconfinedTestDispatcher()) {
+        val requests = MutableSharedFlow<Frame.ServerRequest>(replay = 16)
+        val answered = AnsweredRequestIds()
+        val poster = FakePoster()
+        val job = Job()
+        val hub = hub(requests, answered, poster, job) { false }
+        hub.start()
+        requests.emit(approval("srq-1"))
+        val transport = FakeTransport(live = false)
+        val answerer = ApprovalAnswerer(transport, answered, { true }, hub::cancel, hub::repostApproval)
+
+        assertEquals(ApprovalAnswerer.Outcome.NotSent, answerer.answer("srq-1", "deny"))
+        assertFalse("claim released: it can be answered again", "srq-1" in answered)
+        assertEquals(listOf("srq-1".hashCode(), "srq-1".hashCode()), poster.posted.map { it.id }) // re-posted
+        assertEquals(poster.posted[0], poster.posted[1])
+
+        transport.live = true
+        assertEquals(ApprovalAnswerer.Outcome.Sent, answerer.answer("srq-1", "deny"))
+        assertTrue("srq-1" in answered)
+        assertEquals(2, poster.posted.size)
+        job.cancelAndJoin()
     }
 
     private fun approval(id: String) = Frame.ServerRequest(id, "approval", buildJsonObject { put("command", "ls") })

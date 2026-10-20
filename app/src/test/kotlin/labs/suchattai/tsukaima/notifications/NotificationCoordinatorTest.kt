@@ -153,4 +153,13 @@ class NotificationCoordinatorTest {
             c.onPairing(emptyList(), foreground = false),
         )
     }
+
+    @Test
+    fun connectionEndedCancelsPostedApprovalsAndAllowsRenotify() {
+        assertNotNull(c.onServerRequest(approval("srq-1"), foreground = false))
+        assertEquals(listOf(Cancel("srq-1".hashCode())), c.onConnectionEnded())
+        assertTrue(c.onConnectionEnded().isEmpty())
+        assertEquals(listOf("srq-1".hashCode()), c.onBackground(listOf(approval("srq-1"))).map { it.id })
+        assertNotNull(c.approvalSpec("srq-1"))
+    }
 }

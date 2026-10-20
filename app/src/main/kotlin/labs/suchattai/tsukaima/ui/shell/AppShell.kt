@@ -51,6 +51,8 @@ import labs.suchattai.tsukaima.ui.navigation.navigateTop
 import labs.suchattai.tsukaima.ui.theme.Dimens
 import labs.suchattai.tsukaima.ui.theme.Motion
 import labs.suchattai.tsukaima.ui.theme.tsukaima
+import labs.suchattai.tsukaima.notifications.ApprovalNotifier
+import kotlinx.coroutines.flow.filterNotNull
 
 /**
  * The frame every screen lives in (HANDOFF §4, §8).
@@ -117,6 +119,17 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
             val openId = entryNow?.arguments?.getString(Route.ARG_SESSION)
             if (entryNow?.destination?.route == Route.Chat.path && openId == id) {
                 navController.navigateTop(Route.Chat.create())
+            }
+        }
+    }
+    LaunchedEffect(navController) {
+        // A notification asked for a screen: chat opens the last conversation, settings the pairing list.
+        container.openScreen.filterNotNull().collect { screen ->
+            container.openScreen.value = null
+            if (navController.currentBackStackEntry?.destination?.route == Route.Onboarding.path) return@collect
+            when (screen) {
+                ApprovalNotifier.SCREEN_CHAT -> navController.navigateTop(Route.Chat.create(container.settings.value?.lastSessionId))
+                ApprovalNotifier.SCREEN_SETTINGS -> navController.navigate(Route.Settings.path) { launchSingleTop = true }
             }
         }
     }

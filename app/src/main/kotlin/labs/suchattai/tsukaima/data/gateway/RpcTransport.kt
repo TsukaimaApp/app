@@ -13,8 +13,11 @@ interface RpcTransport {
      */
     suspend fun request(method: String, params: JsonObject = JsonObject(emptyMap())): JsonObject
 
-    /** Answers a server→client request ([Frame.ServerRequest]) with [result], echoing its [id]. */
-    fun respond(id: String, result: JsonObject)
+    /**
+     * Answers a server→client request ([Frame.ServerRequest]) with [result], echoing its [id]. Returns
+     * whether the frame was enqueued on a live connection; false means it was not sent.
+     */
+    fun respond(id: String, result: JsonObject): Boolean
 }
 
 /** The server answered a request with a JSON-RPC error frame. */

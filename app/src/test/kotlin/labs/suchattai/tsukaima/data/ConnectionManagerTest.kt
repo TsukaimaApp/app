@@ -7,6 +7,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.jsonObject
@@ -307,6 +308,36 @@ class ConnectionManagerTest {
         cm.start() // back to the foreground: same loop, fast interval, refreshed now
         await { while (statusPolls.get() < 4) delay(20) }
         assertEquals(ConnectionState.Connected, cm.hermes.value.connection)
+        assertEquals(1, wsUpgrades.get())
+        cm.stop()
+        await { cm.hermes.first { it.connection == ConnectionState.Disconnected } }
+    }
+
+    @Test
+    fun handoffToBackgroundKeepsSocket() = runBlocking<Unit> {
+        wsListener = object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                if (method(text) == "client.capabilities") webSocket.send(READY)
+            }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                webSocket.close(1000, null)
+            }
+        }
+        creds.save("pw", "tok", serverUrl())
+        val cm = manager(pollMs = 50, backgroundPollMs = 60_000)
+        cm.start()
+        await { cm.hermes.first { it.connection == ConnectionState.Connected } }
+        val states = mutableListOf<ConnectionState>()
+        val watch = scope.launch { cm.hermes.collect { states += it.connection } }
+
+        cm.startBackground() // ON_STOP hand-off: same loop, same socket
+        delay(300)
+        cm.start() // ON_START: back to foreground polling, still the same socket
+        delay(300)
+
+        watch.cancel()
+        assertTrue("never disconnected: $states", states.all { it == ConnectionState.Connected })
         assertEquals(1, wsUpgrades.get())
         cm.stop()
         await { cm.hermes.first { it.connection == ConnectionState.Disconnected } }

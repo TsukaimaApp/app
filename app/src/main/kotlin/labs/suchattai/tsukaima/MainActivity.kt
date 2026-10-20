@@ -1,6 +1,7 @@
 package labs.suchattai.tsukaima
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
@@ -18,6 +19,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import labs.suchattai.tsukaima.di.AppContainer
+import labs.suchattai.tsukaima.notifications.ApprovalNotifier
 import labs.suchattai.tsukaima.notifications.BackgroundPolicy
 import java.io.IOException
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -38,6 +40,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val container = (application as TsukaimaApp).container
         askForNotificationsOnce(container)
+        handleOpenScreen(intent)
         setContent {
             val settings by container.settings.collectAsStateWithLifecycle()
             // Until settings load, follow the system (the shell shows only the page background meanwhile).
@@ -70,6 +73,20 @@ class MainActivity : ComponentActivity() {
                 notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleOpenScreen(intent)
+    }
+
+    /** A notification tap or button asked for a screen; only the known screens are accepted. */
+    private fun handleOpenScreen(intent: Intent?) {
+        val screen = intent?.getStringExtra(ApprovalNotifier.EXTRA_OPEN_SCREEN) ?: return
+        if (screen == ApprovalNotifier.SCREEN_CHAT || screen == ApprovalNotifier.SCREEN_SETTINGS) {
+            (application as TsukaimaApp).container.openScreen.value = screen
+        }
+        intent.removeExtra(ApprovalNotifier.EXTRA_OPEN_SCREEN) // not again on recreation
     }
 
     private fun granted(): Boolean = Build.VERSION.SDK_INT < 33 ||

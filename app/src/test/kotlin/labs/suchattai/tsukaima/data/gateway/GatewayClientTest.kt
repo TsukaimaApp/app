@@ -27,6 +27,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -211,9 +212,13 @@ class GatewayClientTest {
         val req = srq.await()
         assertEquals("srq-1", req.id)
         assertEquals("approval", req.method)
-        gw.respond("srq-1", buildJsonObject { put("choice", "once") })
+        assertTrue(gw.respond("srq-1", buildJsonObject { put("choice", "once") }))
 
         assertEquals("""{"jsonrpc":"2.0","id":"srq-1","result":{"choice":"once"}}""", fake.nextRaw())
+
+        gw.disconnect()
+        gw.awaitState(ConnectionState.Disconnected)
+        assertFalse("no live socket: not enqueued", gw.respond("srq-2", buildJsonObject { put("choice", "deny") }))
     }
 
     @Test

@@ -99,6 +99,12 @@ class GatewayClient(
     // ---- Actor-confined state: only read or written inside handle(). ----
     private var epoch = 0L
     private var socket: WebSocket? = null
+
+    /**
+     * The current socket once `gateway.ready` arrived, else null. Written only by the actor (and its
+     * completion handler); read by [respond] from any thread.
+     */
+    @Volatile private var liveSocket: WebSocket? = null
     private var lastInboundAt = 0L
     private var retries = 0
     private var ticketJob: Job? = null
@@ -144,6 +150,7 @@ class GatewayClient(
             wanted.value = false
             socket?.cancel()
             socket = null
+            liveSocket = null
             failPending()
             _state.value = ConnectionState.Disconnected
         }
@@ -190,10 +197,13 @@ class GatewayClient(
         }
     }
 
-    /** Sent on the open socket, if any; with no socket it is dropped (the server re-offers open requests on resume). */
-    override fun respond(id: String, result: JsonObject) {
-        post(Input.Send(JsonRpc.encodeResult(id, result), null, null))
-    }
+    /**
+     * Enqueues the answer directly on the live (ready) socket; OkHttp's [WebSocket.send] is thread-safe.
+     * Returns false when there is no live socket or it refused the frame (closing, queue full): the answer
+     * was not sent and the caller may let the user try again. The server re-offers open requests on resume.
+     */
+    override fun respond(id: String, result: JsonObject): Boolean =
+        liveSocket?.send(JsonRpc.encodeResult(id, result)) ?: false
 
     private suspend fun awaitConnected() {
         val s = combine(state, wanted) { s, w -> if (s == ConnectionState.Disconnected && !w) null else s }
@@ -292,6 +302,7 @@ class GatewayClient(
                 is Frame.Event -> {
                     if (frame.type == READY_EVENT && _state.value != ConnectionState.Connected) {
                         retries = 0
+                        liveSocket = socket
                         _state.value = ConnectionState.Connected
                     }
                     _events.tryEmit(frame)
@@ -340,6 +351,7 @@ class GatewayClient(
         val e = ++epoch
         cancelJobs()
         socket = null
+        liveSocket = null
         failPending()
         if (!wanted.value) {
             _state.value = ConnectionState.Disconnected
@@ -359,6 +371,7 @@ class GatewayClient(
         cancelJobs()
         socket?.close(NORMAL_CLOSE_CODE, null)
         socket = null
+        liveSocket = null
         failPending()
         retries = 0
         _state.value = ConnectionState.Disconnected

@@ -9,8 +9,17 @@ import labs.suchattai.tsukaima.ui.chat.ChatSync
 import labs.suchattai.tsukaima.ui.chat.components.CommandText
 import labs.suchattai.tsukaima.ui.settings.pairingEntry
 
-/** A button on a notification: [intentAction] is delivered to [NotificationActionReceiver] with [extras]. */
-data class NotificationAction(val label: String, val intentAction: String, val extras: Map<String, String>)
+/**
+ * A button on a notification: [intentAction] is delivered to [NotificationActionReceiver] with [extras], except
+ * [ApprovalNotifier.ACTION_OPEN_CHAT], which opens the app. [requiresAuth] buttons need the device unlocked
+ * (API 31+); below that they open the app ([ApprovalNotifier.fallbackScreen]) instead of acting.
+ */
+data class NotificationAction(
+    val label: String,
+    val intentAction: String,
+    val extras: Map<String, String> = emptyMap(),
+    val requiresAuth: Boolean = false,
+)
 
 /** Platform-free description of a notification; [AndroidNotificationPoster] turns it into a real one. */
 data class NotificationSpec(
@@ -20,6 +29,8 @@ data class NotificationSpec(
     val text: String,
     val actions: List<NotificationAction> = emptyList(),
     val ongoing: Boolean = false,
+    /** Screen the tap opens ([ApprovalNotifier.SCREEN_CHAT] / [ApprovalNotifier.SCREEN_SETTINGS]); null = as left. */
+    val openScreen: String? = null,
 )
 
 /** Pure builders for every notification the app posts. */
@@ -27,6 +38,16 @@ object ApprovalNotifier {
     const val ACTION_APPROVE = "labs.suchattai.tsukaima.action.APPROVE"
     const val ACTION_DENY = "labs.suchattai.tsukaima.action.DENY"
     const val ACTION_PAIR_APPROVE = "labs.suchattai.tsukaima.action.PAIR_APPROVE"
+
+    /** Not a broadcast: opens the chat, like tapping the notification. */
+    const val ACTION_OPEN_CHAT = "labs.suchattai.tsukaima.action.OPEN_CHAT"
+
+    const val EXTRA_OPEN_SCREEN = "open_screen"
+    const val SCREEN_CHAT = "chat"
+    const val SCREEN_SETTINGS = "settings"
+
+    /** Lock-screen stand-in for private notifications: no command, name or title leaks. */
+    const val PUBLIC_TITLE = "Hermes needs your attention"
 
     const val EXTRA_SRQ_ID = "srq_id"
     const val EXTRA_CHOICE = "choice"
@@ -41,6 +62,7 @@ object ApprovalNotifier {
     const val GATEWAY_ID = 0x75_6b_02
 
     private const val MAX_COMMAND = 200
+    private const val MAX_PAIRING_FIELD = 40
     private const val HIDDEN_SUFFIX = " (hidden characters)"
     private const val APPROVAL_METHOD = "approval"
 
@@ -58,20 +80,36 @@ object ApprovalNotifier {
 
     fun isApproval(req: Frame.ServerRequest): Boolean = req.method == APPROVAL_METHOD
 
+    /**
+     * Approve is offered inline only when the notification shows the whole command and it had no hidden
+     * characters; otherwise the user gets Deny and "Open to review" (the full command in chat). Approve needs
+     * the device unlocked. No usable srq id: informational, no buttons.
+     */
     fun forApproval(req: Frame.ServerRequest): NotificationSpec {
         val command = req.params.str("command") ?: req.params.str("tool_name").orEmpty()
         val revealed = CommandText.reveal(command)
-        val text = truncate(revealed.text) + if (revealed.hadHiddenChars) HIDDEN_SUFFIX else ""
-        val actions = if (isAnswerableSrqId(req.id)) {
-            listOf(
-                NotificationAction("Approve", ACTION_APPROVE, mapOf(EXTRA_SRQ_ID to req.id, EXTRA_CHOICE to CHOICE_ONCE)),
-                NotificationAction("Deny", ACTION_DENY, mapOf(EXTRA_SRQ_ID to req.id, EXTRA_CHOICE to CHOICE_DENY)),
+        val truncated = revealed.text.length > MAX_COMMAND
+        val text = cap(revealed.text, MAX_COMMAND) + if (revealed.hadHiddenChars) HIDDEN_SUFFIX else ""
+        val deny = NotificationAction("Deny", ACTION_DENY, mapOf(EXTRA_SRQ_ID to req.id, EXTRA_CHOICE to CHOICE_DENY))
+        val actions = when {
+            !isAnswerableSrqId(req.id) -> emptyList() // informational only: nothing safe to answer it by
+            truncated || revealed.hadHiddenChars -> listOf(deny, NotificationAction("Open to review", ACTION_OPEN_CHAT))
+            else -> listOf(
+                NotificationAction(
+                    "Approve", ACTION_APPROVE, mapOf(EXTRA_SRQ_ID to req.id, EXTRA_CHOICE to CHOICE_ONCE),
+                    requiresAuth = true,
+                ),
+                deny,
             )
-        } else {
-            emptyList() // informational only: nothing safe to answer it by
         }
-        return NotificationSpec(Channels.APPROVALS, approvalId(req.id), "Hermes wants to run a tool", text, actions)
+        return NotificationSpec(
+            Channels.APPROVALS, approvalId(req.id), "Hermes wants to run a tool", text, actions, openScreen = SCREEN_CHAT,
+        )
     }
+
+    /** Where a [NotificationAction.requiresAuth] button leads on API 29–30, where it cannot require unlock. */
+    fun fallbackScreen(intentAction: String): String =
+        if (intentAction == ACTION_PAIR_APPROVE) SCREEN_SETTINGS else SCREEN_CHAT
 
     /** A pending pairing entry (`{platform, request_id, user_id, user_name, age_minutes}`); null if malformed. */
     fun forPairing(json: JsonObject): NotificationSpec? {
@@ -81,18 +119,22 @@ object ApprovalNotifier {
                 NotificationAction(
                     "Approve", ACTION_PAIR_APPROVE,
                     mapOf(EXTRA_PLATFORM to entry.platform, EXTRA_REQUEST_ID to entry.requestId),
+                    requiresAuth = true,
                 ),
             )
         } else {
             emptyList()
         }
-        val who = entry.who.ifBlank { "Someone" }
+        // Names come from a third-party chat platform: reveal hidden characters, cap, and always show the id.
+        val who = safe(entry.who).ifBlank { "Someone" }
+        val userId = safe(entry.userId).ifBlank { "no id" }
         return NotificationSpec(
             Channels.PAIRING,
             pairingId(entry.platform, entry.requestId),
             "Pairing request",
-            "$who wants to pair on ${entry.platform}",
+            "$who ($userId) wants to pair on ${safe(entry.platform)}",
             actions,
+            openScreen = SCREEN_SETTINGS,
         )
     }
 
@@ -118,9 +160,12 @@ object ApprovalNotifier {
 
     private const val TASK_DONE = "Hermes finished the task"
 
-    private fun truncate(s: String): String {
-        if (s.length <= MAX_COMMAND) return s
-        val end = if (Character.isHighSurrogate(s[MAX_COMMAND - 1])) MAX_COMMAND - 1 else MAX_COMMAND
+    private fun safe(raw: String): String = cap(CommandText.reveal(raw).text, MAX_PAIRING_FIELD)
+
+    /** At most [max] chars (never splitting a surrogate pair), plus "…" when cut. */
+    private fun cap(s: String, max: Int): String {
+        if (s.length <= max) return s
+        val end = if (Character.isHighSurrogate(s[max - 1])) max - 1 else max
         return s.substring(0, end) + "…"
     }
 

@@ -53,6 +53,18 @@ fun HermesState.gatewayStatus(): AgentStatus? = when {
     else -> null
 }
 
+/** The lifecycle half of [ConnectionManager], a seam for the background hand-off. */
+interface ConnectionControl {
+    /** Foreground polling; keeps (never rebuilds) a connected gateway. */
+    fun start()
+
+    /** Background polling on the same connection; never disconnects. */
+    fun startBackground()
+
+    /** Stops polling and disconnects the gateway. */
+    fun stop()
+}
+
 /**
  * Owns the app's connection to Hermes: polls `/api/status`, keeps the chat [GatewayClient] connected while
  * credentials are configured, fans out server→client requests, and tracks whether the user must sign in again.
@@ -74,7 +86,7 @@ class ConnectionManager(
     private val backgroundPollMs: Long = 60_000,
     private val now: () -> Long = System::currentTimeMillis,
     private val logger: (String, Throwable?) -> Unit = { _, _ -> },
-) {
+) : ConnectionControl {
     private data class Poll(val reachable: Boolean = true, val status: StatusDto? = null, val lastSeenAt: Long? = null)
 
     /** Guards [poll], [pollJob], [generation] and the derive-and-set in [publish]. */
@@ -133,13 +145,13 @@ class ConnectionManager(
      * collector of [GatewayClient.serverRequests], which [stop] does not cancel. If a background loop is
      * running it is kept and switched to the foreground interval, polling at once.
      */
-    fun start() = run(pollMs)
+    override fun start() = run(pollMs)
 
     /**
      * Like [start], for the foreground service while the app is in the background: keeps the gateway
      * connected but polls status every [backgroundPollMs] instead of [pollMs].
      */
-    fun startBackground() = run(backgroundPollMs)
+    override fun startBackground() = run(backgroundPollMs)
 
     private fun run(interval: Long) {
         if (forwarding.compareAndSet(false, true)) {
@@ -177,7 +189,7 @@ class ConnectionManager(
     }
 
     /** Stops polling and disconnects the gateway. [serverRequests] stays wired for the next [start]. */
-    fun stop() {
+    override fun stop() {
         synchronized(lock) {
             generation++
             pollJob?.cancel()

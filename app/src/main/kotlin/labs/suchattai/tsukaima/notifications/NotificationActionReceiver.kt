@@ -21,7 +21,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
                     intent.getStringExtra(ApprovalNotifier.EXTRA_SRQ_ID),
                     intent.getStringExtra(ApprovalNotifier.EXTRA_CHOICE),
                 )
-                if (outcome == ApprovalAnswerer.Outcome.NotConnected) {
+                if (outcome == ApprovalAnswerer.Outcome.NotConnected || outcome == ApprovalAnswerer.Outcome.NotSent) {
                     Toast.makeText(context, "Not connected to Hermes; try again in a moment", Toast.LENGTH_SHORT).show()
                 }
             }
@@ -36,7 +36,11 @@ class NotificationActionReceiver : BroadcastReceiver() {
                         container.repository.approvePairing(platform, requestId).onFailure { e ->
                             Log.w(TAG, "pairing approval failed", e)
                             container.notifications.post(
-                                NotificationSpec(Channels.PAIRING, id, "Pairing not approved", "Couldn’t approve the $platform request; open Tsukaima to retry"),
+                                NotificationSpec(
+                                    Channels.PAIRING, id, "Pairing not approved",
+                                    "Couldn’t approve the pairing request; open Tsukaima to retry",
+                                    openScreen = ApprovalNotifier.SCREEN_SETTINGS,
+                                ),
                             )
                         }
                     } finally {

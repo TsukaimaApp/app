@@ -24,6 +24,11 @@ class RecentIds(val capacity: Int = 64) {
     @Synchronized
     fun add(id: String): Boolean = ids.put(id, Unit) == null
 
+    @Synchronized
+    fun remove(id: String) {
+        ids.remove(id)
+    }
+
     @get:Synchronized
     val size: Int get() = ids.size
 }
@@ -49,6 +54,9 @@ class NotificationCoordinator(private val answered: Set<String>, capacity: Int =
     private val srqByRequestId = bounded<String>(capacity)
     private val titles = bounded<String>(capacity)
 
+    /** Approval notifications currently posted, by srq id: for re-posting and for clearing dead buttons. */
+    private val postedApprovals = bounded<NotificationSpec>(capacity)
+
     private var gatewayDown: AgentStatus? = null
     private var cronSnapshot: Map<String, CronJobDto>? = null
     private val postedPairing = mutableSetOf<String>()
@@ -59,7 +67,31 @@ class NotificationCoordinator(private val answered: Set<String>, capacity: Int =
         if (foreground || req.id in answered) return null
         if (!notified.add(req.id)) return null
         req.params.str("request_id")?.let { srqByRequestId[it] = req.id }
-        return ApprovalNotifier.forApproval(req)
+        return ApprovalNotifier.forApproval(req).also { postedApprovals[req.id] = it }
+    }
+
+    /**
+     * The app just went to the background with the connection kept: run the server-request replay through
+     * [onServerRequest], so approvals that arrived (and were suppressed) in the foreground are notified now.
+     * Answered and already-notified ids are filtered there.
+     */
+    fun onBackground(replay: List<Frame.ServerRequest>): List<NotificationSpec> =
+        replay.mapNotNull { onServerRequest(it, foreground = false) }
+
+    /** The posted approval for [srqId], to re-post when an answer from its button was not sent. */
+    @Synchronized
+    fun approvalSpec(srqId: String): NotificationSpec? = postedApprovals[srqId]
+
+    /**
+     * The background connection ended: approval buttons can no longer work, so cancel them. They are
+     * forgotten too, so the next hand-off can notify the still-open ones again.
+     */
+    @Synchronized
+    fun onConnectionEnded(): List<NotificationCommand.Cancel> {
+        val ids = postedApprovals.keys.toList()
+        postedApprovals.clear()
+        ids.forEach(notified::remove)
+        return ids.map { NotificationCommand.Cancel(ApprovalNotifier.approvalId(it)) }
     }
 
     /** An approval was answered somewhere (chat or a notification): its notification goes. */
@@ -77,11 +109,11 @@ class NotificationCoordinator(private val answered: Set<String>, capacity: Int =
         } else {
             listOf(NotificationCommand.Post(ApprovalNotifier.forTaskDone(titles[ev.sessionId], ev.sessionId)))
         }
-        "request.cancel" -> listOfNotNull(ev.payload.str("id")?.let { onAnswered(it) })
+        "request.cancel" -> listOfNotNull(ev.payload.str("id")?.let { postedApprovals.remove(it); onAnswered(it) })
         "approval.cancelled" -> (ev.payload["request_ids"] as? JsonArray).orEmpty()
             .mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
             .mapNotNull { srqByRequestId.remove(it) }
-            .map { onAnswered(it) }
+            .map { postedApprovals.remove(it); onAnswered(it) }
         else -> emptyList()
     }
 

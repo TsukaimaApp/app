@@ -3,6 +3,7 @@ package labs.suchattai.tsukaima.di
 import android.content.Context
 import android.os.SystemClock
 import android.util.Log
+import androidx.core.app.NotificationManagerCompat
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
@@ -31,6 +32,9 @@ import labs.suchattai.tsukaima.data.gateway.ConnectionState
 import labs.suchattai.tsukaima.notifications.AndroidNotificationPoster
 import labs.suchattai.tsukaima.notifications.AnsweredRequestIds
 import labs.suchattai.tsukaima.notifications.ApprovalAnswerer
+import labs.suchattai.tsukaima.notifications.BackgroundController
+import labs.suchattai.tsukaima.notifications.BackgroundPolicy
+import labs.suchattai.tsukaima.notifications.GatewayService
 import labs.suchattai.tsukaima.notifications.NotificationHub
 import labs.suchattai.tsukaima.ui.components.ToastState
 import okhttp3.OkHttpClient
@@ -148,8 +152,11 @@ class AppContainer(context: Context) {
      */
     val answeredRequestIds = AnsweredRequestIds()
 
-    /** True while some activity is started (ProcessLifecycle STARTED); set by [labs.suchattai.tsukaima.TsukaimaApp]. */
+    /** True while some activity is started (ProcessLifecycle STARTED); written by [background]. */
     val inForeground = MutableStateFlow(false)
+
+    /** A notification asked to open a screen (`chat` / `settings`); the shell navigates and clears it. */
+    val openScreen = MutableStateFlow<String?>(null)
 
     /** Posts and cancels notifications for the five background events; started by the application. */
     val notifications = NotificationHub(
@@ -171,6 +178,26 @@ class AppContainer(context: Context) {
         answered = answeredRequestIds,
         connected = { gateway.state.value == ConnectionState.Connected },
         cancel = notifications::cancel,
+        repost = notifications::repostApproval,
+    )
+
+    /** Foreground/background hand-off of the live connection (driven by the process lifecycle). */
+    val background = BackgroundController(
+        scope = appScope,
+        connection = connection,
+        inForeground = inForeground,
+        shouldHandOff = {
+            BackgroundPolicy.shouldStartService(
+                settings = settings.value,
+                hasPassword = credentials.password() != null,
+                authRequired = connection.authRequired.value,
+                notificationsPermitted = NotificationManagerCompat.from(appContext).areNotificationsEnabled(),
+                foreground = inForeground.value,
+            )
+        },
+        startService = { GatewayService.start(appContext) },
+        onHandOff = notifications::onBackground,
+        onQuiet = notifications::onConnectionEnded,
     )
 
     private companion object {

@@ -8,16 +8,22 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import labs.suchattai.tsukaima.TsukaimaApp
 
 /**
- * Foreground service (type `dataSync`) that keeps the gateway connected while the app is in the
- * background, so approvals, pairing requests and alerts can reach the user. Thin: the connection is
- * [labs.suchattai.tsukaima.data.ConnectionManager.startBackground], the decisions are in [NotificationHub].
- * Started on ProcessLifecycle ON_STOP (see [BackgroundPolicy]) and stopped on ON_START.
+ * Foreground service (type `dataSync`) that keeps the app process, and with it the connection handed over
+ * by [BackgroundController], alive while the app is in the background. Thin: it shows the ongoing
+ * "Listening for Hermes" notification, runs [NotificationHub]'s background poll, and stops itself as soon as
+ * the app is in the foreground again (ON_START never calls stopService, so startForeground always runs).
  */
 class GatewayService : Service() {
     private val container get() = (application as TsukaimaApp).container
+    private var scope: CoroutineScope? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = AndroidNotificationPoster(this).build(ApprovalNotifier.forService())
@@ -30,11 +36,14 @@ class GatewayService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (container.inForeground.value) {
-            stopSelf() // the user came back before we started: the normal start() already runs
-            return START_NOT_STICKY
+        if (scope == null) {
+            scope = MainScope().also { s ->
+                s.launch {
+                    container.background.inForeground.first { it }
+                    stopSelf() // back in the foreground: the connection already polls normally
+                }
+            }
         }
-        container.connection.startBackground()
         container.notifications.startBackground()
         return START_NOT_STICKY
     }
@@ -45,9 +54,11 @@ class GatewayService : Service() {
     }
 
     override fun onDestroy() {
+        scope?.cancel()
+        scope = null
         container.notifications.stopBackground()
-        // Returning to the foreground already called start(); only a background stop drops the connection.
-        if (!container.inForeground.value) container.connection.stop()
+        // Only while backgrounded: disconnect and clear approval buttons that can no longer work.
+        container.background.onServiceEnded()
         super.onDestroy()
     }
 
@@ -56,16 +67,13 @@ class GatewayService : Service() {
     companion object {
         private const val TAG = "Tsukaima"
 
-        fun start(context: Context) {
-            try {
-                ContextCompat.startForegroundService(context, Intent(context, GatewayService::class.java))
-            } catch (e: RuntimeException) { // background-start restrictions
-                Log.w(TAG, "gateway service: start refused", e)
-            }
-        }
-
-        fun stop(context: Context) {
-            context.stopService(Intent(context, GatewayService::class.java))
+        /** Returns false when the system refused the start (background-start restrictions). */
+        fun start(context: Context): Boolean = try {
+            ContextCompat.startForegroundService(context, Intent(context, GatewayService::class.java))
+            true
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "gateway service: start refused", e)
+            false
         }
     }
 }

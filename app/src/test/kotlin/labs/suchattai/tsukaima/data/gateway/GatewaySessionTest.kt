@@ -22,8 +22,9 @@ class GatewaySessionTest {
             calls += method to params
             return result
         }
-        override fun respond(id: String, result: JsonObject) {
+        override fun respond(id: String, result: JsonObject): Boolean {
             responses += id to result
+            return true
         }
     }
 
