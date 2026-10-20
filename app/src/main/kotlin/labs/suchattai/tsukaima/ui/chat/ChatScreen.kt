@@ -86,6 +86,7 @@ class ChatActions(
     val onSecret: (id: String, value: String) -> Unit = { _, _ -> },
     val onSecretCancel: (String) -> Unit = {},
     val onStop: () -> Unit = {},
+    val onVoice: () -> Unit = {},
     val onClarify: (id: String, answers: Map<String, String?>) -> Unit = { _, _ -> },
     val onClarifySkip: (String) -> Unit = {},
     val onMenu: (ChatMenu?) -> Unit = {},
@@ -239,6 +240,7 @@ fun ChatContent(
             onRetryAttachment = actions.onRetryAttachment,
             running = state.chat.status.running,
             onStop = actions.onStop,
+            onVoice = actions.onVoice,
         )
     }
     ChatSheets(state, actions, overflow)

@@ -60,6 +60,9 @@ import androidx.compose.material.icons.rounded.VideoFile
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.MicOff
+import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -152,6 +155,11 @@ enum class IconName(val symbol: String) {
     Compress("compress"),
     AccountTree("account_tree"),
     Warning("warning"),
+
+    /** Not in the handoff (v0.6.0): voice mode. */
+    Mic("mic"),
+    MicOff("mic_off"),
+    Keyboard("keyboard"),
 }
 
 /** Pure lookup, safe from JVM unit tests (no Android context involved). */
@@ -207,6 +215,9 @@ fun iconFor(name: IconName): ImageVector = when (name) {
     IconName.FolderZip -> Icons.Rounded.FolderZip
     IconName.InsertDriveFile -> Icons.AutoMirrored.Rounded.InsertDriveFile
     IconName.Stop -> Icons.Rounded.Stop
+    IconName.Mic -> Icons.Rounded.Mic
+    IconName.MicOff -> Icons.Rounded.MicOff
+    IconName.Keyboard -> Icons.Rounded.Keyboard
     IconName.Key -> Icons.Rounded.Key
     IconName.Visibility -> Icons.Rounded.Visibility
     IconName.VisibilityOff -> Icons.Rounded.VisibilityOff

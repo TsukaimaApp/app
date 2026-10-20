@@ -57,11 +57,32 @@ import labs.suchattai.tsukaima.ui.theme.TsukaimaShapes
 import labs.suchattai.tsukaima.ui.theme.TsukaimaType
 import labs.suchattai.tsukaima.ui.theme.tsukaima
 
+/** What the 44dp trailing slot of the [Composer] does. */
+enum class ComposerAction { Voice, Send, Stop }
+
+/**
+ * Pure choice for the trailing slot: [ComposerAction.Stop] while a turn [running] on an [enabled] composer;
+ * [ComposerAction.Voice] when it is enabled, voice is [voiceAvailable] and there is nothing to send (blank
+ * [value], no attachments); otherwise [ComposerAction.Send].
+ */
+fun composerAction(
+    value: String,
+    hasAttachments: Boolean,
+    enabled: Boolean,
+    running: Boolean,
+    voiceAvailable: Boolean,
+): ComposerAction = when {
+    running && enabled -> ComposerAction.Stop
+    enabled && voiceAvailable && value.isBlank() && !hasAttachments -> ComposerAction.Voice
+    else -> ComposerAction.Send
+}
+
 /**
  * Bottom composer pill: pending attachments (chips) above the row of attach, multiline field (max 120dp) and
  * send. The IME Send action and a hardware Enter send; hardware Shift+Enter inserts a newline. [canSend]
  * gates sending (text or a ready attachment); the caller clears [value] in [onSend]. While the agent is
- * [running] a turn, send becomes a danger-filled Stop ([onStop]) in the same 44dp slot, and Enter does nothing.
+ * [running] a turn, send becomes a danger-filled Stop ([onStop]) in the same 44dp slot, and Enter does nothing. When [onVoice] is set and there is nothing to send, send
+ * becomes an accent mic that calls it (see [composerAction]).
  */
 @Composable
 fun Composer(
@@ -79,6 +100,7 @@ fun Composer(
     running: Boolean = false,
     onStop: () -> Unit = {},
     disabledPlaceholder: String = "Hermes is unreachable",
+    onVoice: (() -> Unit)? = null,
 ) {
     val colors = MaterialTheme.tsukaima
     val shape = TsukaimaShapes.composer
@@ -143,10 +165,13 @@ fun Composer(
                     }
                 },
             )
-            if (running && enabled) {
-                IconButton44(IconName.Stop, "Stop", onClick = onStop, filled = true, tone = Tone.Danger)
-            } else {
-                IconButton44(IconName.ArrowUpward, "Send", onClick = send, filled = enabled && canSend, enabled = enabled && canSend)
+            when (composerAction(value, attachments.isNotEmpty(), enabled, running, voiceAvailable = onVoice != null)) {
+                ComposerAction.Stop ->
+                    IconButton44(IconName.Stop, "Stop", onClick = onStop, filled = true, tone = Tone.Danger)
+                ComposerAction.Voice ->
+                    IconButton44(IconName.Mic, "Voice", onClick = { onVoice?.invoke() }, filled = true)
+                ComposerAction.Send ->
+                    IconButton44(IconName.ArrowUpward, "Send", onClick = send, filled = enabled && canSend, enabled = enabled && canSend)
             }
         }
     }
@@ -220,6 +245,7 @@ private fun ComposerPreview(dark: Boolean) = PreviewPage(dark) {
     Composer("Restart the agent and tail the logs.", {}, {}, {}, enabled = true)
     Composer("", {}, {}, {}, enabled = false)
     Composer("", {}, {}, {}, enabled = true, running = true)
+    Composer("", {}, {}, {}, enabled = true, onVoice = {})
     Composer(
         "What is in these?", {}, {}, {}, enabled = true, canSend = false,
         attachments = listOf(
