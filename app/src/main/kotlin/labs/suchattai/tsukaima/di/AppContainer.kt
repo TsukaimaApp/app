@@ -13,7 +13,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import labs.suchattai.tsukaima.data.ConnectionManager
 import labs.suchattai.tsukaima.data.HermesRepository
@@ -224,9 +229,18 @@ class AppContainer(context: Context) {
             )
         },
         startService = { GatewayService.start(appContext) },
+        stopService = { GatewayService.stop(appContext) },
         onHandOff = notifications::onBackground,
         onQuiet = notifications::onConnectionEnded,
     )
+
+    init {
+        // Every notification kind switched off (or one back on) while in the background: stop or restart the hand-off.
+        appScope.launch {
+            settings.filterNotNull().map { it.notifications.anyOn }.distinctUntilChanged().drop(1)
+                .collect { background.reevaluate() }
+        }
+    }
 
     /**
      * App-wide half of a sign-out, after [HermesRepository.signOut] cleared the credentials and dropped the socket:

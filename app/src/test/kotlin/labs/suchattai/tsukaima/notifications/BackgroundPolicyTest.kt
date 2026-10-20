@@ -1,5 +1,6 @@
 package labs.suchattai.tsukaima.notifications
 
+import labs.suchattai.tsukaima.data.prefs.NotificationPrefs
 import labs.suchattai.tsukaima.data.prefs.Settings
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -24,6 +25,9 @@ class BackgroundPolicyTest {
         assertFalse(start(settings = null))
         assertFalse(start(authRequired = true))
         assertFalse(start(foreground = true)) // the user came back before we decided
+        val allOff = NotificationPrefs(approvals = false, pairing = false, replies = false, alerts = false)
+        assertFalse(start(settings = s.copy(notifications = allOff))) // nothing would be posted
+        assertTrue(start(settings = s.copy(notifications = allOff.copy(alerts = true))))
     }
 
     @Test

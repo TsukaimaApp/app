@@ -37,6 +37,7 @@ class BackgroundControllerTest {
             inForeground = inForeground,
             shouldHandOff = { gate?.invoke(); allow },
             startService = { events += "service"; serviceStarts },
+            stopService = { events += "stopService" },
             onHandOff = { events += "handOff" },
             onQuiet = { events += "quiet" },
         )
@@ -116,5 +117,43 @@ class BackgroundControllerTest {
         assertEquals(0, h.connection.disconnects)
         c.onServiceEnded(second)
         assertEquals(1, h.connection.disconnects)
+    }
+
+    @Test
+    fun everyKindSwitchedOffInBackgroundStopsTheService() = runTest(UnconfinedTestDispatcher()) {
+        val h = Harness()
+        val c = h.controller(this)
+        c.onBackground().join()
+        val handedOff = c.generation
+        h.allow = false // the last notification kind went off
+        c.reevaluate().join()
+        assertEquals(listOf("startBackground", "stop"), h.connection.calls)
+        assertEquals(listOf("service", "handOff", "stopService", "quiet"), h.events)
+        c.onServiceEnded(handedOff) // that service's onDestroy: already quiet, no second stop
+        assertEquals(1, h.connection.disconnects)
+    }
+
+    @Test
+    fun kindSwitchedBackOnInBackgroundHandsOffAgain() = runTest(UnconfinedTestDispatcher()) {
+        val h = Harness(allow = false)
+        val c = h.controller(this)
+        c.onBackground().join()
+        assertEquals(listOf("quiet"), h.events)
+        h.allow = true
+        c.reevaluate().join()
+        assertEquals(listOf("stop", "startBackground"), h.connection.calls)
+        assertEquals(listOf("quiet", "service", "handOff"), h.events)
+        c.reevaluate().join() // unchanged policy: nothing more
+        assertEquals(listOf("quiet", "service", "handOff"), h.events)
+    }
+
+    @Test
+    fun reevaluateInForegroundDoesNothing() = runTest(UnconfinedTestDispatcher()) {
+        val h = Harness(allow = false)
+        val c = h.controller(this)
+        c.onForeground()
+        c.reevaluate().join()
+        assertEquals(listOf("start"), h.connection.calls)
+        assertTrue(h.events.isEmpty())
     }
 }

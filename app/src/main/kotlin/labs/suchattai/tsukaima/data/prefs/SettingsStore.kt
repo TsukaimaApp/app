@@ -21,7 +21,10 @@ data class NotificationPrefs(
     /** "Hermes finished the task" when a reply completes while the app is in the background. */
     val replies: Boolean = true,
     val alerts: Boolean = true,
-)
+) {
+    /** False when every kind is off: nothing would be posted, so the app does not stay connected in the background. */
+    val anyOn: Boolean get() = approvals || pairing || replies || alerts
+}
 
 data class Settings(
     val serverUrl: String = "",
