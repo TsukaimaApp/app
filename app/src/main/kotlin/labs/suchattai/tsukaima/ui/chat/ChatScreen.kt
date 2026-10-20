@@ -1,6 +1,8 @@
 package labs.suchattai.tsukaima.ui.chat
 
 import android.content.ClipData
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +29,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -60,6 +63,8 @@ class ChatActions(
     val onInput: (String) -> Unit = {},
     val onSend: () -> Unit = {},
     val onAttach: () -> Unit = {},
+    val onRemoveAttachment: (String) -> Unit = {},
+    val onRetryAttachment: (String) -> Unit = {},
     val onApprove: (String) -> Unit = {},
     val onDeny: (String) -> Unit = {},
     val onClarify: (id: String, answers: Map<String, String?>) -> Unit = { _, _ -> },
@@ -99,6 +104,10 @@ fun ChatScreen(
     }
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
+    val resolver = LocalContext.current.contentResolver
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) vm.attach(uris.map { ContentPickedFile(resolver, it) })
+    }
     LaunchedEffect(vm) { vm.closed.collect { onDeleted() } }
     ChatContent(
         state = state,
@@ -108,7 +117,9 @@ fun ChatScreen(
         actions = ChatActions(
             onInput = vm::setInput,
             onSend = vm::send,
-            onAttach = vm::attach,
+            onAttach = { picker.launch(arrayOf("*/*")) },
+            onRemoveAttachment = vm::removeAttachment,
+            onRetryAttachment = vm::retryAttachment,
             onApprove = vm::approve,
             onDeny = vm::deny,
             onClarify = vm::answerClarify,
@@ -172,6 +183,10 @@ fun ChatContent(
             onSend = actions.onSend,
             onAttach = actions.onAttach,
             enabled = !state.offline,
+            canSend = state.canSend,
+            attachments = state.attachments,
+            onRemoveAttachment = actions.onRemoveAttachment,
+            onRetryAttachment = actions.onRetryAttachment,
         )
     }
     ChatSheets(state, actions)
@@ -197,7 +212,7 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
     ) {
         items(items, key = { it.id }, contentType = { it::class }) { item ->
             when (item) {
-                is ChatItem.UserMessage -> UserBubble(item.text)
+                is ChatItem.UserMessage -> UserBubble(item.text, attachments = item.attachments)
                 is ChatItem.AssistantMessage -> AssistantMessage(item.text, item.streaming, item.reasoning)
                 is ChatItem.ToolCall -> ToolRow(item)
                 is ChatItem.Approval -> ApprovalCard(

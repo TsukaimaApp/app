@@ -101,6 +101,33 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
             put("last_seen", lastSeen)
         })
 
+    /**
+     * Uploads a non-image file into the session workspace (`file.attach` with the bytes as a [dataUrl]); the
+     * result's `ref_text` (`@file:…`) goes into the prompt text.
+     */
+    suspend fun attachFile(sessionId: String, dataUrl: String, name: String): FileAttached =
+        decode("file.attach", rpc("file.attach", buildJsonObject {
+            put("session_id", sessionId)
+            put("data_url", dataUrl)
+            put("name", name)
+        }))
+
+    /** Queues an image (raw base64, no `data:` prefix) for the session's next turn (`image.attach_bytes`). */
+    suspend fun attachImage(sessionId: String, contentBase64: String, filename: String): ImageAttached =
+        decode("image.attach_bytes", rpc("image.attach_bytes", buildJsonObject {
+            put("session_id", sessionId)
+            put("content_base64", contentBase64)
+            put("filename", filename)
+        }))
+
+    /** Drops a queued image ([path] as `image.attach_bytes` returned it) before the next turn. */
+    suspend fun detachImage(sessionId: String, path: String) {
+        rpc("image.detach", buildJsonObject {
+            put("session_id", sessionId)
+            put("path", path)
+        })
+    }
+
     /** Returns whether the answer was enqueued on a live connection ([RpcTransport.respond]). */
     fun respondApproval(requestId: String, choice: ApprovalChoice): Boolean =
         transport.respond(requestId, buildJsonObject { put("choice", JsonPrimitive(choice.wire)) })

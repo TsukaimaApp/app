@@ -54,8 +54,9 @@ object ChatReducer {
         text: String,
         localId: String,
         flair: () -> String = ThinkingFlair::next,
+        attachments: List<String> = emptyList(),
     ): ChatState = state.copy(
-        items = state.items + ChatItem.UserMessage(localId, text),
+        items = state.items + ChatItem.UserMessage(localId, text, attachments),
         status = AgentStatus.Thinking(flair()),
     )
 

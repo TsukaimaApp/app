@@ -46,6 +46,23 @@ data class SessionSummary(
     val source: String? = null,
 )
 
+/** `file.attach` result (gateway-contract `FileAttachResult`). */
+@Serializable
+data class FileAttached(
+    val attached: Boolean = false,
+    val name: String = "",
+    val path: String = "",
+    @SerialName("ref_text") val refText: String = "",
+)
+
+/** `image.attach_bytes` result (`AttachedImageResult`); [path] is what `image.detach` takes. */
+@Serializable
+data class ImageAttached(
+    val attached: Boolean = false,
+    val path: String = "",
+    val message: String? = null,
+)
+
 /** Answer to an `approval` server request; [wire] is the exact string the server expects. */
 @Suppress("EnumEntryName")
 enum class ApprovalChoice(val wire: String) {

@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import labs.suchattai.tsukaima.data.gateway.ApprovalChoice
@@ -43,6 +44,7 @@ class ChatViewModel(
     private val backend: ChatBackend,
     private val storedSessionId: String?,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
+    private val io: CoroutineDispatcher = Dispatchers.IO,
     private val flair: () -> String = ThinkingFlair::next,
 ) : ViewModel() {
     private val session = GatewaySession(backend.transport) { backend.settings.value?.profile }
@@ -63,6 +65,10 @@ class ChatViewModel(
     private var userCounter = 0L
     private val sync = ChatReconnector(
         session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), storedSessionId, flair, _state,
+    )
+
+    private val attachments = ChatAttachments(
+        session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), io, _state, ::liveSession,
     )
 
     private val chat get() = _state.value.chat
@@ -161,28 +167,45 @@ class ChatViewModel(
 
     fun setInput(text: String) = _state.update { it.copy(input = text) }
 
+    /** Sends the typed text with the ready attachments ([Attachments.promptText]); see [ChatUiState.canSend]. */
     fun send() {
+        if (!_state.value.canSend) return
         val text = _state.value.input.trim()
-        if (text.isEmpty() || _state.value.offline) return
         val live = chat.liveSessionId ?: return backend.toast("Still connecting to Hermes")
+        val sent = attachments.takeReady()
         val localId = "u-l${++userCounter}"
-        _state.update { it.copy(input = "", chat = ChatReducer.onSubmitted(it.chat, text, localId, flair)) }
+        _state.update {
+            it.copy(input = "", chat = ChatReducer.onSubmitted(it.chat, text, localId, flair, sent.map(PendingAttachment::name)))
+        }
         launch {
             try {
-                session.submit(live, text)
+                session.submit(live, Attachments.promptText(text, sent))
+                attachments.sent(sent)
             } catch (c: CancellationException) {
                 throw c
             } catch (e: Exception) {
-                // Undo the optimistic bubble: the text goes back to the composer, so a retry must not duplicate it.
+                // Undo the optimistic bubble: text and attachments go back to the composer for a retry.
                 setChat { c -> c.copy(items = c.items.filterNot { it.id == localId }, status = unlessOffline(c.status, AgentStatus.Idle)) }
                 _state.update { if (it.input.isEmpty()) it.copy(input = text) else it }
+                attachments.restore(sent)
                 backend.toast("Message not sent: ${e.message ?: "gateway error"}")
             }
         }
     }
 
-    /** Attach is not built yet (upload into the workspace is a later task). */
-    fun attach() = backend.toast("Attachments aren’t supported yet")
+    /** Uploads picked files at once (creating the session first if needed); see [ChatAttachments]. */
+    fun attach(files: List<PickedFile>) = attachments.attach(files)
+
+    fun removeAttachment(localId: String) = attachments.remove(localId)
+
+    fun retryAttachment(localId: String) = attachments.retry(localId)
+
+    /** The live session id; opens (creates or resumes) the session first and waits for it when there is none. */
+    private suspend fun liveSession(): String? {
+        chat.liveSessionId?.let { return it }
+        open()
+        return withTimeoutOrNull(OPEN_WAIT_MS) { _state.map { it.chat.liveSessionId }.filterNotNull().first() }
+    }
 
     fun interrupt() {
         val live = chat.liveSessionId ?: return
@@ -359,4 +382,9 @@ class ChatViewModel(
             failure?.let { backend.toast("$it: ${e.message ?: "gateway error"}") }
             false
         }
+
+    private companion object {
+        /** How long an attachment waits for the session to open before failing (retry is offered). */
+        const val OPEN_WAIT_MS = 30_000L
+    }
 }

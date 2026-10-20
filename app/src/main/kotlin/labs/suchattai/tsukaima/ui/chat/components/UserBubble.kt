@@ -1,6 +1,9 @@
 package labs.suchattai.tsukaima.ui.chat.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -19,9 +22,12 @@ import labs.suchattai.tsukaima.ui.theme.tsukaima
 
 private val BubbleShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 6.dp)
 
-/** Right-aligned user message: pale lavender fill, 6dp tail corner, at most 82 % of the width. */
+/**
+ * Right-aligned user message: pale lavender fill, 6dp tail corner, at most 82 % of the width. [attachments]
+ * (names of files sent with it) are listed under the text in caption style.
+ */
 @Composable
-fun UserBubble(text: String, modifier: Modifier = Modifier) {
+fun UserBubble(text: String, modifier: Modifier = Modifier, attachments: List<String> = emptyList()) {
     val colors = MaterialTheme.tsukaima
     BoxWithConstraints(
         modifier = modifier
@@ -29,21 +35,26 @@ fun UserBubble(text: String, modifier: Modifier = Modifier) {
             .padding(horizontal = Dimens.gutter, vertical = 4.dp),
         contentAlignment = Alignment.CenterEnd,
     ) {
-        Text(
-            text = text,
-            style = TsukaimaType.body,
-            color = colors.ink1,
+        Column(
             modifier = Modifier
                 .widthIn(max = maxWidth * 0.82f)
                 .background(colors.accentWash, BubbleShape)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
-        )
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            if (text.isNotBlank() || attachments.isEmpty()) Text(text = text, style = TsukaimaType.body, color = colors.ink1)
+            attachments.forEach { name ->
+                Text(name, style = TsukaimaType.caption, color = colors.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
     }
 }
 
 @Composable
 private fun UserBubblePreview(dark: Boolean) = PreviewPage(dark) {
     UserBubble("Restart the agent and tail the logs.")
+    UserBubble("What is the first line?", attachments = listOf("notes.txt", "screenshot.png"))
+    UserBubble("", attachments = listOf("photo.jpg"))
     UserBubble("A much longer message that should wrap well before it reaches the left edge of the screen, keeping the 82 percent cap.")
 }
 

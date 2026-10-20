@@ -11,6 +11,7 @@ import kotlinx.coroutines.job
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.serialization.json.JsonObject
@@ -140,7 +141,7 @@ class ChatViewModelTest {
     }
 
     private fun vm(b: FakeBackend, storedId: String? = null) =
-        ChatViewModel(b, storedId, dispatcher = dispatcher, flair = { "flair" }).also { created += it }
+        ChatViewModel(b, storedId, dispatcher = dispatcher, io = dispatcher, flair = { "flair" }).also { created += it }
 
     private fun ev(type: String, seq: Long?, payload: String = "{}", session: String = live) =
         Frame.Event(type, session, seq, obj(payload))
@@ -445,6 +446,218 @@ class ChatViewModelTest {
         assertEquals("srq-c", card.id)
         assertFalse(card.answered)
         assertEquals(AgentStatus.Question, vm.state.value.status)
+    }
+
+    private class FakeFile(private val name: String, private val mime: String?, val bytes: ByteArray, private val size: Long? = bytes.size.toLong()) : PickedFile {
+        override fun describe() = FileInfo(name, mime, size)
+        override fun open() = java.io.ByteArrayInputStream(bytes)
+    }
+
+    private val notes = FakeFile("notes.txt", "text/plain", "line one\nline two\nline three\n".toByteArray())
+    private val png = FakeFile("shot.png", "image/png", byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 1, 2, 3))
+
+    private fun FakeBackend.cannedAttach() {
+        transport.on(
+            "file.attach",
+            obj("""{"attached":true,"name":"notes.txt","path":"/w/attachments/notes.txt","ref_path":"attachments/notes.txt","ref_text":"@file:attachments/notes.txt","uploaded":true}"""),
+        )
+        transport.on("image.attach_bytes", obj("""{"attached":true,"path":"/h/images/upload_1.png","count":1,"width":1,"height":1}"""))
+    }
+
+    @Test
+    fun attachFileUploadsAndAppendsRef() = runTest(dispatcher) {
+        val b = backend().apply { cannedAttach() }
+        val vm = vm(b)
+        advanceUntilIdle()
+
+        vm.attach(listOf(notes))
+        advanceUntilIdle()
+
+        val params = b.transport.last("file.attach")
+        assertEquals(setOf("session_id", "data_url", "name"), params.keys)
+        assertEquals(live, params["session_id"]!!.jsonPrimitive.content)
+        assertEquals("notes.txt", params["name"]!!.jsonPrimitive.content)
+        val dataUrl = params["data_url"]!!.jsonPrimitive.content
+        assertTrue(dataUrl, dataUrl.startsWith("data:text/plain;base64,"))
+        assertEquals(
+            "line one\nline two\nline three\n",
+            String(java.util.Base64.getDecoder().decode(dataUrl.substringAfter(","))),
+        )
+        val chip = vm.state.value.attachments.single()
+        assertEquals(AttachmentStatus.Ready, chip.status)
+        assertEquals(AttachmentKind.File, chip.kind)
+        assertEquals("@file:attachments/notes.txt", chip.refText)
+
+        vm.setInput("hi")
+        vm.send()
+        advanceUntilIdle()
+        // Desktop buildContextText: refs joined by "\n", then a blank line, then the typed text.
+        assertEquals("@file:attachments/notes.txt\n\nhi", b.transport.last("prompt.submit")["text"]!!.jsonPrimitive.content)
+        assertTrue(vm.state.value.attachments.isEmpty())
+        val bubble = vm.state.value.chat.items.single() as ChatItem.UserMessage
+        assertEquals("hi", bubble.text)
+        assertEquals(listOf("notes.txt"), bubble.attachments)
+    }
+
+    @Test
+    fun attachImageQueuesNoTextRef() = runTest(dispatcher) {
+        val b = backend().apply { cannedAttach() }
+        val vm = vm(b)
+        advanceUntilIdle()
+
+        vm.attach(listOf(png))
+        advanceUntilIdle()
+        val params = b.transport.last("image.attach_bytes")
+        assertEquals(setOf("session_id", "content_base64", "filename"), params.keys)
+        assertEquals(java.util.Base64.getEncoder().encodeToString(png.bytes), params["content_base64"]!!.jsonPrimitive.content)
+        assertEquals("shot.png", params["filename"]!!.jsonPrimitive.content)
+        val chip = vm.state.value.attachments.single()
+        assertEquals(AttachmentKind.Image, chip.kind)
+        assertEquals(AttachmentStatus.Ready, chip.status)
+        assertEquals("/h/images/upload_1.png", chip.serverPath)
+        assertNull(chip.refText)
+        assertFalse("file.attach" in b.transport.methods())
+
+        assertTrue(vm.state.value.canSend)
+        vm.send() // no text: the image alone goes with a stock prompt, and no @file ref
+        advanceUntilIdle()
+        assertEquals("See the attached image.", b.transport.last("prompt.submit")["text"]!!.jsonPrimitive.content)
+        assertTrue(vm.state.value.attachments.isEmpty())
+    }
+
+    @Test
+    fun oversizedAttachmentRejected() = runTest(dispatcher) {
+        assertFalse(Attachments.tooLarge(Attachments.MAX_BYTES.toLong()))
+        assertTrue(Attachments.tooLarge(Attachments.MAX_BYTES + 1L))
+        assertFalse("unknown size: checked while reading", Attachments.tooLarge(null))
+        // A 12 MB file must still fit OkHttp's 16 MiB WebSocket send queue once base64-encoded in its frame.
+        assertTrue((Attachments.MAX_BYTES + 2L) / 3 * 4 + 1024 < 16L * 1024 * 1024)
+
+        val b = backend().apply { cannedAttach() }
+        val vm = vm(b)
+        advanceUntilIdle()
+        val big = ByteArray(Attachments.MAX_BYTES + 1)
+        vm.attach(listOf(FakeFile("big.bin", "application/octet-stream", big)))
+        vm.attach(listOf(FakeFile("sizeless.bin", null, big, size = null))) // caught while reading
+        advanceUntilIdle()
+        assertEquals(listOf("File too large (max 12 MB)", "File too large (max 12 MB)"), b.toasts)
+        assertTrue(vm.state.value.attachments.isEmpty())
+        assertFalse("file.attach" in b.transport.methods())
+    }
+
+    @Test
+    fun removeImageCallsDetach() = runTest(dispatcher) {
+        val b = backend().apply { cannedAttach() }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.attach(listOf(png, notes))
+        advanceUntilIdle()
+        val (image, file) = vm.state.value.attachments
+
+        vm.removeAttachment(image.localId)
+        advanceUntilIdle()
+        val params = b.transport.last("image.detach")
+        assertEquals(setOf("session_id", "path"), params.keys)
+        assertEquals(live, params["session_id"]!!.jsonPrimitive.content)
+        assertEquals("/h/images/upload_1.png", params["path"]!!.jsonPrimitive.content)
+
+        vm.removeAttachment(file.localId) // a file stays in the workspace: dropped locally only
+        advanceUntilIdle()
+        assertEquals(1, b.transport.methods().count { it == "image.detach" })
+        assertTrue(vm.state.value.attachments.isEmpty())
+    }
+
+    @Test
+    fun sendDisabledWithoutTextOrReadyAttachment() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val b = backend().apply {
+            cannedAttach()
+            transport.gateNext["file.attach"] = gate
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        assertFalse(vm.state.value.canSend)
+        vm.setInput("   ")
+        assertFalse(vm.state.value.canSend)
+        vm.send()
+        advanceUntilIdle()
+        assertFalse("prompt.submit" in b.transport.methods())
+
+        vm.attach(listOf(notes))
+        advanceUntilIdle()
+        assertEquals(AttachmentStatus.Uploading, vm.state.value.attachments.single().status)
+        assertFalse("an upload in flight holds Send", vm.state.value.canSend)
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertTrue(vm.state.value.canSend)
+
+        vm.setInput("hello")
+        assertTrue(vm.state.value.canSend)
+        b.hermes.value = HermesState(reachable = false)
+        advanceUntilIdle()
+        assertFalse(vm.state.value.canSend)
+    }
+
+    @Test
+    fun failedUploadKeepsChipWithRetry() = runTest(dispatcher) {
+        val b = backend().apply {
+            cannedAttach()
+            transport.failNext["file.attach"] = null
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.attach(listOf(notes))
+        advanceUntilIdle()
+        val chip = vm.state.value.attachments.single()
+        assertEquals(AttachmentStatus.Failed, chip.status)
+        assertTrue(b.toasts.any { it.startsWith("Couldn’t attach notes.txt") })
+        assertFalse(vm.state.value.canSend)
+
+        vm.retryAttachment(chip.localId)
+        advanceUntilIdle()
+        assertEquals(AttachmentStatus.Ready, vm.state.value.attachments.single().status)
+        assertEquals(2, b.transport.methods().count { it == "file.attach" })
+    }
+
+    @Test
+    fun attachWaitsForTheSessionToOpen() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val b = backend().apply {
+            cannedAttach()
+            transport.gateNext["session.create"] = gate
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        assertNull(vm.state.value.chat.liveSessionId)
+
+        vm.attach(listOf(notes))
+        runCurrent() // not advanceUntilIdle: virtual time would run out the 30 s wait for the session
+        assertEquals(AttachmentStatus.Uploading, vm.state.value.attachments.single().status)
+        assertFalse("file.attach" in b.transport.methods())
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(listOf("session.create", "file.attach"), b.transport.methods().filter { it == "session.create" || it == "file.attach" })
+        assertEquals(live, b.transport.last("file.attach")["session_id"]!!.jsonPrimitive.content)
+        assertEquals(AttachmentStatus.Ready, vm.state.value.attachments.single().status)
+    }
+
+    @Test
+    fun failedSubmitKeepsAttachments() = runTest(dispatcher) {
+        val b = backend().apply {
+            cannedAttach()
+            transport.failNext["prompt.submit"] = null
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.attach(listOf(notes))
+        advanceUntilIdle()
+        vm.setInput("hi")
+        vm.send()
+        advanceUntilIdle()
+        assertEquals("hi", vm.state.value.input)
+        assertEquals(listOf(AttachmentStatus.Ready), vm.state.value.attachments.map { it.status })
+        assertTrue(vm.state.value.chat.items.isEmpty())
     }
 
     @Test

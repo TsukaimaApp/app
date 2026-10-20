@@ -25,12 +25,22 @@ data class ChatUiState(
     val decisions: Map<String, Boolean> = emptyMap(),
     /** Opened as a new chat (no stored session id in the route). */
     val isNew: Boolean = true,
+    /** Composer attachments; kept across rotation (VM), lost with the process. */
+    val attachments: List<PendingAttachment> = emptyList(),
 ) {
     /** What the status line shows. */
     val status: AgentStatus get() = gatewayStatus ?: chat.status
 
     /** Server unreachable or socket down: history stays visible, the composer is disabled. */
     val offline: Boolean get() = gatewayStatus == AgentStatus.Offline || chat.status == AgentStatus.Offline
+
+    /**
+     * Send is live with text or a ready attachment, while no upload is in flight (an image landing after the
+     * submit would ride along with the next turn instead) and Hermes is reachable.
+     */
+    val canSend: Boolean
+        get() = !offline && attachments.none { it.status == AttachmentStatus.Uploading } &&
+            (input.isNotBlank() || attachments.any { it.status == AttachmentStatus.Ready })
 
     /** A new chat with nothing in it yet (shows the working-directory picker). */
     val empty: Boolean get() = isNew && chat.items.isEmpty() && !loading

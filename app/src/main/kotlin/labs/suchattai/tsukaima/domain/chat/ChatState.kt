@@ -8,7 +8,8 @@ enum class ToolStatus { Running, Done, Failed }
 sealed interface ChatItem {
     val id: String
 
-    data class UserMessage(override val id: String, val text: String) : ChatItem
+    /** [attachments]: names of the files sent with the message (local echo only; history shows the text). */
+    data class UserMessage(override val id: String, val text: String, val attachments: List<String> = emptyList()) : ChatItem
 
     data class AssistantMessage(
         override val id: String,

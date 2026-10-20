@@ -77,3 +77,15 @@ Every decision the build controller made on the user's behalf, in order, with wh
 - Task 19: minor (deferred → final fix wave): chat approve ignores respond() enqueue result (card may show answered when unsent); "Open to review"/API29-30 fallback opens last chat, not the requesting session (should deep-link by stored session id)
 - Task 19: minor (deferred → final fix wave): GatewayService first{it} collector not relaunched per onStartCommand — after a stale-stop race a newer hand-off has no watcher (service lingers until timeout)
 - FINAL fix wave re-review: all addressed, no new Critical/Important. minor (later): I5 snapshot-vs-new-approval race during resume; no cooldown after 429 on re-login; GatewaySession.list(200) dead code; clarify hint lost when backgrounded; squash 5d9b414+2fc8e12 for bisectability.
+
+## v0.2.0 rulings (clarify picker + attachments)
+
+- Ruling: "Skip" on a clarify card replies `{}`, not `{"answers": null}` — the contract's `ClarifyResult` says a response without `answers` is cancel-all, the TUI's Esc path sends `{}`, and `server_requests.resolve` treats `{"answers": null}` as outcome `submitted` (empty), not `cancelled` — cost if wrong: one constant.
+- Ruling: multi-select answers are `JSON.stringify([...picked, other])` (compact JSON array string), empty → null — ui-tui `prompts.tsx lockPicked` — cost if wrong: the agent sees a JSON string instead of a list.
+- Ruling: a clarify with no askable question (no qid/question text) is cancelled at once in `ServerRequestRouter` with `{}`, as the TUI does, instead of leaving the agent waiting 300 s.
+- Ruling: clarify notifications have no buttons (tap opens the asking chat) and are not tracked in `postedApprovals`, so a background disconnect does not cancel them (the tap resumes the chat, which re-adopts the open request).
+- Ruling: attachment cap is 12 MB, not 16 MB — the bytes travel base64-encoded in one WebSocket text frame, and OkHttp's `RealWebSocket` closes the socket when a send would push its queue past 16 MiB (16 MB → ~21.3 MB base64). Server caps are higher (images 25 MB, WS frame 384 MiB). Toast "File too large (max 12 MB)" — cost if wrong: users cannot attach 12–16 MB files.
+- Ruling: prompt text with file refs follows Hermes desktop `buildContextText`: refs joined by "\n", a blank line, then the typed text (`@file:a\n\nhi`), not text-first — cost if wrong: refs ordering only (both resolve).
+- Ruling: Send is held while any upload is in flight — an image queued after `prompt.submit` would silently ride along with the next turn instead.
+- Ruling: images are those Hermes can queue (png/jpeg/gif/webp/bmp by MIME); anything else (HEIC included) is uploaded with `file.attach`. The image filename gets a matching extension, since the server picks the type from the suffix.
+- Ruling: an image removed while still uploading is detached as soon as its upload lands.
