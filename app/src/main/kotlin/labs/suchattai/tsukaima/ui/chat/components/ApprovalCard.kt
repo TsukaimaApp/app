@@ -91,20 +91,34 @@ fun ApprovalCard(
         )
         val revealed = remember(item.command) { CommandText.reveal(item.command) }
         var expanded by rememberSaveable(item.id) { mutableStateOf(false) }
-        var overflows by remember(item.command) { mutableStateOf(false) }
+        // null = not measured yet; fail closed so Approve is never live before the layout is known.
+        var hiddenLines by remember(item.command) { mutableStateOf<Int?>(null) }
+        val blocked = !expanded && hiddenLines != 0
         Text(
             text = revealed.text,
             style = TsukaimaType.mono,
             color = colors.codeInk,
             maxLines = if (expanded) Int.MAX_VALUE else CommandMaxLines,
-            overflow = TextOverflow.Clip,
-            onTextLayout = { if (!expanded) overflows = it.hasVisualOverflow },
+            overflow = TextOverflow.Ellipsis,
+            onTextLayout = { layout ->
+                if (!expanded) {
+                    hiddenLines = if (!layout.hasVisualOverflow) {
+                        0
+                    } else {
+                        val text = revealed.text
+                        val end = layout.getLineEnd(layout.lineCount - 1, visibleEnd = false).coerceIn(0, text.length)
+                        val total = text.count { it == '\n' } + 1
+                        val shown = text.substring(0, end).count { it == '\n' } + 1
+                        maxOf(1, total - shown)
+                    }
+                }
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .background(colors.codeBg, TsukaimaShapes.code)
                 .padding(horizontal = 12.dp, vertical = 10.dp),
         )
-        if (overflows || expanded) {
+        if (expanded || (hiddenLines ?: 0) > 0) {
             Text(
                 text = if (expanded) "Show less" else "Show all",
                 style = TsukaimaType.caption,
@@ -114,6 +128,15 @@ fun ApprovalCard(
                     .clickable(role = Role.Button) { expanded = !expanded }
                     .padding(horizontal = 4.dp)
                     .wrapContentHeight(Alignment.CenterVertically),
+            )
+        }
+        if (blocked && (hiddenLines ?: 0) > 0) {
+            val n = hiddenLines ?: 0
+            Text(
+                text = "$n more ${if (n == 1) "line" else "lines"} hidden \u2014 Show all to approve",
+                style = TsukaimaType.caption,
+                color = colors.warn,
+                modifier = Modifier.padding(top = 2.dp),
             )
         }
         if (revealed.hadHiddenChars) {
@@ -144,7 +167,7 @@ fun ApprovalCard(
                 )
             }
             GhostButton("Deny", onDeny, tone = Tone.Danger, enabled = !item.answered)
-            PrimaryButton("Approve", onApprove, icon = IconName.Check, enabled = !item.answered)
+            PrimaryButton("Approve", onApprove, icon = IconName.Check, enabled = !item.answered && !blocked)
         }
     }
 }
