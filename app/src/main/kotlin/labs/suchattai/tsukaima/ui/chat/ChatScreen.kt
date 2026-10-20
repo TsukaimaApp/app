@@ -41,6 +41,10 @@ import kotlinx.coroutines.launch
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.ChatReducer
+import labs.suchattai.tsukaima.ui.components.PickerSheet
+import labs.suchattai.tsukaima.ui.components.PickerNode
+import labs.suchattai.tsukaima.domain.chat.ModelTree
+import labs.suchattai.tsukaima.domain.chat.ModelEntry
 import labs.suchattai.tsukaima.domain.chat.ChatState
 import labs.suchattai.tsukaima.domain.chat.ClarifyQuestion
 import labs.suchattai.tsukaima.domain.chat.ToolStatus
@@ -363,7 +367,7 @@ internal fun messageItems(state: ChatUiState, actions: ChatActions): List<MenuIt
 @Composable
 private fun ChatSheets(state: ChatUiState, actions: ChatActions, overflow: List<MenuItem>) {
     val dismiss = { actions.onMenu(null) }
-    MenuSheet(state.menu == ChatMenu.Model, dismiss, modelItems(state, actions))
+    PickerSheet(state.menu == ChatMenu.Model, dismiss, "Model", modelNodes(state, actions))
     MenuSheet(state.menu == ChatMenu.Workspace, dismiss, workspaceItems(state, actions))
     MenuSheet(state.menu == ChatMenu.Overflow && overflow.isNotEmpty(), dismiss, overflow)
     MenuSheet(state.menu == ChatMenu.Reasoning, dismiss, reasoningItems(state, actions))
@@ -399,17 +403,25 @@ private fun ChatSheets(state: ChatUiState, actions: ChatActions, overflow: List<
     }
 }
 
-/** Providers → models, check on the current one. Unauthenticated providers are left out. */
-private fun modelItems(state: ChatUiState, actions: ChatActions): List<MenuItem> {
-    val providers = state.models?.providers.orEmpty().filter { it.authenticated != false }
-    val labelled = providers.size > 1
-    val items = providers.flatMap { p ->
-        p.models.map { m ->
-            val current = m == state.model && (state.provider == null || state.provider == p.slug)
-            MenuItem(if (labelled) "$m · ${p.name ?: p.slug}" else m, null, checked = current) { actions.onModel(p.slug, m) }
+/**
+ * Provider → model → flavor ([ModelTree]), check on the current one at every level. A lone provider skips its
+ * level; a model without flavors picks directly.
+ */
+private fun modelNodes(state: ChatUiState, actions: ChatActions): List<PickerNode> {
+    val providers = ModelTree.build(state.models?.providers.orEmpty())
+    fun current(slug: String, model: String) = model == state.model && (state.provider == null || state.provider == slug)
+    fun modelNode(slug: String, entry: ModelEntry): PickerNode =
+        if (entry.flavors.isEmpty()) {
+            PickerNode.Leaf(entry.base, checked = current(slug, entry.base)) { actions.onModel(slug, entry.base) }
+        } else {
+            PickerNode.Group(entry.base, entry.flavors.map { f -> PickerNode.Leaf(f.label, checked = current(slug, f.model)) { actions.onModel(slug, f.model) } })
         }
+    val nodes = when (providers.size) {
+        0 -> emptyList()
+        1 -> providers.single().let { p -> p.models.map { modelNode(p.slug, it) } }
+        else -> providers.map { p -> PickerNode.Group(p.name, p.models.map { modelNode(p.slug, it) }) }
     }
-    return items.ifEmpty { listOf(MenuItem(if (state.models == null) "Loading models…" else "No models available", null) {}) }
+    return nodes.ifEmpty { listOf(PickerNode.Leaf(if (state.models == null) "Loading models…" else "No models available") {}) }
 }
 
 private fun workspaceItems(state: ChatUiState, actions: ChatActions): List<MenuItem> {

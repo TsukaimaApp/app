@@ -3,6 +3,14 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.5.4 — 2026-10-20 (versionCode 10)
+
+### Fixed
+- The model picker scrolls (it listed every model of every provider in one unscrollable column) and is now a
+  drill-down: provider → model → flavor. `melious/deepseek-v4.1-flash:speed` is picked as melious →
+  deepseek-v4.1-flash → speed; a model without `:flavor` variants picks directly; a single provider skips its
+  level. Every bottom-sheet menu scrolls when it is taller than the screen.
+
 ## 0.5.3 — 2026-10-20 (versionCode 9)
 
 ### Fixed
