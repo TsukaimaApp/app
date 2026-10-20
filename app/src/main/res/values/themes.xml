@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Tsukaima" parent="android:Theme.Material.NoActionBar" />
+    <style name="Theme.Tsukaima" parent="android:Theme.Material.NoActionBar">
+        <!-- Page cream: avoids the dark flash before Compose draws. -->
+        <item name="android:windowBackground">#F7F4ED</item>
+    </style>
 </resources>
