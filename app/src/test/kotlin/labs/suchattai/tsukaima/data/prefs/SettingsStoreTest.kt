@@ -52,6 +52,7 @@ class SettingsStoreTest {
             materialYou = true,
             lastSessionId = "abc",
             onboarded = true,
+            askedNotifications = true,
         )
         store.update { full }
         assertEquals(full, store.settings.first())

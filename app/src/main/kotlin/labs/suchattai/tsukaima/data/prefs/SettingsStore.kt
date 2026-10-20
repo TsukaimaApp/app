@@ -22,6 +22,8 @@ data class Settings(
     val materialYou: Boolean = false,
     val lastSessionId: String? = null,
     val onboarded: Boolean = false,
+    /** Whether the app has already asked for `POST_NOTIFICATIONS` (asked once, after onboarding). */
+    val askedNotifications: Boolean = false,
 )
 
 class SettingsStore(private val dataStore: DataStore<Preferences>) {
@@ -40,6 +42,7 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             prefs[MATERIAL_YOU] = next.materialYou
             prefs.putOrRemove(LAST_SESSION_ID, next.lastSessionId)
             prefs[ONBOARDED] = next.onboarded
+            prefs[ASKED_NOTIFICATIONS] = next.askedNotifications
         }
     }
 
@@ -64,6 +67,7 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             materialYou = this[MATERIAL_YOU] ?: defaults.materialYou,
             lastSessionId = this[LAST_SESSION_ID],
             onboarded = this[ONBOARDED] ?: defaults.onboarded,
+            askedNotifications = this[ASKED_NOTIFICATIONS] ?: defaults.askedNotifications,
         )
     }
 
@@ -78,5 +82,6 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
         val MATERIAL_YOU = booleanPreferencesKey("material_you")
         val LAST_SESSION_ID = stringPreferencesKey("last_session_id")
         val ONBOARDED = booleanPreferencesKey("onboarded")
+        val ASKED_NOTIFICATIONS = booleanPreferencesKey("asked_notifications")
     }
 }

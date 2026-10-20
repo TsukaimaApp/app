@@ -71,6 +71,7 @@ class ConnectionManager(
     private val creds: CredentialStore,
     private val scope: CoroutineScope,
     private val pollMs: Long = 20_000,
+    private val backgroundPollMs: Long = 60_000,
     private val now: () -> Long = System::currentTimeMillis,
     private val logger: (String, Throwable?) -> Unit = { _, _ -> },
 ) {
@@ -80,6 +81,9 @@ class ConnectionManager(
     private val lock = Any()
     private var poll = Poll()
     private var pollJob: Job? = null
+
+    /** Wait between polls: [pollMs] after [start], [backgroundPollMs] after [startBackground]. */
+    @Volatile private var intervalMs = pollMs
 
     /**
      * Bumped by every [start] that launches a loop and by every [stop]. A loop iteration only touches the
@@ -126,14 +130,28 @@ class ConnectionManager(
 
     /**
      * Starts polling and gateway management (idempotent). The first call also starts the one long-lived
-     * collector of [GatewayClient.serverRequests], which [stop] does not cancel.
+     * collector of [GatewayClient.serverRequests], which [stop] does not cancel. If a background loop is
+     * running it is kept and switched to the foreground interval, polling at once.
      */
-    fun start() {
+    fun start() = run(pollMs)
+
+    /**
+     * Like [start], for the foreground service while the app is in the background: keeps the gateway
+     * connected but polls status every [backgroundPollMs] instead of [pollMs].
+     */
+    fun startBackground() = run(backgroundPollMs)
+
+    private fun run(interval: Long) {
         if (forwarding.compareAndSet(false, true)) {
             scope.launch { gateway.serverRequests.collect { _serverRequests.emit(it) } }
         }
         synchronized(lock) {
-            if (pollJob?.isActive == true) return
+            val faster = interval < intervalMs
+            intervalMs = interval
+            if (pollJob?.isActive == true) {
+                if (faster) wake.trySend(Unit) // back in the foreground: refresh now, not in up to a minute
+                return
+            }
             val gen = ++generation
             pollJob = scope.launch {
                 settings.filterNotNull().first() // cold start: wait for DataStore, never poll with defaults
@@ -152,7 +170,7 @@ class ConnectionManager(
                     } catch (e: Exception) {
                         logger("connection: poll iteration failed", e)
                     }
-                    withTimeoutOrNull(pollMs) { wake.receive() }
+                    withTimeoutOrNull(intervalMs) { wake.receive() }
                 }
             }
         }

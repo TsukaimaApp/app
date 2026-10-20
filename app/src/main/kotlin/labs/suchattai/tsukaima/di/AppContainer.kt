@@ -9,6 +9,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -26,9 +27,13 @@ import labs.suchattai.tsukaima.data.prefs.EncryptedCredentialStore
 import labs.suchattai.tsukaima.data.prefs.LazyCredentialStore
 import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.data.prefs.SettingsStore
+import labs.suchattai.tsukaima.data.gateway.ConnectionState
+import labs.suchattai.tsukaima.notifications.AndroidNotificationPoster
+import labs.suchattai.tsukaima.notifications.AnsweredRequestIds
+import labs.suchattai.tsukaima.notifications.ApprovalAnswerer
+import labs.suchattai.tsukaima.notifications.NotificationHub
 import labs.suchattai.tsukaima.ui.components.ToastState
 import okhttp3.OkHttpClient
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
@@ -141,7 +146,32 @@ class AppContainer(context: Context) {
      * [ConnectionManager.serverRequests] replays recent requests to late subscribers, so each consumer skips
      * ids in this set and adds the id when it answers.
      */
-    val answeredRequestIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    val answeredRequestIds = AnsweredRequestIds()
+
+    /** True while some activity is started (ProcessLifecycle STARTED); set by [labs.suchattai.tsukaima.TsukaimaApp]. */
+    val inForeground = MutableStateFlow(false)
+
+    /** Posts and cancels notifications for the five background events; started by the application. */
+    val notifications = NotificationHub(
+        scope = appScope,
+        serverRequests = connection.serverRequests,
+        events = gateway.events,
+        hermes = connection.hermes,
+        answered = answeredRequestIds,
+        cronJobs = { repository.cronJobs() },
+        pairing = { repository.pairing() },
+        poster = AndroidNotificationPoster(appContext),
+        foreground = { inForeground.value },
+        logger = { m, t -> Log.w(TAG, m, t) },
+    )
+
+    /** Answers approvals from notification buttons, by srq id only, at most once. */
+    val approvalAnswerer = ApprovalAnswerer(
+        transport = gateway,
+        answered = answeredRequestIds,
+        connected = { gateway.state.value == ConnectionState.Connected },
+        cancel = notifications::cancel,
+    )
 
     private companion object {
         const val TAG = "Tsukaima"

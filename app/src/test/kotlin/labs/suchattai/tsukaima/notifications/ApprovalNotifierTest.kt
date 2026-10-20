@@ -1,0 +1,124 @@
+package labs.suchattai.tsukaima.notifications
+
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import labs.suchattai.tsukaima.data.gateway.Frame
+import labs.suchattai.tsukaima.domain.chat.AgentStatus
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ApprovalNotifierTest {
+    private fun approval(id: String, command: String, tool: String = "terminal") = Frame.ServerRequest(
+        id = id,
+        method = "approval",
+        params = buildJsonObject {
+            put("session_id", "live-1")
+            put("request_id", "r-1")
+            put("command", command)
+            put("tool_name", tool)
+        },
+    )
+
+    @Test
+    fun approvalSpecHasApproveAndDenyActionsWithRequestId() {
+        val spec = ApprovalNotifier.forApproval(approval("srq-7", "rm -rf build"))
+        assertEquals(Channels.APPROVALS, spec.channel)
+        assertEquals("srq-7".hashCode(), spec.id)
+        assertEquals("Hermes wants to run a tool", spec.title)
+        assertEquals("rm -rf build", spec.text)
+        assertEquals(listOf("Approve", "Deny"), spec.actions.map { it.label })
+        val approve = spec.actions[0]
+        val deny = spec.actions[1]
+        assertEquals(ApprovalNotifier.ACTION_APPROVE, approve.intentAction)
+        assertEquals(ApprovalNotifier.ACTION_DENY, deny.intentAction)
+        // Only the server-request id and the choice travel in the intent.
+        assertEquals(mapOf(ApprovalNotifier.EXTRA_SRQ_ID to "srq-7", ApprovalNotifier.EXTRA_CHOICE to "once"), approve.extras)
+        assertEquals(mapOf(ApprovalNotifier.EXTRA_SRQ_ID to "srq-7", ApprovalNotifier.EXTRA_CHOICE to "deny"), deny.extras)
+    }
+
+    @Test
+    fun gatewaySpecOnlyForStoppedOrOffline() {
+        assertNull(ApprovalNotifier.forGateway(AgentStatus.Idle))
+        assertNull(ApprovalNotifier.forGateway(AgentStatus.Replying))
+        assertNull(ApprovalNotifier.forGateway(null))
+        val stopped = ApprovalNotifier.forGateway(AgentStatus.Stopped)
+        val offline = ApprovalNotifier.forGateway(AgentStatus.Offline)
+        assertNotNull(stopped)
+        assertNotNull(offline)
+        assertEquals(Channels.GATEWAY, stopped!!.channel)
+        assertEquals(ApprovalNotifier.GATEWAY_ID, stopped.id)
+        assertEquals(ApprovalNotifier.GATEWAY_ID, offline!!.id)
+        assertEquals("Gateway stopped", stopped.title)
+        assertTrue(stopped.actions.isEmpty())
+    }
+
+    @Test
+    fun taskDoneUsesSessionTitle() {
+        val spec = ApprovalNotifier.forTaskDone("Fix the nginx config", sessionId = "live-1")
+        assertEquals(Channels.AGENT, spec.channel)
+        assertEquals("Fix the nginx config", spec.title)
+        assertEquals("Hermes finished the task", spec.text)
+        val untitled = ApprovalNotifier.forTaskDone(null, sessionId = "live-2")
+        assertEquals("Hermes finished the task", untitled.title)
+    }
+
+    @Test
+    fun approvalSpecRevealsHiddenCharacters() {
+        val spec = ApprovalNotifier.forApproval(approval("srq-8", "ls ‮txt.exe"))
+        assertTrue(spec.text.contains("⟨U+202E⟩"))
+        assertFalse(spec.text.contains("‮"))
+        assertTrue(spec.text.endsWith(" (hidden characters)"))
+
+        val long = ApprovalNotifier.forApproval(approval("srq-9", "x".repeat(500)))
+        assertEquals(201, long.text.length)
+        assertTrue(long.text.endsWith("…"))
+
+        val longHidden = ApprovalNotifier.forApproval(approval("srq-10", "​" + "y".repeat(500)))
+        assertTrue(longHidden.text.endsWith("… (hidden characters)"))
+    }
+
+    @Test
+    fun noActionsWithoutSrqId() {
+        val blank = ApprovalNotifier.forApproval(approval("", "rm -rf /"))
+        assertTrue(blank.actions.isEmpty())
+        assertEquals("rm -rf /", blank.text)
+        // A resume's synthetic pending-approval id is not a server-request id: never answerable from here.
+        val pending = ApprovalNotifier.forApproval(approval("pending-r-1", "rm -rf /"))
+        assertTrue(pending.actions.isEmpty())
+    }
+
+    @Test
+    fun pairingSpecApprovesByPlatformAndRequestId() {
+        val entry = buildJsonObject {
+            put("platform", "telegram")
+            put("request_id", "p-1")
+            put("user_id", "42")
+            put("user_name", "alice")
+            put("age_minutes", 3)
+        }
+        val spec = ApprovalNotifier.forPairing(entry)!!
+        assertEquals(Channels.PAIRING, spec.channel)
+        assertEquals(ApprovalNotifier.pairingId("telegram", "p-1"), spec.id)
+        assertTrue(spec.text.contains("alice"))
+        assertEquals(listOf("Approve"), spec.actions.map { it.label })
+        assertEquals(
+            mapOf(ApprovalNotifier.EXTRA_PLATFORM to "telegram", ApprovalNotifier.EXTRA_REQUEST_ID to "p-1"),
+            spec.actions.single().extras,
+        )
+        assertNull(ApprovalNotifier.forPairing(JsonObject(mapOf("user_id" to JsonPrimitive("1")))))
+    }
+
+    @Test
+    fun cronFailedNamesTheJob() {
+        val spec = ApprovalNotifier.forCronFailed("nightly backup", jobId = "j1")
+        assertEquals(Channels.AGENT, spec.channel)
+        assertTrue(spec.text.contains("nightly backup"))
+        assertEquals(ApprovalNotifier.cronId("j1"), spec.id)
+    }
+}

@@ -48,6 +48,7 @@ class ConnectionManagerTest {
     private lateinit var settings: MutableStateFlow<Settings?>
     private val managers = mutableListOf<ConnectionManager>()
     private val wsUpgrades = AtomicInteger()
+    private val statusPolls = AtomicInteger()
 
     @Volatile private var statusBody = STATUS_RUNNING
 
@@ -59,7 +60,7 @@ class ConnectionManagerTest {
         server = MockWebServer()
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse = when (request.url.encodedPath) {
-                "/api/status" -> MockResponse.Builder()
+                "/api/status" -> MockResponse.Builder().also { statusPolls.incrementAndGet() }
                     .addHeader("Content-Type", "application/json")
                     .body(statusBody)
                     .build()
@@ -87,7 +88,11 @@ class ConnectionManagerTest {
 
     private val clock = AtomicLong(1_000)
 
-    private fun manager(pollMs: Long = 20_000, credStore: CredentialStore = creds): ConnectionManager {
+    private fun manager(
+        pollMs: Long = 20_000,
+        credStore: CredentialStore = creds,
+        backgroundPollMs: Long = 60_000,
+    ): ConnectionManager {
         val api = HermesApi(okHttp, { settings.value?.serverUrl.orEmpty() }, { settings.value ?: Settings() })
         val gateway = GatewayClient(
             client = okHttp,
@@ -96,7 +101,11 @@ class ConnectionManagerTest {
             scope = scope,
             backoffMs = listOf(20L),
         )
-        return ConnectionManager(api, gateway, settings, credStore, scope, pollMs, now = { clock.incrementAndGet() })
+        return ConnectionManager(
+            api, gateway, settings, credStore, scope, pollMs,
+            backgroundPollMs = backgroundPollMs,
+            now = { clock.incrementAndGet() },
+        )
             .also { managers += it }
     }
 
@@ -258,6 +267,10 @@ class ConnectionManagerTest {
                     )
                 }
             }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                webSocket.close(1000, null) // finish the handshake so the server can shut down promptly
+            }
         }
         creds.save("pw", "tok", serverUrl())
         val cm = manager()
@@ -271,6 +284,32 @@ class ConnectionManagerTest {
         assertEquals("srq-1", req.id)
         assertEquals("approval", req.method)
         assertEquals(1, cm.serverRequests.replayCache.size)
+    }
+
+    @Test
+    fun backgroundModeKeepsGatewayAndPollsSlower() = runBlocking<Unit> {
+        wsListener = object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                if (method(text) == "client.capabilities") webSocket.send(READY)
+            }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                webSocket.close(1000, null) // finish the handshake so the server can shut down promptly
+            }
+        }
+        creds.save("pw", "tok", serverUrl())
+        val cm = manager(pollMs = 50, backgroundPollMs = 60_000)
+        cm.startBackground()
+        await { cm.hermes.first { it.connection == ConnectionState.Connected } }
+        delay(400)
+        assertEquals("background polls every 60 s, not every 50 ms", 1, statusPolls.get())
+
+        cm.start() // back to the foreground: same loop, fast interval, refreshed now
+        await { while (statusPolls.get() < 4) delay(20) }
+        assertEquals(ConnectionState.Connected, cm.hermes.value.connection)
+        assertEquals(1, wsUpgrades.get())
+        cm.stop()
+        await { cm.hermes.first { it.connection == ConnectionState.Disconnected } }
     }
 
     @Test
