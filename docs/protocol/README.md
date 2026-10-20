@@ -76,6 +76,9 @@ profile other than `default` is active.
 | `image.attach_bytes` | `session_id*`, `content_base64*`, `filename` | `attached`, `path`, `name`, `width`, `height` (queued for the next turn) |
 | `image.detach` | `session_id*`, `path*` | – |
 | `approval.respond` | `session_id*`, `choice`, `request_id` | – (RPC fallback for a resume's `pending_approval`, which has no `srq-…` id) |
+| `config.set` | `session_id`, `key*`, `value*`, `scope`, `confirm_expensive_model` | `key`, `value` (+ `warning`, `confirm_required`, `confirm_message`, `scope`, `deferred` for `model`); see §4 |
+| `session.usage` | `session_id*` | the `usage` object (see §4) |
+| `session.compress` | `session_id*`, `focus_topic` | `status`, `summary{headline,…}`, `info`, `usage`, `messages`, … (see §4) |
 
 Note: the REST `/api/sessions` list and `session.list` return the **stored** id. Live sessions have a
 separate short `session_id`; events carry the **live** id. Keep both.
@@ -89,6 +92,8 @@ Observed in a real turn, in order:
 `tool.start {tool_id, name, context, args}` → `tool.complete {tool_id, name, args, duration_s, result:{output, exit_code, error}}` →
 `session.usage {usage}` → `message.delta {text}` (visible reply chunks) → `reasoning.available {text}` →
 `message.complete {text, usage}` → `session.info` → `sessions.changed {}` (global, `session_id:""`).
+v0.5.0 also handles `session.usage`, `session.info` (`usage`, `reasoning_effort`), `subagent.*`, `tool.output_risk`,
+`session.resume_progress`, `notification.show`, `sessions.changed` and `platforms.changed` (shapes in §4).
 
 Also: `turn.error {message,…}`, `message.interim {text, already_streamed}` (commentary beside tool calls; when
 `already_streamed` is false the text never came as `message.delta`, so the app shows it as its own completed
@@ -136,7 +141,9 @@ All need the bearer header unless marked public. Management endpoints accept `?p
 | `GET /api/system/stats` | `hostname`, `os`, `hermes_version`, `cpu_count`, `memory{total,available,…}`, … |
 | `POST /api/gateway/start` / `stop` / `restart` | `{"ok":true,"pid":…,"name":"gateway-start"}`; state flips within ~5 s. |
 | `GET /api/sessions?limit=N&archived=…&exclude_sources=…` | `{"sessions":[{id,title,preview,source,started_at,ended_at,message_count,model,archived,profile,…}]}`. `limit` must be `0..100` (422 otherwise; the app clamps). `archived` = `exclude` (default) / `only` / `include`; `exclude_sources` is a comma list (the drawer sends `archived=include&exclude_sources=cron`). |
-| `GET /api/sessions/search?q=` | FTS search. |
+| `GET /api/sessions/search?q=&limit=20` | `{"results":[…]}`: session-id matches, then FTS over message text, then titles; rows are session rows plus `snippet` (`>>>`/`<<<` around the match), `role`, `session_id`, `lineage_root`. A blank `q` → `{"results":[]}`. |
+| `GET /api/sessions/{id}` | The raw session row; `archived` is `0`/`1` (a number, not a boolean). |
+| `PUT /api/tools/toolsets/{name}` | `{"enabled":bool}` → `{"ok":true,"name","platform","enabled","post_setup_started"}`; unknown name → 400, missing `enabled` → 422. |
 | `PATCH /api/sessions/{id}` | `{"title":"…"}` → `{"ok":true,"title":"…"}` (also `{"archived":true}`). |
 | `DELETE /api/sessions/{id}` | |
 | `GET /api/model/options` | same shape as RPC `model.options`. `GET /api/model/info` → `{model, provider, effective_context_length}`. |
@@ -167,3 +174,60 @@ All need the bearer header unless marked public. Management endpoints accept `?p
 - The test instance is now pinned to `approvals.mode: manual` so approval UI can be exercised.
 - **HTTPS fronts rename the cookies.** When the dashboard is reached over HTTPS (Tailscale Serve, any TLS reverse proxy) `dashboard_auth/cookies.py` names them `__Host-hermes_session_at` / `__Host-hermes_session_rt` / `__Host-hermes_session_provider` with `Secure`. Verified via `tailscale serve --https=8443 http://127.0.0.1:9119` on the claude VM: login, bearer `/api/auth/me`, ws-ticket and the `wss://…/api/ws` upgrade all work with no `dashboard.public_url` set, because the test instance binds `0.0.0.0` (`_is_accepted_host` then accepts any Host). An instance bound to a specific host needs `dashboard.public_url` set to the Serve origin or Host/WS checks fail. v0.1.x only parsed the unprefixed name, so HTTPS logins failed with "carried no hermes_session_at cookie".
 - **File deliveries (`MEDIA:`).** The agent hands a file to the user by putting a whole line `MEDIA:<path>` in its reply (seen as `MEDIA: /home/…/out/file.txt`, `` MEDIA:`/path with space.pdf` ``, `MEDIA:"/p.pdf"`, `~/…` paths). The dashboard leaves it as prose; the TUI (`ui-tui/src/components/markdown.tsx` `MEDIA_LINE_RE`) and desktop (`apps/desktop/src/lib/chat-messages/parts.ts`) render cards; deliverable extensions are `MEDIA_DELIVERY_EXTS` in `gateway/platforms/base.py`. The bytes come from `GET /api/files/download?path=<absolute or ~/ path>` (bearer, or `?token=`; `hermes_cli/web_routers/files.py`): `200` streamed with `Content-Disposition: attachment; filename="name"` (`filename*=utf-8''…` for non-ASCII names), `Content-Type` from `mimetypes` (fallback `application/octet-stream`) and `Content-Length`. Errors: `401` no auth, `404` missing, `400` directory / relative path / `..`, `403` sensitive path (`.env`, credential dirs), `409` a live SQLite file, `413` over 100 MB. `HEAD` → `405`. Not profile-scoped. `GET /api/files/read?path=` returns the same file as base64 `data_url` JSON (not used for downloads). Verified live: the test agent answered a delivery request with `MEDIA: /home/claude/workspace/output/tsukaima-probe/tsukaima-media-probe.txt`, and the download returned it (94 B, `text/plain; charset=utf-8`).
+
+### v0.5.0 additions (2026-10-20, verified live against 0.22.2)
+
+- **Live model switch**: `config.set {session_id, key:"model", value:"<model> --provider <slug> --session"}` (the
+  desktop picker's format; `tui_gateway/methods_config_set.py::_set_model`, `model_switch.py::_switch_request`). The
+  value is parsed like `/model` (bare name, `vendor/model`, `--provider`, `--session` / `--global` / `--once`). Reply:
+  `{"key":"model","value":"deepseek-v4.1-flash-1017","warning":"","confirm_required":false,"confirm_message":"","scope":"session"}`,
+  followed by a `session.info` event. While a turn runs the pick is queued: `{…,"deferred":true}` (applied at the
+  next turn start; a dropped queued pick arrives as `notification.show {key:"model_switch.dropped", level:"warn"}`).
+  A model the selection guards flag answers `confirm_required:true` with `confirm_message` and switches nothing;
+  re-send with `confirm_expensive_model:true`. An unknown provider → error 5001 ("Unknown provider 'nope'…"). Without
+  `--session` the server may persist the pick as the profile default (`resolve_persist_behavior`); the app always
+  sends `--session`. There is no `session.info` RPC (-32601); the info arrives as events and in create/resume.
+- **Reasoning effort**: `config.set {session_id, key:"reasoning", value}` with no `scope` is session-scoped
+  (`scope:"global"` would write `agent.reasoning_effort`). Values: `none` (off), `minimal`, `low`, `medium`, `high`,
+  `xhigh`, `max`, `ultra`; reply `{"key":"reasoning","value":"low"}` and a `session.info` with
+  `reasoning_effort:"low"`, `reasoning_effort_wire:"low"`. `bogus` → error 4002 "unknown reasoning value". The words
+  `show`/`hide`/`full`/`clamp` are display settings that write config.yaml — never sent by the app.
+- **`session.info`** (event; also `info` of create/resume) carries `reasoning_effort` (`""` = provider default,
+  `none` = off) and `usage`. A lazy session's info (create, cold resume) has only `model`, `cwd`, `tools`, `skills`,
+  `lazy`… — usage and effort appear with the first built-agent `session.info`.
+- **Usage**: `usage` objects (`message.complete.usage`, `session.usage {usage}`, `session.info.usage`, RPC
+  `session.usage {session_id}` → the object itself) look like
+  `{"model","input":15882,"output":4,"reasoning":0,"prompt":31498,"completion":4,"total":31502,"calls":2,"context_used":15754,"context_max":1000000,"context_percent":2,"context_source":"provider_usage","context_estimated":false,"compressions":0,"cache_hit_pct":50,"avg_latency_s":0.9,"avg_tps":2.3,"active_subagents":0}`.
+  `total` is cumulative over the session; `context_*` is the current window occupancy. The `session.usage` event is a
+  1 s ticker during a turn and only fires when counters change (a short turn may emit none).
+  `session.context_breakdown {session_id}` → `{categories:[{id,label,tokens,color}], context_max, context_percent,
+  context_used, estimated_total, context_estimated, context_source, context_files, model}` (not used by the app).
+- **Compaction**: `session.compress {session_id, focus_topic?}` (idle-gated: 4009 while a turn runs) →
+  `{status:"compressed"|"aborted"|"pending", removed, before_messages, after_messages, before_tokens, after_tokens,
+  summary:{noop, aborted, refused_would_grow, headline, token_line, note}, usage, info, messages}`; a lock held
+  elsewhere answers `{compressed:false, lock_held:true, message}`. A refused compression is still
+  `status:"compressed"` with `summary.noop:true` and a headline saying why ("Compression refused (summary would grow
+  the conversation): 8 messages preserved"). During it the server emits `status.update {kind:"compressing"|"compacting"|"warn"|"status", text}`
+  and `sessions.changed`. `info.stored_session_id` names the stored id after compaction (it can rotate). The summary
+  is a model call: the app gives the RPC 11 min (`compression.context_total_ceiling_seconds` is 600 s).
+- **`subagent.*`** (`spawn_requested`, `start`, `progress`, `thinking`, `tool`, `complete`; `text` is for watch
+  windows): `{goal, task_count, task_index, subagent_id, parent_id?, child_session_id, delegation_id, depth, model,
+  tool_count, toolsets[], text?, tool_preview?, status?, summary?, input_tokens?, output_tokens?, duration_seconds?}`;
+  `complete.status` ∈ `completed`/`failed`/`error`/`timeout`/`interrupted`. Observed: a background delegation's
+  `tool.complete` (`result.status:"dispatched"`) and the turn's `message.complete` came **before** the child's
+  `subagent.start/thinking/complete`, then `status.update {kind:"process", text:"Subagent Task Completed: …"}`.
+- **`tool.output_risk`** `{tool_id, name, risk:"low"|…, findings:[str], redacted:bool}` (only with
+  `display.tool_progress` on; not observed live). **`session.resume_progress`** `{phase:"history",
+  status:"loading"|"complete"|"failed", message_count?, message?}` — only for deferred resumes (`defer_history`), which
+  the app does not use. **`notification.show`** `{text, level:"info"|"warn"|"error"|"success", kind:"sticky"|"ttl"|"agent",
+  ttl_ms, key, id}`, withdrawn by `notification.clear {key}`.
+- **Global change events**: `sessions.changed {}` (twice per turn in the probe, and on compaction) and
+  `platforms.changed {}`, both with `session_id:""`.
+- **Archived sessions**: `PATCH /api/sessions/{id} {"archived":true}` → `{"ok":true,"title":…,"archived":true}`; an
+  archived session still resumes normally (`session.resume` works and does not unarchive it); `{"archived":false}`
+  restores it.
+- **Toolset toggle side effect**: the first `PUT /api/tools/toolsets/{name}` rewrites
+  `platform_toolsets.<platform>` from the preset (`["hermes-cli"]`) into an explicit list of the enabled toolsets (and
+  records `known_*_toolsets`), so later Hermes releases' new default toolsets are not auto-enabled for that
+  platform. Toggling back on does not restore the preset.
+

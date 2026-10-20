@@ -3,12 +3,16 @@
 Native Android client (Kotlin + Jetpack Compose) for a self-hosted [Hermes Agent](https://github.com/NousResearch/hermes-agent).
 Chat with your agent, browse sessions, manage cron jobs, and get actionable notifications from your phone.
 
-Version **0.4.0** (versionCode 5). Changes per release: [`CHANGELOG.md`](CHANGELOG.md).
+Version **0.5.0** (versionCode 6). Changes per release: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Features
 
 - Streaming chat over the Hermes JSON-RPC WebSocket: replies, reasoning, tool calls, mid-turn commentary
 - **Stop** a running turn from the composer (or the chat's overflow menu)
+- **Live model switch** for the open chat (session-scoped; mid-turn picks apply at the next turn), **reasoning
+  effort**, a context meter in the status line ("42% ctx · 12.3k tok") and **Compact context**
+- **Retry** a failed send from its bubble; long-press a message to **copy** its text or reasoning
+- Subagent (delegation) rows, a risk note on flagged tool output, archived chats read-only with **Unarchive**
 - Tool approvals in chat: Deny / Approve, plus "Approve for…" this session or always when the server allows it
 - Answer the agent's **clarify** questions (choices, multi-select, free text) in chat
 - **Masked prompts**: a `sudo` password, a skill's secret or a password-manager unlock, typed into a hidden
@@ -17,12 +21,13 @@ Version **0.4.0** (versionCode 5). Changes per release: [`CHANGELOG.md`](CHANGEL
 - **File deliveries**: the agent's `MEDIA:` lines become file cards with image previews; tap to save to
   Downloads and open
 - Resume a running chat with the reply streamed so far; replay missed events after a reconnect
-- Sessions drawer: filter, rename, archive, delete; working-directory and model pickers
+- Sessions drawer: server-side **search**, rename, archive, delete, live refresh; working-directory and model pickers
 - Cron job management (create, edit, pause/resume, run now)
-- Status home: gateway state, platforms, start/stop/restart
-- Settings sections: Hermes instance (sign in / **sign out**), profile, model, skills, toolsets, pairing,
-  diagnostics (logs, usage), theme
-- Actionable approval notifications, question and password prompts, gateway alerts via a foreground service
+- Status home: gateway state, platforms (live refresh), start/stop/restart
+- Settings sections: Hermes instance (sign in / **sign out**), profile, model, skills and **toolsets** (both
+  toggleable), pairing (revoke with confirmation), **notifications** (per kind), diagnostics (logs, usage), theme
+- Actionable approval notifications, question and password prompts, finished replies, gateway-down and
+  cron-failed alerts via a foreground service; each kind can be switched off
 - HTTPS fronts (Tailscale Serve or any TLS reverse proxy) as well as plain `http://` on a tailnet
 - Light/dark themes, Material You option, wide (tablet/foldable) pane layout
 

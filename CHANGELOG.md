@@ -3,6 +3,42 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.5.0 — 2026-10-20 (versionCode 6)
+
+The Tier 2 batch of the completeness pass ([`docs/superpowers/2026-10-20-completeness-pass.md`](docs/superpowers/2026-10-20-completeness-pass.md)).
+
+### Added
+- **Live model switch**: the chat's model sheet switches the open session (`config.set key=model`, value
+  `"<model> --provider <slug> --session"`) and saves the pair for new chats once the server took it. A switch
+  picked mid-turn applies at the next turn ("Model switches when this turn ends"); server advice (`warning`) is
+  toasted; a model the server's guards flag (`confirm_required`) asks for confirmation first. Without a live
+  session the pick still only applies to the next chat. The v0.4.0 close-and-re-create of an empty chat is gone.
+- **Reasoning effort** in the chat overflow ("Reasoning · Low"): Off, Minimal … Ultra, session-scoped
+  (`config.set key=reasoning`); the current value comes from `session.info.reasoning_effort`.
+- **Context meter** in the chat's status line ("2% ctx · 31.5k tok") from `session.usage`, `message.complete`
+  and `session.info` `usage`; **Compact context** in the overflow (`session.compress`, between turns), with
+  "Compacting context…" in the status line and the server's headline as a toast.
+- **Archived chats are read-only**: a banner above the disabled composer with **Unarchive**
+  (`PATCH /api/sessions/{id} {archived:false}`); the overflow offers Unarchive instead of Archive.
+- **Retry a failed send**: the bubble stays, marked "Not sent", with Retry (same text and attachments) and
+  Dismiss (back into the composer).
+- **Copy a message**: long-press a user or assistant bubble → Copy text / Copy reasoning.
+- **Subagent rows** for `subagent.*` events (goal, running / finished / failed, latest progress, summary).
+- `tool.output_risk` shows an amber "Output flagged: … risk" note under the tool row; `session.resume_progress`
+  shows under the loading skeleton; `notification.show` notices are toasted once.
+- **Drawer search** through `GET /api/sessions/search` (2+ characters, 300 ms debounce); the list returns when the
+  query is cleared.
+- **Live refresh**: `sessions.changed` reloads the drawer and `platforms.changed` the Status screen, debounced
+  1 s, only while on screen.
+- **Notification settings**: approvals and questions, pairing, finished replies, gateway and cron alerts, each
+  switchable. Cron failures now also cover `delivery_failed`, `blocked_config` and `timeout`.
+- **Toolsets are toggleable** in Settings (`PUT /api/tools/toolsets/{name}`), optimistic with revert.
+- Pairing **Revoke** asks for confirmation and toasts a refusal.
+
+### Changed
+- The e2e smoke also GETs `/api/sessions/search` and `/api/sessions/{id}` and round-trips `config.set key=model`
+  with the session's own model.
+
 ## 0.4.0 — 2026-10-20 (versionCode 5)
 
 The Tier 1 batch of the completeness pass ([`docs/superpowers/2026-10-20-completeness-pass.md`](docs/superpowers/2026-10-20-completeness-pass.md)).
