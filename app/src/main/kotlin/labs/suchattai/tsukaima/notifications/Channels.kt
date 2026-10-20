@@ -13,6 +13,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import labs.suchattai.tsukaima.MainActivity
+import labs.suchattai.tsukaima.R
 
 /** Notification channel ids and their registration. */
 object Channels {
@@ -59,7 +60,7 @@ class AndroidNotificationPoster(context: Context) : NotificationPoster {
     fun build(spec: NotificationSpec): Notification {
         val open = openApp(spec.openScreen, spec.id, "content", spec.sessionId)
         val builder = NotificationCompat.Builder(context, spec.channel)
-            .setSmallIcon(android.R.drawable.stat_notify_chat)
+            .setSmallIcon(R.drawable.ic_stat_tsukaima)
             .setContentTitle(spec.title)
             .setContentText(spec.text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(spec.text))
@@ -72,7 +73,7 @@ class AndroidNotificationPoster(context: Context) : NotificationPoster {
             builder.setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                 .setPublicVersion(
                     NotificationCompat.Builder(context, spec.channel)
-                        .setSmallIcon(android.R.drawable.stat_notify_chat)
+                        .setSmallIcon(R.drawable.ic_stat_tsukaima)
                         .setContentTitle(ApprovalNotifier.PUBLIC_TITLE)
                         .build(),
                 )
