@@ -12,16 +12,11 @@ import kotlinx.coroutines.flow.map
 enum class ThemeMode { Warm, Dark, System }
 
 /**
- * Where voice mode recognises speech: [Phone] = the platform recogniser (live partials); [Server] = one WAV per
- * utterance uploaded to Hermes' `/api/audio/transcribe` relay (its configured STT, Whisper).
+ * Where voice mode runs, both ways: [Phone] = the platform recogniser (live partials) and text-to-speech engine
+ * (voice language setting); [Server] = each utterance uploaded to Hermes' `/api/audio/transcribe` relay and each reply
+ * sentence synthesised by its `/api/audio/speak` (its configured STT and TTS and their language settings), played here.
  */
-enum class VoiceRecognition { Phone, Server }
-
-/**
- * Where voice mode speaks replies: [Phone] = the platform text-to-speech engine (voice language setting); [Server] =
- * each sentence synthesised by Hermes' `/api/audio/speak` (its configured TTS and its language settings), played here.
- */
-enum class VoiceOutput { Phone, Server }
+enum class VoiceProcessing { Phone, Server }
 
 /**
  * Which kinds of notification the app posts (Settings → Notifications); all on by default. Android's own channel
@@ -63,10 +58,8 @@ data class Settings(
      * system default.
      */
     val voiceLanguage: String? = null,
-    /** Where voice mode recognises speech; read when a voice session opens. */
-    val voiceRecognition: VoiceRecognition = VoiceRecognition.Phone,
-    /** Where voice mode speaks replies; read when a voice session opens. */
-    val voiceOutput: VoiceOutput = VoiceOutput.Phone,
+    /** Where voice mode recognises speech and speaks replies; read when a voice session opens. */
+    val voiceProcessing: VoiceProcessing = VoiceProcessing.Phone,
 )
 
 class SettingsStore(private val dataStore: DataStore<Preferences>) {
@@ -93,8 +86,8 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             prefs.putOrRemove(ASSIST_SESSION_ID, next.assistSessionId)
             if (next.assistSessionAt == null) prefs.remove(ASSIST_SESSION_AT) else prefs[ASSIST_SESSION_AT] = next.assistSessionAt
             prefs.putOrRemove(VOICE_LANGUAGE, next.voiceLanguage)
-            prefs[VOICE_RECOGNITION] = next.voiceRecognition.name
-            prefs[VOICE_OUTPUT] = next.voiceOutput.name
+            prefs[VOICE_PROCESSING] = next.voiceProcessing.name
+            prefs.remove(LEGACY_VOICE_OUTPUT) // never shipped; its choice is not carried over
         }
     }
 
@@ -129,10 +122,10 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             assistSessionId = this[ASSIST_SESSION_ID],
             assistSessionAt = this[ASSIST_SESSION_AT],
             voiceLanguage = this[VOICE_LANGUAGE],
-            voiceRecognition = this[VOICE_RECOGNITION]?.let { name -> VoiceRecognition.entries.firstOrNull { it.name == name } }
-                ?: defaults.voiceRecognition,
-            voiceOutput = this[VOICE_OUTPUT]?.let { name -> VoiceOutput.entries.firstOrNull { it.name == name } }
-                ?: defaults.voiceOutput,
+            // 0.7.x stored only the recognition choice; it decides until the new key is written.
+            voiceProcessing = (this[VOICE_PROCESSING] ?: this[LEGACY_VOICE_RECOGNITION])
+                ?.let { name -> VoiceProcessing.entries.firstOrNull { it.name == name } }
+                ?: defaults.voiceProcessing,
         )
     }
 
@@ -155,7 +148,12 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
         val ASSIST_SESSION_ID = stringPreferencesKey("assist_session_id")
         val ASSIST_SESSION_AT = longPreferencesKey("assist_session_at")
         val VOICE_LANGUAGE = stringPreferencesKey("voice_language")
-        val VOICE_RECOGNITION = stringPreferencesKey("voice_recognition")
-        val VOICE_OUTPUT = stringPreferencesKey("voice_output")
+        val VOICE_PROCESSING = stringPreferencesKey("voice_processing")
+
+        /** 0.7.x's "Speech recognition" setting (`Phone`/`Server`): read only while [VOICE_PROCESSING] is unset. */
+        val LEGACY_VOICE_RECOGNITION = stringPreferencesKey("voice_recognition")
+
+        /** The unreleased separate speech output setting: removed on the next write. */
+        val LEGACY_VOICE_OUTPUT = stringPreferencesKey("voice_output")
     }
 }

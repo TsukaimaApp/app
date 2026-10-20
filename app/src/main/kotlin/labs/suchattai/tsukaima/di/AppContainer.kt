@@ -40,8 +40,7 @@ import labs.suchattai.tsukaima.data.prefs.LazyCredentialStore
 import labs.suchattai.tsukaima.data.prefs.NotificationPrefs
 import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.data.prefs.SettingsStore
-import labs.suchattai.tsukaima.data.prefs.VoiceOutput
-import labs.suchattai.tsukaima.data.prefs.VoiceRecognition
+import labs.suchattai.tsukaima.data.prefs.VoiceProcessing
 import labs.suchattai.tsukaima.data.gateway.ConnectionState
 import labs.suchattai.tsukaima.notifications.AndroidNotificationPoster
 import labs.suchattai.tsukaima.notifications.AnsweredRequestIds
@@ -179,20 +178,20 @@ class AppContainer(context: Context) {
     val fileSaver: FileSaver = MediaStoreFileSaver(appContext.contentResolver)
 
     /**
-     * A fresh recogniser adapter for one voice session, per the speech recognition setting now: the phone's (each run
+     * A fresh recogniser adapter for one voice session, per the voice processing setting now: the phone's (each run
      * owns its own platform recogniser and reads the voice language) or Hermes' transcription relay.
      */
-    fun speechInput(): SpeechInput = when (settings.value?.voiceRecognition) {
-        VoiceRecognition.Server -> ServerSpeechInput(appContext, transcribe = { audio, mime -> repository.transcribe(audio, mime) })
+    fun speechInput(): SpeechInput = when (settings.value?.voiceProcessing) {
+        VoiceProcessing.Server -> ServerSpeechInput(appContext, transcribe = { audio, mime -> repository.transcribe(audio, mime) })
         else -> AndroidSpeechInput(appContext) { settings.value?.voiceLanguage }
     }
 
     /**
-     * The speech output for one voice session, per the speech output setting now: the phone's TTS engine (shared, see
+     * The speech output for one voice session, per the voice processing setting now: the phone's TTS engine (shared, see
      * [phoneSpeechOutput]) or a fresh player for Hermes' text-to-speech relay.
      */
-    fun speechOutput(): SpeechOutput = when (settings.value?.voiceOutput) {
-        VoiceOutput.Server -> ServerSpeechOutput(appContext, synthesize = { repository.speak(it) })
+    fun speechOutput(): SpeechOutput = when (settings.value?.voiceProcessing) {
+        VoiceProcessing.Server -> ServerSpeechOutput(appContext, synthesize = { repository.speak(it) })
         else -> phoneSpeechOutput
     }
 

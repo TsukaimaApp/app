@@ -1,6 +1,10 @@
 package labs.suchattai.tsukaima.data.prefs
 
+import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import java.io.File
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -15,12 +19,16 @@ class SettingsStoreTest {
     @get:Rule
     val tempDir = TemporaryFolder()
 
-    private fun kotlinx.coroutines.test.TestScope.store() = SettingsStore(
-        PreferenceDataStoreFactory.create(
+    private fun kotlinx.coroutines.test.TestScope.store() = storeWithDataStore().second
+
+    /** The store and its backing DataStore, for tests that seed raw (legacy) keys. */
+    private fun kotlinx.coroutines.test.TestScope.storeWithDataStore(): Pair<DataStore<Preferences>, SettingsStore> {
+        val dataStore = PreferenceDataStoreFactory.create(
             scope = backgroundScope,
             produceFile = { File(tempDir.root, "settings.preferences_pb") },
-        ),
-    )
+        )
+        return dataStore to SettingsStore(dataStore)
+    }
 
     @Test
     fun normalizesServerUrl() = runTest {
@@ -99,23 +107,32 @@ class SettingsStoreTest {
     }
 
     @Test
-    fun voiceRecognitionDefaultsToPhoneAndRoundTrips() = runTest {
+    fun voiceProcessingDefaultsToPhoneAndRoundTrips() = runTest {
         val store = store()
-        assertEquals(VoiceRecognition.Phone, store.settings.first().voiceRecognition)
-        store.update { it.copy(voiceRecognition = VoiceRecognition.Server) }
-        assertEquals(VoiceRecognition.Server, store.settings.first().voiceRecognition)
-        store.update { it.copy(voiceRecognition = VoiceRecognition.Phone) }
-        assertEquals(VoiceRecognition.Phone, store.settings.first().voiceRecognition)
+        assertEquals(VoiceProcessing.Phone, store.settings.first().voiceProcessing)
+        store.update { it.copy(voiceProcessing = VoiceProcessing.Server) }
+        assertEquals(VoiceProcessing.Server, store.settings.first().voiceProcessing)
+        store.update { it.copy(voiceProcessing = VoiceProcessing.Phone) }
+        assertEquals(VoiceProcessing.Phone, store.settings.first().voiceProcessing)
     }
 
     @Test
-    fun voiceOutputDefaultsToPhoneAndRoundTrips() = runTest {
-        val store = store()
-        assertEquals(VoiceOutput.Phone, store.settings.first().voiceOutput)
-        store.update { it.copy(voiceOutput = VoiceOutput.Server) }
-        assertEquals(VoiceOutput.Server, store.settings.first().voiceOutput)
-        assertEquals("the recognition setting is separate", VoiceRecognition.Phone, store.settings.first().voiceRecognition)
-        store.update { it.copy(voiceOutput = VoiceOutput.Phone) }
-        assertEquals(VoiceOutput.Phone, store.settings.first().voiceOutput)
+    fun legacyServerRecognitionMigratesToServerProcessing() = runTest {
+        val (dataStore, store) = storeWithDataStore()
+        dataStore.edit { it[stringPreferencesKey("voice_recognition")] = "Server" } // 0.7.x chose Hermes
+        assertEquals(VoiceProcessing.Server, store.settings.first().voiceProcessing)
+        store.update { it.copy(voiceLanguage = "pl-PL") } // any write persists the migrated value
+        assertEquals("Server", dataStore.data.first()[stringPreferencesKey("voice_processing")])
+        store.update { it.copy(voiceProcessing = VoiceProcessing.Phone) }
+        assertEquals("the new key wins over the legacy one", VoiceProcessing.Phone, store.settings.first().voiceProcessing)
+    }
+
+    @Test
+    fun voiceProcessingIsPhoneWhenNeitherKeyIsSet() = runTest {
+        val (dataStore, store) = storeWithDataStore()
+        dataStore.edit { it[stringPreferencesKey("voice_output")] = "Server" } // unreleased key, ignored
+        assertEquals(VoiceProcessing.Phone, store.settings.first().voiceProcessing)
+        store.update { it }
+        assertNull("the unreleased key is dropped", dataStore.data.first()[stringPreferencesKey("voice_output")])
     }
 }

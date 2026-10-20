@@ -46,8 +46,7 @@ import labs.suchattai.tsukaima.data.api.SkillDto
 import labs.suchattai.tsukaima.data.api.ToolsetDto
 import labs.suchattai.tsukaima.data.prefs.NotificationPrefs
 import labs.suchattai.tsukaima.data.prefs.ThemeMode
-import labs.suchattai.tsukaima.data.prefs.VoiceOutput
-import labs.suchattai.tsukaima.data.prefs.VoiceRecognition
+import labs.suchattai.tsukaima.data.prefs.VoiceProcessing
 import labs.suchattai.tsukaima.diagnostics.CrashRecord
 import labs.suchattai.tsukaima.diagnostics.shareReport
 import labs.suchattai.tsukaima.domain.voice.VoiceLanguages
@@ -93,14 +92,10 @@ class SettingsActions(
     val onVoiceLanguage: (String?) -> Unit = {},
     /** The Language sheet opens: (re)load its options. */
     val onVoiceLanguagesOpen: () -> Unit = {},
-    /** Speech recognition picked: on this phone or on Hermes. */
-    val onVoiceRecognition: (VoiceRecognition) -> Unit = {},
-    /** The speech recognition sheet opens: probe the server's STT model for its label. */
-    val onVoiceRecognitionOpen: () -> Unit = {},
-    /** Speech output picked: on this phone or on Hermes. */
-    val onVoiceOutput: (VoiceOutput) -> Unit = {},
-    /** The speech output sheet opens: probe the server's TTS provider for its label. */
-    val onVoiceOutputOpen: () -> Unit = {},
+    /** Voice processing picked: on this phone or on Hermes. */
+    val onVoiceProcessing: (VoiceProcessing) -> Unit = {},
+    /** The voice processing sheet opens: probe the server's STT and TTS providers for its label. */
+    val onVoiceProcessingOpen: () -> Unit = {},
     /** "Use as device assistant": opens the system's assistant settings. */
     val onAssistant: () -> Unit = {},
     val onTheme: (ThemeMode) -> Unit = {},
@@ -168,10 +163,8 @@ fun SettingsScreen(
             onNotifications = vm::setNotifications,
             onVoiceLanguage = vm::setVoiceLanguage,
             onVoiceLanguagesOpen = vm::loadVoiceLanguages,
-            onVoiceRecognition = vm::setVoiceRecognition,
-            onVoiceRecognitionOpen = vm::loadSttModel,
-            onVoiceOutput = vm::setVoiceOutput,
-            onVoiceOutputOpen = vm::loadTtsProvider,
+            onVoiceProcessing = vm::setVoiceProcessing,
+            onVoiceProcessingOpen = vm::loadVoiceProviders,
             onAssistant = onAssistant,
             onTheme = vm::setTheme,
             onMaterialYou = vm::setMaterialYou,
@@ -198,29 +191,20 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
         onDismiss = { showVoiceLanguages = false },
         items = voiceLanguageItems(state.voiceLanguages, state.voiceLanguage, actions.onVoiceLanguage),
     )
-    var showVoiceRecognition by rememberSaveable { mutableStateOf(false) }
+    var showVoiceProcessing by rememberSaveable { mutableStateOf(false) }
     MenuSheet(
-        visible = showVoiceRecognition,
-        onDismiss = { showVoiceRecognition = false },
+        visible = showVoiceProcessing,
+        onDismiss = { showVoiceProcessing = false },
         items = listOf(
-            MenuItem(PHONE_RECOGNITION, null, checked = state.voiceRecognition == VoiceRecognition.Phone) {
-                actions.onVoiceRecognition(VoiceRecognition.Phone)
+            MenuItem(PHONE_PROCESSING, null, checked = state.voiceProcessing == VoiceProcessing.Phone) {
+                actions.onVoiceProcessing(VoiceProcessing.Phone)
             },
-            MenuItem(serverRecognitionLabel(state.sttModel), null, checked = state.voiceRecognition == VoiceRecognition.Server) {
-                actions.onVoiceRecognition(VoiceRecognition.Server)
-            },
-        ),
-    )
-    var showVoiceOutput by rememberSaveable { mutableStateOf(false) }
-    MenuSheet(
-        visible = showVoiceOutput,
-        onDismiss = { showVoiceOutput = false },
-        items = listOf(
-            MenuItem(PHONE_SPEECH, null, checked = state.voiceOutput == VoiceOutput.Phone) {
-                actions.onVoiceOutput(VoiceOutput.Phone)
-            },
-            MenuItem(serverSpeechLabel(state.ttsProvider), null, checked = state.voiceOutput == VoiceOutput.Server) {
-                actions.onVoiceOutput(VoiceOutput.Server)
+            MenuItem(
+                serverVoiceLabel(state.sttProvider, state.ttsProvider),
+                null,
+                checked = state.voiceProcessing == VoiceProcessing.Server,
+            ) {
+                actions.onVoiceProcessing(VoiceProcessing.Server)
             },
         ),
     )
@@ -387,34 +371,23 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
             }
 
             Section("Voice") {
+                val onHermes = state.voiceProcessing == VoiceProcessing.Server
                 TsukaimaRow(
-                    title = "Speech recognition",
-                    subtitle = if (state.voiceRecognition == VoiceRecognition.Server) serverRecognitionLabel(null) else PHONE_RECOGNITION,
+                    title = "Voice processing",
+                    subtitle = if (onHermes) SERVER_PROCESSING_NOTE else PHONE_PROCESSING,
                     leading = IconName.GraphicEq,
                     trailing = { Chevron() },
                     onClick = {
-                        actions.onVoiceRecognitionOpen()
-                        showVoiceRecognition = true
-                    },
-                    modifier = Modifier.bleed(12.dp),
-                )
-                TsukaimaRow(
-                    title = "Speech output",
-                    subtitle = if (state.voiceOutput == VoiceOutput.Server) SERVER_SPEECH_NOTE else PHONE_SPEECH,
-                    leading = IconName.VolumeUp,
-                    trailing = { Chevron() },
-                    onClick = {
-                        actions.onVoiceOutputOpen()
-                        showVoiceOutput = true
+                        actions.onVoiceProcessingOpen()
+                        showVoiceProcessing = true
                     },
                     modifier = Modifier.bleed(12.dp),
                 )
                 val language = VoiceLanguages.label(state.voiceLanguage, state.voiceLanguages)
-                val anyOnHermes = state.voiceRecognition == VoiceRecognition.Server || state.voiceOutput == VoiceOutput.Server
                 TsukaimaRow(
                     title = "Language",
                     // Hermes' relays carry no language: its own STT and TTS settings decide there.
-                    subtitle = if (anyOnHermes) "$language · phone recognition and speech only" else language,
+                    subtitle = if (onHermes) "$language · phone processing only" else language,
                     leading = IconName.Translate,
                     trailing = { Chevron() },
                     onClick = {
@@ -678,11 +651,8 @@ private fun SupportLightPreview() = TsukaimaTheme(darkTheme = false) { SupportPr
 @Composable
 private fun SupportDarkPreview() = TsukaimaTheme(darkTheme = true) { SupportPreviewContent() }
 
-/** The speech recognition option for the phone's own recogniser. */
-private const val PHONE_RECOGNITION = "On this phone"
+/** The voice processing option for the phone's own recogniser and text-to-speech engine. */
+private const val PHONE_PROCESSING = "On this phone"
 
-/** The speech output option for the phone's own text-to-speech engine. */
-private const val PHONE_SPEECH = "On this phone"
-
-/** The speech output row's subtitle while Hermes speaks: the voice language setting does not reach its TTS. */
-private const val SERVER_SPEECH_NOTE = "Server voices follow Hermes’s language settings"
+/** The voice processing row's subtitle while Hermes runs voice: the voice language setting does not reach it. */
+private const val SERVER_PROCESSING_NOTE = "Hermes listens and speaks · server voices follow its language settings"

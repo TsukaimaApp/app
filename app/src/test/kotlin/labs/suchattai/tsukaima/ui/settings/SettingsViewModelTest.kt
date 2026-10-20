@@ -27,8 +27,7 @@ import labs.suchattai.tsukaima.data.prefs.InMemoryCredentialStore
 import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.data.prefs.SettingsStore
 import labs.suchattai.tsukaima.data.prefs.ThemeMode
-import labs.suchattai.tsukaima.data.prefs.VoiceOutput
-import labs.suchattai.tsukaima.data.prefs.VoiceRecognition
+import labs.suchattai.tsukaima.data.prefs.VoiceProcessing
 import labs.suchattai.tsukaima.domain.voice.VoiceLanguage
 import labs.suchattai.tsukaima.diagnostics.CrashRecord
 import mockwebserver3.Dispatcher
@@ -208,60 +207,43 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun setVoiceRecognitionPersists() = runBlocking<Unit> {
+    fun setVoiceProcessingPersists() = runBlocking<Unit> {
         store.update { it.copy(voiceLanguage = "pl-PL") }
         val vm = vm()
         vm.await { it.voiceLanguage == "pl-PL" } // seeded from the store
-        assertEquals(VoiceRecognition.Phone, vm.state.value.voiceRecognition)
-        vm.setVoiceRecognition(VoiceRecognition.Server)
-        assertEquals(VoiceRecognition.Server, awaitStore { it.voiceRecognition == VoiceRecognition.Server }.voiceRecognition)
-        vm.await { it.voiceRecognition == VoiceRecognition.Server }
-        vm.setVoiceRecognition(VoiceRecognition.Phone)
-        awaitStore { it.voiceRecognition == VoiceRecognition.Phone }
-        assertEquals("pl-PL", store.settings.first().voiceLanguage) // the language is kept for phone recognition
+        assertEquals(VoiceProcessing.Phone, vm.state.value.voiceProcessing)
+        vm.setVoiceProcessing(VoiceProcessing.Server)
+        assertEquals(VoiceProcessing.Server, awaitStore { it.voiceProcessing == VoiceProcessing.Server }.voiceProcessing)
+        vm.await { it.voiceProcessing == VoiceProcessing.Server }
+        vm.setVoiceProcessing(VoiceProcessing.Phone)
+        awaitStore { it.voiceProcessing == VoiceProcessing.Phone }
+        vm.await { it.voiceProcessing == VoiceProcessing.Phone }
+        assertEquals("pl-PL", store.settings.first().voiceLanguage) // the language is kept for phone processing
     }
 
     @Test
-    fun setVoiceOutputPersists() = runBlocking<Unit> {
-        val vm = vm()
-        assertEquals(VoiceOutput.Phone, vm.state.value.voiceOutput)
-        vm.setVoiceOutput(VoiceOutput.Server)
-        assertEquals(VoiceOutput.Server, awaitStore { it.voiceOutput == VoiceOutput.Server }.voiceOutput)
-        vm.await { it.voiceOutput == VoiceOutput.Server }
-        assertEquals("recognition is a separate setting", VoiceRecognition.Phone, store.settings.first().voiceRecognition)
-        vm.setVoiceOutput(VoiceOutput.Phone)
-        awaitStore { it.voiceOutput == VoiceOutput.Phone }
-        vm.await { it.voiceOutput == VoiceOutput.Phone }
-    }
-
-    @Test
-    fun ttsProviderProbeNamesTheServerProviderOnlyWhenThereIsOne() = runBlocking<Unit> {
+    fun voiceProviderProbeNamesBothServerProvidersOnlyWhenBothAreKnown() = runBlocking<Unit> {
         snapshot.value = Settings(serverUrl = "http://${hostPort()}")
-        var body = """{"ok":true,"tts":{"mode":"relay","provider":"piper"}}"""
+        var body = """{"ok":true,"stt":{"mode":"relay","provider":"openai","model":"faster-whisper-large-v3"},""" +
+            """"tts":{"mode":"relay","provider":"piper"}}"""
         routes["/api/audio/voice-config"] = { json(body) }
         val vm = vm()
-        vm.loadTtsProvider()
-        assertEquals("piper", vm.await { it.ttsProvider != null }.ttsProvider)
-        assertEquals("On Hermes (piper)", serverSpeechLabel(vm.state.value.ttsProvider))
-        body = """{"ok":true,"tts":{"mode":"relay","reason":"provider 'piper' has no client wire"}}"""
-        vm.loadTtsProvider()
-        assertNull(vm.await { it.ttsProvider == null }.ttsProvider)
-        assertEquals("On Hermes", serverSpeechLabel(null))
-    }
+        vm.loadVoiceProviders()
+        val probed = vm.await { it.ttsProvider != null }
+        assertEquals("openai", probed.sttProvider)
+        assertEquals("piper", probed.ttsProvider)
+        assertEquals("On Hermes (openai · piper)", serverVoiceLabel(probed.sttProvider, probed.ttsProvider))
 
-    @Test
-    fun sttModelProbeNamesTheServerModelOnlyWhenThereIsOne() = runBlocking<Unit> {
-        snapshot.value = Settings(serverUrl = "http://${hostPort()}")
-        var body = """{"ok":true,"stt":{"mode":"relay","provider":"openai","model":"faster-whisper-large-v3","streaming":false}}"""
-        routes["/api/audio/voice-config"] = { json(body) }
-        val vm = vm()
-        vm.loadSttModel()
-        assertEquals("faster-whisper-large-v3", vm.await { it.sttModel != null }.sttModel)
-        assertEquals("On Hermes (faster-whisper-large-v3)", serverRecognitionLabel(vm.state.value.sttModel))
-        body = """{"ok":true,"stt":{"mode":"relay","provider":"none","model":"x"}}"""
-        vm.loadSttModel()
-        assertNull(vm.await { it.sttModel == null }.sttModel)
-        assertEquals("On Hermes (Whisper)", serverRecognitionLabel(null))
+        body = """{"ok":true,"stt":{"mode":"relay","provider":"none"},"tts":{"mode":"relay","provider":"piper"}}"""
+        vm.loadVoiceProviders()
+        val noStt = vm.await { it.sttProvider == null }
+        assertEquals("piper", noStt.ttsProvider)
+        assertEquals("On Hermes", serverVoiceLabel(noStt.sttProvider, noStt.ttsProvider))
+
+        body = """{"ok":true,"stt":{"mode":"relay","provider":"openai"},"tts":{"mode":"relay","reason":"no client wire"}}"""
+        vm.loadVoiceProviders()
+        val noTts = vm.await { it.ttsProvider == null && it.sttProvider != null }
+        assertEquals("On Hermes", serverVoiceLabel(noTts.sttProvider, noTts.ttsProvider))
     }
 
     @Test

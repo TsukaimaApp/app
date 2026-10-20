@@ -47,13 +47,14 @@ when the language pack is missing. Speech uses the system text-to-speech engine;
 only. Both follow one language setting, the system default unless you pick another in Settings → Voice → Language
 or with the translate button on the voice screen.
 
-Settings → Voice → Speech recognition switches recognition to Hermes ("On Hermes"): the phone records one
-utterance at a time, detects the end of speech itself, uploads it as a 16 kHz mono WAV (about 32 kB per second of
-speech, only while the mic is listening) to the dashboard's `/api/audio/transcribe`, and Hermes transcribes it with
-its configured speech-to-text (Whisper). There are no live partial words; the status line shows "Transcribing…"
-until the text arrives. The server picks the language (its STT setting, or auto-detection), so the voice language
-then applies to speech only. Audio is held in memory for one utterance and never saved. The switch applies from the
-next voice session.
+Settings → Voice → Voice processing is one switch for both directions: "On this phone" (above) or "On Hermes".
+On Hermes, the phone records one utterance at a time, detects the end of speech itself, uploads it as Opus (WAV if
+the encoder is unavailable; only while the mic is listening) to the dashboard's `/api/audio/transcribe`, and Hermes
+transcribes it with its configured speech-to-text. There are no live partial words; the status line shows
+"Transcribing…" until the text arrives. Replies are spoken sentence by sentence through `/api/audio/speak` with
+Hermes' configured text-to-speech and played on the phone. Hermes' own language settings decide both ways, so the
+voice language then has no effect. Audio is held in memory for one utterance and never saved. Recognising on one
+side and speaking on the other is not offered. The switch applies from the next voice session.
 
 To use Tsukaima as the device assistant, open Settings → Voice → "Use as device assistant" and pick it in the
 system's assistant picker. Long-press home (or the corner swipe) shows a sheet that handles one exchange per
