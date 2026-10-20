@@ -568,6 +568,55 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun uploadsRunOneAtATime() = runTest(dispatcher) {
+        // Two frames queued at once could exceed OkHttp's 16 MiB send queue and close the socket.
+        val gate = CompletableDeferred<Unit>()
+        val b = backend().apply {
+            cannedAttach()
+            transport.gateNext["image.attach_bytes"] = gate
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.attach(listOf(png, notes))
+        advanceUntilIdle()
+        assertTrue("image.attach_bytes" in b.transport.methods())
+        assertFalse("second upload waits for the first", "file.attach" in b.transport.methods())
+        assertEquals(listOf(AttachmentStatus.Uploading, AttachmentStatus.Uploading), vm.state.value.attachments.map { it.status })
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertTrue("file.attach" in b.transport.methods())
+        assertEquals(listOf(AttachmentStatus.Ready, AttachmentStatus.Ready), vm.state.value.attachments.map { it.status })
+    }
+
+    @Test
+    fun newLiveSessionFailsQueuedImagesSoRetryRequeues() = runTest(dispatcher) {
+        val b = backend().apply { cannedAttach() }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.attach(listOf(png, notes))
+        advanceUntilIdle()
+        assertEquals(live, vm.state.value.attachments.first().liveSessionId)
+
+        // The server session expired: the resume comes back with a different live id.
+        b.transport.on("session.resume", obj(resumeJson.replace(live, "beef0001")))
+        b.transport.on("session.events.since", obj("""{"events":[],"latest_seq":0,"truncated":false,"open_requests":[]}"""))
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+        assertEquals("beef0001", vm.state.value.chat.liveSessionId)
+        val (image, file) = vm.state.value.attachments
+        assertEquals("queued image was left in the old live session", AttachmentStatus.Failed, image.status)
+        assertEquals("a file lives in the workspace, still valid", AttachmentStatus.Ready, file.status)
+
+        vm.retryAttachment(image.localId)
+        advanceUntilIdle()
+        assertEquals("beef0001", b.transport.last("image.attach_bytes")["session_id"]!!.jsonPrimitive.content)
+        assertEquals(AttachmentStatus.Ready, vm.state.value.attachments.first().status)
+        assertEquals("beef0001", vm.state.value.attachments.first().liveSessionId)
+    }
+
+    @Test
     fun sendDisabledWithoutTextOrReadyAttachment() = runTest(dispatcher) {
         val gate = CompletableDeferred<Unit>()
         val b = backend().apply {

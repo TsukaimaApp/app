@@ -83,7 +83,10 @@ class ChatViewModel(
         launch {
             // Lets notifications open the stored session that asked, knowing only its live id.
             _state.map { it.chat.liveSessionId to it.chat.storedSessionId }.distinctUntilChanged().collect { (live, stored) ->
-                if (live != null) backend.bindSession(live, stored)
+                if (live != null) {
+                    backend.bindSession(live, stored)
+                    attachments.onLiveSession(live)
+                }
             }
         }
         open()

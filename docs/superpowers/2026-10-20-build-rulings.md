@@ -89,3 +89,5 @@ Every decision the build controller made on the user's behalf, in order, with wh
 - Ruling: Send is held while any upload is in flight — an image queued after `prompt.submit` would silently ride along with the next turn instead.
 - Ruling: images are those Hermes can queue (png/jpeg/gif/webp/bmp by MIME); anything else (HEIC included) is uploaded with `file.attach`. The image filename gets a matching extension, since the server picks the type from the suffix.
 - Ruling: an image removed while still uploading is detached as soon as its upload lands.
+- v0.2.0 review fixes: uploads run one at a time (`ChatAttachments.uploads` mutex) so two frames can never exceed OkHttp's 16 MiB send queue; a resume that yields a new live session id marks queued (Ready) image chips Failed, since the old session's image queue is gone — retry re-queues them. Deferred (low confidence): a retry after a lost `image.attach_bytes` response can leave two copies queued server-side.
+- HTTPS fronts: the dashboard names its cookies `__Host-hermes_session_at` behind TLS; `HermesApi.parseSessionCookie` accepts the `__Host-`/`__Secure-` prefixes (v0.1.x refused HTTPS logins).

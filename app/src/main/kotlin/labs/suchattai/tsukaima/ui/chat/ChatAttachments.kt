@@ -6,6 +6,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import labs.suchattai.tsukaima.data.gateway.GatewaySession
 import java.io.ByteArrayOutputStream
@@ -18,7 +20,8 @@ enum class AttachmentStatus { Uploading, Ready, Failed }
 
 /**
  * A picked file on its way into the session. Images are queued server-side for the next turn ([serverPath] is
- * what `image.detach` takes); files land in the workspace and the prompt carries their [refText] (`@file:…`).
+ * what `image.detach` takes, in the live session [liveSessionId] that holds the queue); files land in the
+ * workspace and the prompt carries their [refText] (`@file:…`).
  */
 data class PendingAttachment(
     val localId: String,
@@ -28,6 +31,7 @@ data class PendingAttachment(
     val status: AttachmentStatus,
     val serverPath: String? = null,
     val refText: String? = null,
+    val liveSessionId: String? = null,
 )
 
 /** Name, MIME type and size (null when unknown) of a picked file. */
@@ -117,6 +121,13 @@ internal class ChatAttachments(
     private var counter = 0L
     private val sources = mutableMapOf<String, Pair<PickedFile, FileInfo>>()
 
+    /**
+     * One upload at a time: each one is a single WebSocket frame of up to ~16 MB, and OkHttp closes the socket
+     * when queued frames exceed 16 MiB, so two in flight on a slow uplink would drop the connection. Also bounds
+     * peak heap to one file's bytes plus its base64.
+     */
+    private val uploads = Mutex()
+
     fun attach(files: List<PickedFile>) {
         scope.launch {
             for (file in files) {
@@ -153,18 +164,37 @@ internal class ChatAttachments(
         val chip = find(localId) ?: return
         drop(localId)
         // An image still uploading is detached when its upload lands (see [upload]).
-        chip.serverPath?.let { if (chip.kind == AttachmentKind.Image) detach(chip.name, it) }
+        if (chip.kind == AttachmentKind.Image && chip.status == AttachmentStatus.Ready) detach(chip)
     }
 
-    private fun detach(name: String, path: String) {
+    /**
+     * A resume that came back with a different live session id left queued images behind in the old one: mark
+     * them failed so a retry re-queues them where the next turn will run. Files stay valid (workspace paths).
+     */
+    fun onLiveSession(live: String) {
+        state.update { s ->
+            s.copy(
+                attachments = s.attachments.map {
+                    if (it.kind == AttachmentKind.Image && it.status == AttachmentStatus.Ready && it.liveSessionId != live) {
+                        it.copy(status = AttachmentStatus.Failed, serverPath = null, liveSessionId = null)
+                    } else {
+                        it
+                    }
+                },
+            )
+        }
+    }
+
+    private fun detach(chip: PendingAttachment) {
+        val live = chip.liveSessionId ?: return
+        val path = chip.serverPath ?: return
         scope.launch {
-            val live = state.value.chat.liveSessionId ?: return@launch
             try {
                 session.detachImage(live, path)
             } catch (c: CancellationException) {
                 throw c
             } catch (e: Exception) {
-                backend.toast("Couldn’t remove $name: ${e.message ?: "gateway error"}")
+                backend.toast("Couldn’t remove ${chip.name}: ${e.message ?: "gateway error"}")
             }
         }
     }
@@ -188,37 +218,43 @@ internal class ChatAttachments(
     private fun upload(localId: String) {
         val (file, info) = sources[localId] ?: return
         scope.launch {
-            val chip = find(localId) ?: return@launch
-            try {
-                val bytes = withContext(io) { file.open().use(Attachments::readCapped) }
-                if (bytes == null) {
-                    drop(localId)
-                    return@launch backend.toast(Attachments.TOO_LARGE)
-                }
-                val base64 = withContext(io) { Base64.getEncoder().encodeToString(bytes) }
-                val live = liveSession() ?: throw IOException("no chat session yet")
-                val done = if (chip.kind == AttachmentKind.Image) {
-                    val r = session.attachImage(live, base64, Attachments.imageFilename(info.name, info.mime))
-                    if (!r.attached) throw IOException(r.message ?: "not attached")
-                    chip.copy(status = AttachmentStatus.Ready, serverPath = r.path)
-                } else {
-                    val r = session.attachFile(live, Attachments.dataUrl(info.mime, base64), info.name)
-                    if (!r.attached || r.refText.isBlank()) throw IOException("not attached")
-                    chip.copy(status = AttachmentStatus.Ready, serverPath = r.path, refText = r.refText)
-                }
-                if (find(localId) == null) {
-                    // Removed while uploading: an image would otherwise ride along with the next turn.
-                    done.serverPath?.let { if (done.kind == AttachmentKind.Image) detach(done.name, it) }
-                } else {
-                    set(localId) { done }
-                }
-            } catch (c: CancellationException) {
-                throw c
-            } catch (e: Exception) {
-                if (find(localId) != null) {
-                    set(localId) { it.copy(status = AttachmentStatus.Failed) }
-                    backend.toast("Couldn’t attach ${chip.name}: ${e.message ?: "gateway error"}")
-                }
+            uploads.withLock {
+                val chip = find(localId) ?: return@launch
+                uploadLocked(localId, chip, file, info)
+            }
+        }
+    }
+
+    private suspend fun uploadLocked(localId: String, chip: PendingAttachment, file: PickedFile, info: FileInfo) {
+        try {
+            val bytes = withContext(io) { file.open().use(Attachments::readCapped) }
+            if (bytes == null) {
+                drop(localId)
+                return backend.toast(Attachments.TOO_LARGE)
+            }
+            val base64 = withContext(io) { Base64.getEncoder().encodeToString(bytes) }
+            val live = liveSession() ?: throw IOException("no chat session yet")
+            val done = if (chip.kind == AttachmentKind.Image) {
+                val r = session.attachImage(live, base64, Attachments.imageFilename(info.name, info.mime))
+                if (!r.attached) throw IOException(r.message ?: "not attached")
+                chip.copy(status = AttachmentStatus.Ready, serverPath = r.path, liveSessionId = live)
+            } else {
+                val r = session.attachFile(live, Attachments.dataUrl(info.mime, base64), info.name)
+                if (!r.attached || r.refText.isBlank()) throw IOException("not attached")
+                chip.copy(status = AttachmentStatus.Ready, serverPath = r.path, refText = r.refText)
+            }
+            if (find(localId) == null) {
+                // Removed while uploading: an image would otherwise ride along with the next turn.
+                if (done.kind == AttachmentKind.Image) detach(done)
+            } else {
+                set(localId) { done }
+            }
+        } catch (c: CancellationException) {
+            throw c
+        } catch (e: Exception) {
+            if (find(localId) != null) {
+                set(localId) { it.copy(status = AttachmentStatus.Failed) }
+                backend.toast("Couldn’t attach ${chip.name}: ${e.message ?: "gateway error"}")
             }
         }
     }
