@@ -75,6 +75,9 @@ data class SettingsUiState(
     val theme: ThemeMode = ThemeMode.System,
     val materialYou: Boolean = false,
     val simulateOffline: Boolean = false,
+    /** The "Sign out?" confirmation is showing. */
+    val confirmSignOut: Boolean = false,
+    val signingOut: Boolean = false,
 ) {
     /** The URL field was edited to a different server than the one signed in to, and not yet signed in again. */
     val urlChangedWithoutSignIn: Boolean
@@ -88,6 +91,8 @@ class SettingsViewModel(
     private val creds: CredentialStore,
     private val connection: ConnectionManager,
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    /** App-wide sign-out side effects beyond the repository: notifications, the foreground service. */
+    private val onSignedOut: () -> Unit = {},
 ) : ViewModel() {
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
@@ -98,6 +103,11 @@ class SettingsViewModel(
 
     /** One event per successful [signIn]; the screen decides whether that means leaving first-run. */
     val signedIn: Flow<Unit> = _signedIn.receiveAsFlow()
+
+    private val _signedOut = Channel<Unit>(Channel.CONFLATED)
+
+    /** One event per [signOut]; the app routes to Onboarding. */
+    val signedOut: Flow<Unit> = _signedOut.receiveAsFlow()
 
     init {
         viewModelScope.launch {
@@ -192,6 +202,30 @@ class SettingsViewModel(
         is AuthException -> e.message ?: "Authentication failed"
         is IllegalArgumentException -> "Enter a valid server URL"
         else -> "Can't reach Hermes at ${ServerUrl.normalize(url) ?: url}"
+    }
+
+    fun askSignOut(show: Boolean) = _state.update { it.copy(confirmSignOut = show) }
+
+    /**
+     * Signs out ([HermesRepository.signOut]: credentials cleared, gateway disconnected, back to first run), then
+     * [onSignedOut] clears notifications and stops the foreground service. The form forgets the password and every
+     * server-side list; the URL and username stay for the next sign-in.
+     */
+    fun signOut() {
+        if (_state.value.signingOut) return
+        _state.update { it.copy(confirmSignOut = false, signingOut = true) }
+        loadJob?.cancel()
+        viewModelScope.launch {
+            repo.signOut()
+            onSignedOut()
+            _state.update {
+                SettingsUiState(
+                    serverUrl = it.serverUrl, username = it.username, storedUrl = it.storedUrl, profile = it.profile,
+                    theme = it.theme, materialYou = it.materialYou, simulateOffline = it.simulateOffline,
+                )
+            }
+            _signedOut.trySend(Unit)
+        }
     }
 
     // ---- remote data ---------------------------------------------------------------------

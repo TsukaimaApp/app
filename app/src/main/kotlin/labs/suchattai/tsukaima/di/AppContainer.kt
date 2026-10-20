@@ -219,6 +219,16 @@ class AppContainer(context: Context) {
         onQuiet = notifications::onConnectionEnded,
     )
 
+    /**
+     * App-wide half of a sign-out, after [HermesRepository.signOut] cleared the credentials and dropped the socket:
+     * no notification (or its dead buttons) survives and the foreground service goes.
+     */
+    fun signedOut() {
+        notifications.signedOut()
+        GatewayService.stop(appContext)
+        visibleLiveSessionId.value = null
+    }
+
     private companion object {
         const val TAG = "Tsukaima"
     }

@@ -29,11 +29,15 @@ class NotificationHubTest {
     private class FakePoster : NotificationPoster {
         val posted = mutableListOf<NotificationSpec>()
         val cancelled = mutableListOf<Int>()
+        var cancelledAll = 0
         override fun post(spec: NotificationSpec) {
             posted += spec
         }
         override fun cancel(id: Int) {
             cancelled += id
+        }
+        override fun cancelAll() {
+            cancelledAll++
         }
     }
 
@@ -191,5 +195,20 @@ class NotificationHubTest {
         assertEquals("srq-1", transport.responses[0].first)
         assertEquals("\"once\"", transport.responses[0].second["choice"].toString())
         assertTrue("srq-1".hashCode() in cancelled)
+    }
+
+    @Test
+    fun signedOutCancelsEverythingAndStopsBackgroundPolls() = runTest(UnconfinedTestDispatcher()) {
+        val requests = MutableSharedFlow<Frame.ServerRequest>(replay = 16)
+        val poster = FakePoster()
+        val job = Job()
+        val hub = hub(requests, AnsweredRequestIds(), poster, job) { false }
+        hub.start()
+        hub.startBackground()
+        requests.emit(approval("srq-1"))
+        assertEquals(1, poster.posted.size)
+        hub.signedOut()
+        assertEquals(1, poster.cancelledAll)
+        job.cancelAndJoin()
     }
 }

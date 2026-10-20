@@ -6,6 +6,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.automirrored.rounded.InsertDriveFile
+import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
 import androidx.compose.material.icons.automirrored.rounded.Send
@@ -140,6 +141,9 @@ enum class IconName(val symbol: String) {
     Key("key"),
     Visibility("visibility"),
     VisibilityOff("visibility_off"),
+
+    /** Not in the handoff (v0.4.0): Settings → Sign out. */
+    Logout("logout"),
 }
 
 /** Pure lookup, safe from JVM unit tests (no Android context involved). */
@@ -198,6 +202,7 @@ fun iconFor(name: IconName): ImageVector = when (name) {
     IconName.Key -> Icons.Rounded.Key
     IconName.Visibility -> Icons.Rounded.Visibility
     IconName.VisibilityOff -> Icons.Rounded.VisibilityOff
+    IconName.Logout -> Icons.AutoMirrored.Rounded.Logout
 }
 
 /**

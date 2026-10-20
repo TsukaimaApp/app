@@ -72,14 +72,16 @@ class HermesRepository(
     }
 
     /**
-     * Forgets the stored password and token; the gateway disconnects on the connection manager's next sync.
-     * Settings (URL, username) are kept to prefill the sign-in form. Call off the main thread if the credential
-     * store may not have been touched yet (first access builds the encrypted store).
+     * Sign-out: forgets the stored password and token (off the main thread: the first credential access builds the
+     * encrypted store), disconnects the gateway at once ([ConnectionManager.signOut]) and clears `onboarded` and
+     * the last session, so the next launch starts at Onboarding. The URL and username are kept to prefill the
+     * sign-in form. Never throws except on cancellation; a failed settings write is returned as a failure.
      */
-    fun signOut() {
-        creds.clear()
+    suspend fun signOut(): Result<Unit> {
+        withContext(io) { creds.clear() }
         credsVersion.value++
-        connection.clearAuthRequired()
+        connection.signOut()
+        return attempt { settings.update { it.copy(onboarded = false, lastSessionId = null) } }
     }
 
     // ---- pass-through --------------------------------------------------------------------

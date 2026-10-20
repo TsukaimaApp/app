@@ -35,6 +35,7 @@ import labs.suchattai.tsukaima.data.prefs.ThemeMode
 import labs.suchattai.tsukaima.ui.chat.components.PairingCard
 import labs.suchattai.tsukaima.ui.components.ButtonSize
 import labs.suchattai.tsukaima.ui.components.Chip
+import labs.suchattai.tsukaima.ui.components.ConfirmDialog
 import labs.suchattai.tsukaima.ui.components.GhostButton
 import labs.suchattai.tsukaima.ui.components.IconButton44
 import labs.suchattai.tsukaima.ui.components.IconName
@@ -66,6 +67,8 @@ class SettingsActions(
     val onTheme: (ThemeMode) -> Unit = {},
     val onMaterialYou: (Boolean) -> Unit = {},
     val onSimulateOffline: (Boolean) -> Unit = {},
+    val onAskSignOut: (Boolean) -> Unit = {},
+    val onSignOut: () -> Unit = {},
 )
 
 @Composable
@@ -96,6 +99,8 @@ fun SettingsScreen(
             onTheme = vm::setTheme,
             onMaterialYou = vm::setMaterialYou,
             onSimulateOffline = vm::setSimulateOffline,
+            onAskSignOut = vm::askSignOut,
+            onSignOut = vm::signOut,
         ),
         modifier = modifier,
     )
@@ -105,6 +110,7 @@ fun SettingsScreen(
 @Composable
 fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.tsukaima
+    SignOutDialog(state, actions)
     Column(
         modifier
             .fillMaxSize()
@@ -170,6 +176,16 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                     )
                 }
                 state.testResult?.let { Caption(it) }
+                if (state.passwordSaved) {
+                    TsukaimaRow(
+                        title = if (state.signingOut) "Signing out…" else "Sign out",
+                        subtitle = "Forget the password and disconnect from this Hermes",
+                        leading = IconName.Logout,
+                        danger = true,
+                        onClick = { if (!state.signingOut) actions.onAskSignOut(true) },
+                        modifier = Modifier.bleed(12.dp),
+                    )
+                }
             }
 
             Section("Profile", hint = "Scopes sessions, model and skills. Switching here changes everything else.") {
@@ -284,6 +300,20 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
             }
         }
     }
+}
+
+@Composable
+private fun SignOutDialog(state: SettingsUiState, actions: SettingsActions) {
+    if (!state.confirmSignOut) return
+    ConfirmDialog(
+        title = "Sign out?",
+        body = "Tsukaima forgets your password, disconnects from Hermes and clears its notifications. " +
+            "Your chats stay on the server.",
+        confirmText = "Sign out",
+        onConfirm = actions.onSignOut,
+        onDismiss = { actions.onAskSignOut(false) },
+        danger = true,
+    )
 }
 
 @Composable

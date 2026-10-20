@@ -46,6 +46,9 @@ object Channels {
 interface NotificationPoster {
     fun post(spec: NotificationSpec)
     fun cancel(id: Int)
+
+    /** Removes every notification of the app (sign-out). */
+    fun cancelAll()
 }
 
 /** Builds Android notifications from [NotificationSpec]s. Every action is an explicit, immutable broadcast. */
@@ -120,6 +123,8 @@ class AndroidNotificationPoster(context: Context) : NotificationPoster {
     }
 
     override fun cancel(id: Int) = manager.cancel(id)
+
+    override fun cancelAll() = manager.cancelAll()
 
     private companion object {
         const val FLAGS = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT

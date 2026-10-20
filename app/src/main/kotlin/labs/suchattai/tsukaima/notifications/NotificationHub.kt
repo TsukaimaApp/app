@@ -168,6 +168,12 @@ class NotificationHub(
         coordinator.approvalSpec(srqId)?.let(poster::post)
     }
 
+    /** Sign-out: stops the background polls and removes every notification (their buttons and links are dead). */
+    fun signedOut() {
+        stopBackground()
+        poster.cancelAll()
+    }
+
     fun post(spec: NotificationSpec) = poster.post(spec)
     fun cancel(id: Int) = poster.cancel(id)
 

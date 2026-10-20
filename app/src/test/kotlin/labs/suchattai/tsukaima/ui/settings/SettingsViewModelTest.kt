@@ -311,4 +311,62 @@ class SettingsViewModelTest {
         assertEquals("openrouter", s.modelProvider)
         assertEquals("hermes-4-70b", vm.await { it.model == "hermes-4-70b" }.model)
     }
+
+    @Test
+    fun signOutClearsCredentialsDisconnectsAndReturnsToFirstRun() = runBlocking<Unit> {
+        signedInStore()
+        store.update { it.copy(username = "alice", lastSessionId = "20261020_010916_48c967") }
+        var sideEffects = 0
+        val vm = SettingsViewModel(repo, store, creds, connection, onSignedOut = { sideEffects++ }).also { vms += it }
+        vm.await { it.passwordSaved }
+        connection.start()
+        connection.reportAuthFailure()
+
+        vm.askSignOut(true)
+        assertTrue(vm.state.value.confirmSignOut)
+        vm.signOut()
+        withTimeout(5_000) { vm.signedOut.first() }
+
+        assertNull(creds.password())
+        assertNull(creds.accessToken())
+        val s = store.settings.first()
+        assertFalse("next launch starts at Onboarding", s.onboarded)
+        assertNull(s.lastSessionId)
+        assertEquals("the sign-in form stays prefilled", "alice", s.username)
+        assertEquals("http://${hostPort()}", s.serverUrl)
+        assertFalse(connection.authRequired.value)
+        withTimeout(5_000) {
+            connection.hermes.first { it.connection == labs.suchattai.tsukaima.data.gateway.ConnectionState.Disconnected }
+        }
+        assertEquals(1, sideEffects)
+        val ui = vm.state.value
+        assertFalse(ui.passwordSaved)
+        assertFalse(ui.confirmSignOut)
+        assertFalse(ui.signingOut)
+        assertEquals("alice", ui.username)
+        assertTrue(ui.skills.isEmpty())
+        connection.stop()
+    }
+
+    @Test
+    fun signInAfterSignOutConnectsWithoutARestart() = runBlocking<Unit> {
+        // The poll loop survives a sign-out, so the next sign-in reconnects at once (no lifecycle restart).
+        routes["/auth/password-login"] = ::loginOk
+        routes["/api/status"] = { json("""{"gateway_state":"running"}""") }
+        signedInStore()
+        val vm = vm()
+        vm.await { it.passwordSaved }
+        connection.start()
+        vm.signOut()
+        withTimeout(5_000) { vm.signedOut.first() }
+        vm.setServerUrl(hostPort()); vm.setUsername("alice"); vm.setPassword("pw")
+        assertTrue(vm.signIn().isSuccess)
+        assertEquals("pw", creds.password())
+        assertTrue(store.settings.first().onboarded)
+        // A connect attempt follows (the mock has no WebSocket: it then retries, which is all this asserts).
+        withTimeout(5_000) {
+            connection.hermes.first { it.connection != labs.suchattai.tsukaima.data.gateway.ConnectionState.Disconnected }
+        }
+        connection.stop()
+    }
 }

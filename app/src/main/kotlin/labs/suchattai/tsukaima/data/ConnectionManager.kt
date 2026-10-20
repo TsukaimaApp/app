@@ -246,6 +246,21 @@ class ConnectionManager(
         }
     }
 
+    /**
+     * The credentials were just cleared (sign-out): drops the socket at once and clears a pending auth failure. A
+     * running poll loop is replaced by a fresh one at the same interval (an iteration in flight can no longer
+     * reconnect: [stop] bumped the generation); it keeps polling the public `/api/status`, but with no stored
+     * password the gateway stays down until the next sign-in, which then connects without an app restart.
+     */
+    fun signOut() {
+        synchronized(lock) {
+            val running = pollJob?.isActive == true
+            stop()
+            _authRequired.value = false
+            if (running) run(intervalMs)
+        }
+    }
+
     /** Marks that the stored credentials no longer work. The gateway is not reconnected until cleared. */
     fun reportAuthFailure() {
         _authRequired.value = true

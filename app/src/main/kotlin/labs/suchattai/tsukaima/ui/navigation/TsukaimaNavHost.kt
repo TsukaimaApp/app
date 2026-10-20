@@ -28,7 +28,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -155,7 +154,10 @@ fun TsukaimaNavHost(
             val vm: SettingsViewModel = viewModel(
                 factory = viewModelFactory {
                     initializer {
-                        SettingsViewModel(container.repository, container.settingsStore, container.credentials, container.connection)
+                        SettingsViewModel(
+                            container.repository, container.settingsStore, container.credentials, container.connection,
+                            onSignedOut = container::signedOut,
+                        )
                     }
                 },
             )
@@ -164,6 +166,14 @@ fun TsukaimaNavHost(
                 vm.signedIn.collect {
                     val hasStatus = runCatching { navController.getBackStackEntry(Route.Status.path) }.isSuccess
                     if (!hasStatus) navController.navigateTop(Route.Status.path)
+                }
+            }
+            LaunchedEffect(vm) {
+                // Signed out: back to first run, with nothing (chats, status) left on the back stack.
+                vm.signedOut.collect {
+                    navController.navigate(Route.Onboarding.path) {
+                        popUpTo(navController.graph.id) { inclusive = true }
+                    }
                 }
             }
             SettingsScreen(
@@ -204,13 +214,14 @@ private fun cronViewModel(container: AppContainer, owner: ViewModelStoreOwner? =
 /**
  * Navigates to a drawer destination. Status is home: the target replaces everything above Status (a chat
  * replaces the previous chat with a new back-stack entry), so Back from any drawer destination returns to Status. When Status is not on
- * the back stack (first run started at Onboarding), the stack is rebuilt as Status → [route].
+ * the back stack (first run, or after a sign-out, started at Onboarding), the stack is rebuilt as Status → [route].
  */
 fun NavController.navigateTop(route: String) {
     val hasStatus = runCatching { getBackStackEntry(Route.Status.path) }.isSuccess
     if (!hasStatus) {
         navigate(Route.Status.path) {
-            popUpTo(graph.findStartDestination().id) { inclusive = true }
+            // The whole stack: the start destination may not be on it (after a sign-out it is Onboarding → Settings).
+            popUpTo(graph.id) { inclusive = true }
             launchSingleTop = true
         }
     }

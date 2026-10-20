@@ -79,6 +79,11 @@ class GatewayService : Service() {
     companion object {
         private const val TAG = "Tsukaima"
 
+        /** Stops the service if it runs (sign-out); it also stops itself once the app is in the foreground. */
+        fun stop(context: Context) {
+            context.stopService(Intent(context, GatewayService::class.java))
+        }
+
         /** Returns false when the system refused the start (background-start restrictions). */
         fun start(context: Context): Boolean = try {
             ContextCompat.startForegroundService(context, Intent(context, GatewayService::class.java))
