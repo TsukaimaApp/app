@@ -56,6 +56,7 @@ import kotlinx.coroutines.launch
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.ChatReducer
+import labs.suchattai.tsukaima.domain.chat.SideKind
 import labs.suchattai.tsukaima.ui.components.PickerSheet
 import labs.suchattai.tsukaima.ui.components.PickerNode
 import labs.suchattai.tsukaima.domain.chat.ModelTree
@@ -77,6 +78,7 @@ import labs.suchattai.tsukaima.ui.chat.components.ClarifyCard
 import labs.suchattai.tsukaima.ui.chat.components.Composer
 import labs.suchattai.tsukaima.ui.chat.components.MediaHost
 import labs.suchattai.tsukaima.ui.chat.components.SecretCard
+import labs.suchattai.tsukaima.ui.chat.components.SideNoteCard
 import labs.suchattai.tsukaima.ui.chat.components.StatusLine
 import labs.suchattai.tsukaima.ui.chat.components.ToolRow
 import labs.suchattai.tsukaima.ui.chat.components.UserBubble
@@ -139,6 +141,7 @@ class ChatActions(
     val onEditMessage: (String) -> Unit = {},
     val onCancelEdit: () -> Unit = {},
     val onRegenerate: (String) -> Unit = {},
+    val onSendAside: (SideKind) -> Unit = {},
 )
 
 /**
@@ -239,6 +242,7 @@ fun ChatScreen(
             onEditMessage = vm::editMessage,
             onCancelEdit = vm::cancelEdit,
             onRegenerate = vm::regenerate,
+            onSendAside = vm::sendAside,
         ),
     )
 }
@@ -435,12 +439,14 @@ internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatAct
             onSend = { actions.onClarify(item.id, it) },
             onSkipAll = { actions.onClarifySkip(item.id) },
         )
+        is ChatItem.SideNote -> SideNoteCard(item, media = media)
         is ChatItem.Thinking -> Spacer(Modifier.height(0.dp))
     }
 }
 
 /**
- * The top bar's overflow entries: Stop while a turn runs, then the session actions once the session is stored.
+ * The top bar's overflow entries: Stop while a turn runs, the side entries while text is typed ([ChatSides]), then the
+ * session actions once the session is stored.
  * A brand-new chat with no stored id yet offers only what works without one (Stop, and Copy session ID — the live
  * id — once a live session exists); empty disables the button rather than opening a sheet that does nothing.
  */
@@ -454,11 +460,18 @@ internal fun overflowItems(state: ChatUiState, actions: ChatActions): List<MenuI
     // Compaction is idle-gated on the server: offered between turns only.
     val compact = MenuItem("Compact context", IconName.Compress, onClick = actions.onCompact)
         .takeIf { live && !running && !state.compacting && state.chat.items.isNotEmpty() }
-    if (state.chat.storedSessionId == null) {
-        return listOfNotNull(stop, reasoning, compact, copy.takeIf { state.chat.liveSessionId != null })
+    val sides = if (ChatSides.available(state)) {
+        listOf(
+            MenuItem("Send as side question", IconName.Forum) { actions.onSendAside(SideKind.Question) },
+            MenuItem("Send as background task", IconName.Schedule) { actions.onSendAside(SideKind.Background) },
+        )
+    } else {
+        emptyList()
     }
-    return listOfNotNull(
-        stop,
+    if (state.chat.storedSessionId == null) {
+        return listOfNotNull(stop) + sides + listOfNotNull(reasoning, compact, copy.takeIf { state.chat.liveSessionId != null })
+    }
+    return listOfNotNull(stop) + sides + listOfNotNull(
         reasoning,
         compact,
         MenuItem("Rename", IconName.Edit) { actions.onDialog(ChatDialog.Rename) },

@@ -908,4 +908,65 @@ class ChatReducerTest {
         val withRef = ChatReducer.onSubmitted(live, "hi", "u-l1", flair, listOf("notes.txt"), promptText = "@file:notes.txt\n\nhi")
         assertEquals("@file:notes.txt\n\nhi", (withRef.items.single() as ChatItem.UserMessage).promptText)
     }
+
+    // ---- side questions and background tasks ----------------------------------------------------
+
+    @Test
+    fun sideQuestionStartsPendingAndCompletesByTaskId() {
+        val started = ChatReducer.onSideStarted(live, "t-1", SideKind.Question, "what time is it?")
+        val pending = started.items.single() as ChatItem.SideNote
+        assertEquals(ChatItem.SideNote("side-t-1", SideKind.Question, "what time is it?", "", pending = true), pending)
+        assertEquals(AgentStatus.Idle, started.status)
+
+        val done = started.feed(ev("btw.complete", """{"task_id":"t-1","text":"Noon.","question":"what time is it?"}""", seq = 4))
+        assertEquals(ChatItem.SideNote("side-t-1", SideKind.Question, "what time is it?", "Noon.", pending = false), done.items.single())
+        assertEquals(AgentStatus.Idle, done.status)
+
+        val bg = ChatReducer.onSideStarted(live, "t-2", SideKind.Background, "index the repo")
+            .feed(ev("background.complete", """{"task_id":"t-2","text":"Indexed 42 files."}"""))
+        val note = bg.items.single() as ChatItem.SideNote
+        assertEquals(SideKind.Background, note.kind)
+        assertEquals("index the repo", note.question) // kept: background.complete carries no question
+        assertEquals("Indexed 42 files.", note.text)
+        assertFalse(note.pending)
+    }
+
+    @Test
+    fun sideNoteFromAnotherClient() {
+        // A completion for a task this app never started (another client, or the RPC result lost): appended anyway.
+        val s = live.feed(
+            ev("btw.complete", """{"task_id":"t-9","text":"Yes."}"""),
+            ev("background.complete", """{"task_id":"t-8","text":"Done.","question":null}"""),
+        )
+        assertEquals(
+            listOf(
+                ChatItem.SideNote("side-t-9", SideKind.Question, null, "Yes.", pending = false),
+                ChatItem.SideNote("side-t-8", SideKind.Background, null, "Done.", pending = false),
+            ),
+            s.items,
+        )
+        // A completion that beat the RPC result is not followed by a second, pending note.
+        assertEquals(s.items, ChatReducer.onSideStarted(s, "t-9", SideKind.Question, "really?").items)
+        // No task id: nothing to show.
+        assertEquals(live, live.feed(ev("btw.complete", """{"text":"orphan"}""")))
+    }
+
+    @Test
+    fun sideNoteAfterAStreamingReplyDoesNotCloseIt() {
+        val streaming = live.feed(ev("message.start", seq = 1), ev("message.delta", """{"text":"Hel"}""", seq = 2))
+        val withNote = ChatReducer.onSideStarted(streaming, "t-1", SideKind.Question, "side?")
+        assertEquals(streaming.status, withNote.status)
+        val s = withNote.feed(
+            ev("message.delta", """{"text":"lo"}""", seq = 3),
+            ev("btw.complete", """{"task_id":"t-1","text":"Side answer."}""", seq = 4),
+            ev("message.delta", """{"text":"!"}""", seq = 5),
+            ev("message.complete", """{"text":"Hello!"}""", seq = 6),
+        )
+        assertEquals(2, s.items.size)
+        val reply = s.items[0] as ChatItem.AssistantMessage
+        assertEquals("Hello!", reply.text)
+        assertFalse(reply.streaming)
+        assertEquals("Side answer.", (s.items[1] as ChatItem.SideNote).text)
+        assertEquals(AgentStatus.Idle, s.status)
+    }
 }

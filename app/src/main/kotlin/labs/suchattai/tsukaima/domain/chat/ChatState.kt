@@ -105,11 +105,28 @@ sealed interface ChatItem {
         val declined: Boolean = false,
     ) : ChatItem
 
+    /**
+     * A side question (`prompt.btw`) or background task (`prompt.background`) and its answer ([id] `side-<task_id>`).
+     * Side agents run detached from the turn: the note never blocks or closes the streaming reply, and the chat's
+     * status ignores it. [pending] until `btw.complete` / `background.complete` brings [text]; [question] is what was
+     * asked when known (null for a completion this app did not start that carries none).
+     */
+    data class SideNote(
+        override val id: String,
+        val kind: SideKind,
+        val question: String?,
+        val text: String,
+        val pending: Boolean,
+    ) : ChatItem
+
     /** Placeholder "agent is working" row; replaced by the assistant message on `message.start`. */
     data class Thinking(override val id: String) : ChatItem
 }
 
 enum class SubagentStatus { Running, Done, Failed }
+
+/** What a [ChatItem.SideNote] is: a side question (`prompt.btw`) or a background task (`prompt.background`). */
+enum class SideKind { Question, Background }
 
 /** `tool.output_risk`: [level] as the server rates it (`low`/`medium`/`high`), its [findings], and whether the output was [redacted]. */
 data class ToolRisk(val level: String, val findings: List<String>, val redacted: Boolean)

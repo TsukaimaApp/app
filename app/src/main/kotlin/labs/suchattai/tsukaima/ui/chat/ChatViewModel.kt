@@ -33,6 +33,7 @@ import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.ChatReducer
 import labs.suchattai.tsukaima.domain.chat.ChatState
 import labs.suchattai.tsukaima.domain.chat.SecretKind
+import labs.suchattai.tsukaima.domain.chat.SideKind
 import labs.suchattai.tsukaima.domain.chat.ThinkingFlair
 import labs.suchattai.tsukaima.domain.voice.VoiceLanguages
 import labs.suchattai.tsukaima.domain.voice.VoiceMode
@@ -95,6 +96,8 @@ class ChatViewModel(
         forgetFailed = { ids -> ids.forEach(failedSends::remove) },
         reload = ::reloadHistory,
     ) { "u-l${++userCounter}" }
+
+    private val sides = ChatSides(session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state)
 
     private val media = ChatMedia(backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), io, _state)
 
@@ -229,6 +232,9 @@ class ChatViewModel(
         _state.value.pendingEdit?.let { row -> return edits.send(live, text, row) }
         startTurn(live, text, attachments.takeReady(), fromComposer = true)
     }
+
+    /** Overflow "Send as side question" / "Send as background task": the composer's text, without attachments; see [ChatSides]. */
+    fun sendAside(kind: SideKind) = sides.send(kind)
 
     /** "Edit" on user message [id]: its text goes into the composer and the next [send] replaces it; see [ChatEdits]. */
     fun editMessage(id: String) = edits.edit(id)

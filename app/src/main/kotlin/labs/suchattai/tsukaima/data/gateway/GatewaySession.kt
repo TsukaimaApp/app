@@ -78,6 +78,27 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
         return runCatching { HermesJson.decodeFromJsonElement<SubmitResult>(result) }.getOrDefault(SubmitResult())
     }
 
+    /**
+     * Asks a side question (`prompt.btw`): a detached agent answers from the session's context without touching its
+     * history. Returns the `task_id`; the answer arrives as a `btw.complete` event on [sessionId].
+     */
+    suspend fun btw(sessionId: String, text: String): String = sideTask("prompt.btw", sessionId, text)
+
+    /**
+     * Starts a background task (`prompt.background`): a detached agent works on [text] beside the session. Returns
+     * the `task_id`; the result arrives as a `background.complete` event on [sessionId].
+     */
+    suspend fun background(sessionId: String, text: String): String = sideTask("prompt.background", sessionId, text)
+
+    private suspend fun sideTask(method: String, sessionId: String, text: String): String {
+        val result = rpc(method, buildJsonObject {
+            put("session_id", sessionId)
+            put("text", text)
+        })
+        return (result["task_id"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
+            ?: throw IOException("$method: malformed result: no task_id")
+    }
+
     /** Stops the running turn; returns the server's `status` (`interrupted` / `not_interrupted`), null if absent. */
     suspend fun interrupt(sessionId: String): String? =
         (rpc("session.interrupt", idParams(sessionId))["status"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content

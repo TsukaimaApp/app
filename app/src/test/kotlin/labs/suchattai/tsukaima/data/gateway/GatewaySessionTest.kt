@@ -237,4 +237,21 @@ class GatewaySessionTest {
         assertTrue(params["confirm_deep_truncate"]!!.jsonPrimitive.boolean)
         assertTrue(params["confirm_empty_truncate"]!!.jsonPrimitive.boolean)
     }
+
+    @Test
+    fun btwAndBackgroundReturnTheTaskId() = runBlocking {
+        val t = FakeTransport(obj("""{"task_id":"btw_1"}"""))
+        assertEquals("btw_1", GatewaySession(t).btw("s1", "what time is it?"))
+        t.result = obj("""{"task_id":"bg_2"}""")
+        assertEquals("bg_2", GatewaySession(t).background("s1", "index the repo"))
+        assertEquals(listOf("prompt.btw", "prompt.background"), t.calls.map { it.first })
+        assertEquals(obj("""{"session_id":"s1","text":"what time is it?"}"""), t.calls[0].second)
+        assertEquals(obj("""{"session_id":"s1","text":"index the repo"}"""), t.calls[1].second)
+        t.result = obj("""{}""")
+        try {
+            GatewaySession(t).btw("s1", "x")
+            fail("a result without task_id is malformed")
+        } catch (_: IOException) {
+        }
+    }
 }

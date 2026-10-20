@@ -54,4 +54,21 @@ class OverflowMenuTest {
         assertEquals(listOf("Rename", "Unarchive", "Copy session ID", "Delete session"), labels(stored, archived = true))
         assertEquals("Reasoning · Low", labels(stored.copy(reasoningEffort = "low")).first())
     }
+
+    @Test
+    fun sideEntriesNeedTextAndAWritableLiveSession() {
+        val chat = ChatState(liveSessionId = "d4fb0dea")
+        fun labels(input: String, chat: ChatState, archived: Boolean = false, compacting: Boolean = false) =
+            overflowItems(ChatUiState(chat = chat, input = input, archived = archived, compacting = compacting), actions).map { it.label }
+        val sides = listOf("Send as side question", "Send as background task")
+
+        assertEquals(sides + listOf("Reasoning", "Copy session ID"), labels("what time is it?", chat))
+        // Mid-turn too: side agents run detached from the turn.
+        assertEquals(listOf("Stop") + sides, labels("x", chat.copy(status = AgentStatus.Replying)).take(3))
+        assertTrue(labels(" ", chat).none { it in sides })
+        assertTrue(labels("x", ChatState()).none { it in sides })
+        assertTrue(labels("x", chat, archived = true).none { it in sides })
+        assertTrue(labels("x", chat, compacting = true).none { it in sides })
+        assertTrue(labels("x", chat.copy(status = AgentStatus.Offline)).none { it in sides })
+    }
 }

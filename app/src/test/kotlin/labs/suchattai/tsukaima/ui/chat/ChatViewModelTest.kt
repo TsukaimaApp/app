@@ -45,6 +45,7 @@ import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.ChatState
 import labs.suchattai.tsukaima.domain.chat.SecretKind
+import labs.suchattai.tsukaima.domain.chat.SideKind
 import labs.suchattai.tsukaima.domain.chat.StatusTone
 import labs.suchattai.tsukaima.domain.chat.running
 import labs.suchattai.tsukaima.domain.chat.ToolStatus
@@ -2634,5 +2635,82 @@ class ChatViewModelTest {
         assertEquals(listOf("Copy text"), labels(running, "h-2"))
         val offline = idle.copy(chat = idle.chat.copy(status = AgentStatus.Offline))
         assertEquals(listOf("Copy text"), labels(offline, "h-2"))
+    }
+
+    // ---- side questions and background tasks ----------------------------------------------------
+
+    @Test
+    fun sideQuestionGoesThroughBtw() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("prompt.btw", obj("""{"task_id":"btw_1"}""")) }
+        val vm = vm(b)
+        advanceUntilIdle()
+
+        vm.setInput("  what time is it?  ")
+        vm.sendAside(SideKind.Question)
+        advanceUntilIdle()
+
+        assertEquals(obj("""{"session_id":"$live","text":"what time is it?"}"""), b.transport.last("prompt.btw"))
+        assertFalse("prompt.submit" in b.transport.methods())
+        val s = vm.state.value
+        assertEquals("", s.input)
+        assertEquals(ChatItem.SideNote("side-btw_1", SideKind.Question, "what time is it?", "", pending = true), s.chat.items.single())
+        assertEquals(AgentStatus.Idle, s.chat.status)
+
+        b.events.emit(ev("btw.complete", 1, """{"task_id":"btw_1","text":"Noon.","question":"what time is it?"}"""))
+        advanceUntilIdle()
+        assertEquals("Noon.", (vm.state.value.chat.items.single() as ChatItem.SideNote).text)
+        assertFalse((vm.state.value.chat.items.single() as ChatItem.SideNote).pending)
+
+        vm.sendAside(SideKind.Question) // empty composer: nothing sent
+        advanceUntilIdle()
+        assertEquals(1, b.transport.methods().count { it == "prompt.btw" })
+    }
+
+    @Test
+    fun backgroundTaskGoesThroughBackgroundAndAFailureKeepsTheText() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("prompt.background", obj("""{"task_id":"bg_1"}""")) }
+        val vm = vm(b)
+        advanceUntilIdle()
+
+        vm.setInput("index the repo")
+        vm.sendAside(SideKind.Background)
+        advanceUntilIdle()
+        assertEquals("index the repo", b.transport.last("prompt.background")["text"]!!.jsonPrimitive.content)
+        assertEquals(SideKind.Background, (vm.state.value.chat.items.single() as ChatItem.SideNote).kind)
+
+        b.transport.rpcErrors["prompt.background"] = RpcException(4009, "busy")
+        vm.setInput("again")
+        vm.sendAside(SideKind.Background)
+        advanceUntilIdle()
+        assertEquals("again", vm.state.value.input)
+        assertEquals(1, vm.state.value.chat.items.size)
+        assertEquals("Couldn’t send the background task", b.toasts.last())
+
+        b.transport.rpcErrors["prompt.btw"] = RpcException(4009, "busy")
+        vm.sendAside(SideKind.Question)
+        advanceUntilIdle()
+        assertEquals("Couldn’t send the side question", b.toasts.last())
+        assertEquals("again", vm.state.value.input)
+    }
+
+    @Test
+    fun sideQuestionLeavesAttachmentsInTheComposer() = runTest(dispatcher) {
+        val b = backend().apply {
+            cannedAttach()
+            transport.on("prompt.btw", obj("""{"task_id":"btw_1"}"""))
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.attach(listOf(notes))
+        advanceUntilIdle()
+
+        vm.setInput("what is in it?")
+        vm.sendAside(SideKind.Question)
+        advanceUntilIdle()
+
+        assertEquals("Attachments aren’t sent with side questions", b.toasts.last())
+        assertEquals("what is in it?", b.transport.last("prompt.btw")["text"]!!.jsonPrimitive.content)
+        assertEquals(AttachmentStatus.Ready, vm.state.value.attachments.single().status)
+        assertEquals("", vm.state.value.input)
     }
 }

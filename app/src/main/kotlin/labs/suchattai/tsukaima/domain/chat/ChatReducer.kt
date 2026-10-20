@@ -118,6 +118,16 @@ object ChatReducer {
             else -> null
         }
 
+    /**
+     * A side question or background task the server accepted as [taskId]: appends its pending note. Unchanged when
+     * the completion already arrived (it can beat the RPC result); the status is left alone (side agents are detached).
+     */
+    fun onSideStarted(state: ChatState, taskId: String, kind: SideKind, question: String?): ChatState {
+        val id = sideId(taskId)
+        if (state.items.any { it.id == id }) return state
+        return state.copy(items = state.items + ChatItem.SideNote(id, kind, question, text = "", pending = true))
+    }
+
     /** Marks approval [id] answered; idempotent so a double tap sends one answer. */
     fun onApprovalAnswered(state: ChatState, id: String, flair: () -> String = ThinkingFlair::next): ChatState {
         val card = state.items.firstOrNull { it.id == id } as? ChatItem.Approval
@@ -242,6 +252,8 @@ object ChatReducer {
                 if (items.size == s.items.size) s
                 else s.copy(items = items, status = statusAfterApproval(s.status, items, flair))
             }
+            "btw.complete" -> onSideComplete(s, SideKind.Question, p)
+            "background.complete" -> onSideComplete(s, SideKind.Background, p)
             else -> if (ev.type.startsWith(SUBAGENT_PREFIX)) onSubagent(s, ev.type, p) else s
         }
     }
@@ -306,6 +318,20 @@ object ChatReducer {
         val items = if (existing != null) s.items.replace(existing) { row } else s.items + row
         return s.copy(items = items)
     }
+
+    /**
+     * `btw.complete` / `background.complete {task_id, text, question?}`: completes the note of `task_id`, or appends a
+     * completed one for a task this app did not start (another client). The status is unchanged.
+     */
+    private fun onSideComplete(s: ChatState, kind: SideKind, p: JsonObject): ChatState {
+        val id = sideId(p.string("task_id")?.takeIf { it.isNotBlank() } ?: return s)
+        val existing = s.items.firstOrNull { it.id == id } as? ChatItem.SideNote
+        val question = p.string("question")?.takeIf { it.isNotBlank() } ?: existing?.question
+        val done = ChatItem.SideNote(id, existing?.kind ?: kind, question, p.string("text").orEmpty(), pending = false)
+        return s.copy(items = if (existing != null) s.items.replace(existing) { done } else s.items + done)
+    }
+
+    private fun sideId(taskId: String) = "side-$taskId"
 
     /** "Loading history…", "Loaded 42 messages", or the failure, from `session.resume_progress`. */
     private fun resumeProgressText(p: JsonObject): String? = when (p.string("status")) {
@@ -508,6 +534,7 @@ object ChatReducer {
     /**
      * The streaming assistant item that new text may still flow into: the last streaming one,
      * provided no tool call or request card (approval, clarify, masked prompt) was appended after it (that would reorder the turn).
+     * Side notes and subagent rows run detached from the turn and never block it.
      */
     private fun liveAssistant(items: List<ChatItem>): ChatItem.AssistantMessage? {
         val index = items.indexOfLast { it is ChatItem.AssistantMessage && it.streaming }
