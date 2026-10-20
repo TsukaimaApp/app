@@ -48,11 +48,16 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
         return if (v == null || v is JsonNull) null else v.content
     }
 
-    /** Result body (`{status:"streaming",…}`) is intentionally ignored; output arrives as events. */
-    suspend fun submit(sessionId: String, text: String) {
+    /**
+     * Result body (`{status:"streaming",…}`) is intentionally ignored; output arrives as events. [voice]: a spoken
+     * turn (the server answers with its voice persona); [interrupted]: the user barged in on the previous spoken reply.
+     */
+    suspend fun submit(sessionId: String, text: String, voice: Boolean = false, interrupted: Boolean = false) {
         rpc("prompt.submit", buildJsonObject {
             put("session_id", sessionId)
             put("text", text)
+            if (voice) put("voice_turn", true)
+            if (interrupted) put("interrupted", true)
         })
     }
 

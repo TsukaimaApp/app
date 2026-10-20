@@ -41,7 +41,7 @@ internal class ChatVoice(
     private val backend: ChatBackend,
     private val scope: CoroutineScope,
     private val state: MutableStateFlow<ChatUiState>,
-    private val send: (String) -> Boolean,
+    private val send: (text: String, interrupted: Boolean) -> Boolean,
     private val history: StateFlow<ChatHistory>,
 ) {
     private var controller: VoiceController? = null

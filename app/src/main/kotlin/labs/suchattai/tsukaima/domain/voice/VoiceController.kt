@@ -34,7 +34,7 @@ class VoiceController(
     private val output: SpeechOutput,
     private val scope: CoroutineScope,
     private val chat: StateFlow<ChatState>,
-    private val send: (String) -> Boolean,
+    private val send: (text: String, interrupted: Boolean) -> Boolean,
     private val mode: VoiceMode,
     private val onApprovalNeeded: () -> Unit = {},
     private val now: () -> Long = { System.nanoTime() / 1_000_000 },
@@ -95,6 +95,10 @@ class VoiceController(
         chatJob = scope.launch { chat.collect(::onChat) }
         refresh()
     }
+
+    /** True from a barge-in (or a rebuild that cut off speech) until the next spoken turn is sent. */
+    var interruptedSinceLastSend: Boolean = false
+        private set
 
     /** Stops listening and speaking and the loop; the chat's turn keeps running (nothing is interrupted). */
     fun stop() {
@@ -161,6 +165,7 @@ class VoiceController(
         queue.removeAll { it.id in ids } // queued from the rebuilt transcript before this call: never spoken
         if (current?.id in ids) {
             output.stop()
+            interruptedSinceLastSend = true
             speakJob?.cancel()
             speakJob = null
             current = null
@@ -176,6 +181,7 @@ class VoiceController(
 
     private fun bargeIn() {
         output.stop()
+        interruptedSinceLastSend = true
         speakJob?.cancel()
         speakJob = null
         val cut = (queue.mapNotNull { it.id } + listOfNotNull(current?.id) + chunkers.keys).toSet()
@@ -327,7 +333,9 @@ class VoiceController(
                     listeningSince = null
                     awaitingTurn = true // before send: it may update the chat synchronously
                     turnSeen = false
-                    if (send(text)) turnSeen = turnSeen || chat.value.status != AgentStatus.Idle else awaitingTurn = false
+                    val interrupted = interruptedSinceLastSend // snapshot: cleared as the turn goes out
+                    interruptedSinceLastSend = false
+                    if (send(text, interrupted)) turnSeen = turnSeen || chat.value.status != AgentStatus.Idle else awaitingTurn = false
                 } else {
                     listenedTooLong()
                 }

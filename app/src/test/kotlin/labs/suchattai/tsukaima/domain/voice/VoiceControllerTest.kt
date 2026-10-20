@@ -28,6 +28,8 @@ class VoiceControllerTest {
 
     private val approvalLine = "That needs your approval. I’ve opened it in Tsukaima."
 
+    private val interruptedFlags = mutableListOf<Boolean>()
+
     private class Rig(
         val controller: VoiceController,
         val input: FakeSpeechInput,
@@ -58,7 +60,7 @@ class VoiceControllerTest {
         // unconfined: collectors resume inline inside the chat update, as on the app's Main.immediate.
         val dispatcher = if (unconfined) UnconfinedTestDispatcher(testScheduler) else StandardTestDispatcher(testScheduler)
         val scope = CoroutineScope(dispatcher + SupervisorJob()).also { scopes += it }
-        val c = VoiceController(input, output, scope, chat, { sent += it; sendResult }, mode, { approvals[0]++ }, { testScheduler.currentTime })
+        val c = VoiceController(input, output, scope, chat, { text, interrupted -> sent += text; interruptedFlags += interrupted; sendResult }, mode, { approvals[0]++ }, { testScheduler.currentTime })
         c.start()
         advanceUntilIdle()
         return Rig(c, input, output, chat, sent, approvals)
@@ -213,6 +215,25 @@ class VoiceControllerTest {
         assertEquals("Once. Upon. A time.".length, r.state.revealed["a1"])
         assertEquals(VoicePhase.Listening, r.state.phase)
         assertTrue(r.input.active)
+    }
+
+    @Test fun bargeInMarksTheNextTurnInterrupted() = runTest {
+        val r = rig()
+        say(r, "tell me a story")
+        assertFalse(r.controller.interruptedSinceLastSend)
+        r.add(reply("a1", "Once. Upon. A time.", streaming = false), AgentStatus.Idle)
+        advanceUntilIdle()
+        r.controller.tapIndicator()
+        advanceUntilIdle()
+        assertTrue(r.controller.interruptedSinceLastSend)
+        say(r, "stop, something else")
+        assertFalse(r.controller.interruptedSinceLastSend)
+        r.add(reply("a2", "Fine.", streaming = false), AgentStatus.Idle)
+        advanceUntilIdle()
+        r.output.finishSpeaking()
+        advanceUntilIdle()
+        say(r, "thanks")
+        assertEquals(listOf(false, true, false), interruptedFlags)
     }
 
     @Test fun stopDuringSpeakingLeavesTheTurnRunning() = runTest {

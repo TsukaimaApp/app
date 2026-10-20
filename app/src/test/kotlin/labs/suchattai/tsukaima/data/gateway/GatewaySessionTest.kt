@@ -2,6 +2,7 @@ package labs.suchattai.tsukaima.data.gateway
 
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -128,6 +129,21 @@ class GatewaySessionTest {
         val (method, params) = t.calls.single()
         assertEquals("prompt.submit", method)
         assertEquals(setOf("session_id", "text"), params.keys)
+    }
+
+    @Test
+    fun submitAddsVoiceTurnAndInterruptedOnlyWhenSet() = runBlocking {
+        val t = FakeTransport(obj("""{"status":"streaming"}"""))
+        val s = GatewaySession(t)
+        s.submit("s1", "hi", voice = true)
+        s.submit("s1", "hi", voice = true, interrupted = true)
+        s.submit("s1", "hi", interrupted = true)
+        val (voice, both, onlyInterrupted) = t.calls.map { it.second }
+        assertEquals(setOf("session_id", "text", "voice_turn"), voice.keys)
+        assertEquals(JsonPrimitive(true), voice["voice_turn"])
+        assertEquals(setOf("session_id", "text", "voice_turn", "interrupted"), both.keys)
+        assertEquals(JsonPrimitive(true), both["interrupted"])
+        assertEquals(setOf("session_id", "text", "interrupted"), onlyInterrupted.keys)
     }
 
     @Test

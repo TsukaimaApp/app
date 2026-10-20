@@ -1948,6 +1948,49 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun voiceTurnsCarryTheFlags() = runTest(dispatcher) {
+        val b = backend()
+        b.speechOutput.instant = false // replies stay "being spoken" until finished
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.openVoice()
+        advanceUntilIdle()
+        fun JsonObject.flag(k: String) = this[k]?.jsonPrimitive?.content
+        fun submits() = b.transport.calls.filter { it.first == "prompt.submit" }.map { it.second }
+
+        b.speech.emit(SpeechEvent.Final("tell me a story"))
+        advanceUntilIdle()
+        assertEquals("true", submits().last().flag("voice_turn"))
+        assertNull(submits().last().flag("interrupted"))
+
+        b.events.emit(ev("message.complete", 5, """{"text":"Once. Upon. A time."}"""))
+        advanceUntilIdle()
+        assertEquals(VoicePhase.Speaking, vm.state.value.voice?.phase)
+        vm.tapVoiceIndicator() // barge-in
+        advanceUntilIdle()
+        b.speech.emit(SpeechEvent.Final("something else"))
+        advanceUntilIdle()
+        assertEquals("true", submits().last().flag("voice_turn"))
+        assertEquals("true", submits().last().flag("interrupted"))
+
+        b.events.emit(ev("message.complete", 6, """{"text":"Sure."}"""))
+        advanceUntilIdle()
+        b.speechOutput.finishSpeaking()
+        advanceUntilIdle()
+        b.speech.emit(SpeechEvent.Final("thanks"))
+        advanceUntilIdle()
+        assertEquals("true", submits().last().flag("voice_turn"))
+        assertNull(submits().last().flag("interrupted"))
+        assertEquals(3, submits().size)
+
+        vm.closeVoice()
+        vm.setInput("typed")
+        vm.send()
+        advanceUntilIdle()
+        assertNull(submits().last().flag("voice_turn"))
+    }
+
+    @Test
     fun assistVoiceOpenedWhileResumingStartsAfterTheHistory() = runTest(dispatcher) {
         val b = backend().apply { transport.on("session.resume", obj(resumeJson)) }
         val gate = CompletableDeferred<Unit>()

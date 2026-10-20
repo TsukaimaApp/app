@@ -90,7 +90,7 @@ class ChatViewModel(
     /** The chat holds its history: a new chat at once, a stored one once `session.resume` has bound it. */
     private val history = MutableStateFlow(if (storedSessionId == null) ChatHistory.Loaded else ChatHistory.Loading)
 
-    private val voice = ChatVoice(backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state, ::sendText, history)
+    private val voice = ChatVoice(backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state, { text, interrupted -> sendText(text, voice = true, interrupted = interrupted) }, history)
 
     private val chat get() = _state.value.chat
     private fun setChat(block: (ChatState) -> ChatState) = _state.update { it.copy(chat = block(it.chat)) }
@@ -214,33 +214,39 @@ class ChatViewModel(
      * when Hermes is unreachable, the chat archived, the context is being compacted, or no live session is open
      * yet. The status turns Thinking before this returns.
      */
-    fun sendText(text: String): Boolean {
+    fun sendText(text: String, voice: Boolean = false, interrupted: Boolean = false): Boolean {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return false
         if (!_state.value.writable) return false.also { backend.toast("Not connected to Hermes") }
         if (_state.value.compacting) return false.also { backend.toast("Compacting the context, try again in a moment") }
         val live = chat.liveSessionId ?: return false.also { backend.toast("Still connecting to Hermes") }
-        startTurn(live, trimmed, emptyList(), fromComposer = false)
+        startTurn(live, trimmed, emptyList(), fromComposer = false, voice = voice, interrupted = interrupted)
         return true
     }
 
     /** Adds the user bubble (status Thinking) and submits it; [fromComposer] also clears the typed text. */
-    private fun startTurn(live: String, text: String, sent: List<PendingAttachment>, fromComposer: Boolean) {
+    private fun startTurn(
+        live: String, text: String, sent: List<PendingAttachment>, fromComposer: Boolean,
+        voice: Boolean = false, interrupted: Boolean = false,
+    ) {
         val localId = "u-l${++userCounter}"
         _state.update {
             val chat = ChatReducer.onSubmitted(it.chat, text, localId, flair, sent.map(PendingAttachment::name))
             if (fromComposer) it.copy(input = "", chat = chat) else it.copy(chat = chat)
         }
-        launch { submit(live, localId, text, sent) }
+        launch { submit(live, localId, text, sent, voice, interrupted) }
     }
 
     /**
      * Submits user message [localId]. A failure keeps the bubble, marked failed with Retry and Dismiss; its text
      * and attachments wait in [failedSends] (not back in the composer, which would show them twice).
      */
-    private suspend fun submit(live: String, localId: String, text: String, sent: List<PendingAttachment>) {
+    private suspend fun submit(
+        live: String, localId: String, text: String, sent: List<PendingAttachment>,
+        voice: Boolean = false, interrupted: Boolean = false,
+    ) {
         try {
-            session.submit(live, Attachments.promptText(text, sent))
+            session.submit(live, Attachments.promptText(text, sent), voice, interrupted)
             attachments.sent(sent)
         } catch (c: CancellationException) {
             throw c
