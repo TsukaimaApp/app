@@ -3,6 +3,14 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.6.2 — 2026-10-20 (versionCode 15)
+
+### Fixed
+- Picking a voice language other than the device’s own sent recognition to the on-device recogniser (which only
+  has the device language) with an offline preference, so other languages failed or were recognised as the device
+  language. Explicit languages now use the default, network-capable recogniser; on-device recognition is kept for
+  the device language.
+
 ## 0.6.1 — 2026-10-20 (versionCode 14)
 
 ### Added

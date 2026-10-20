@@ -236,3 +236,7 @@ Decisions taken on the user's behalf while implementing `design/handoff_voice/RE
 ## v0.6.1
 
 - Ruling: one language setting for both recognition and speech, system default unless picked; options = device locales ∪ TTS engine languages ∪ a fixed fallback list; an uninstalled TTS language reverts to the engine default with a toast.
+
+## v0.6.2
+
+- Ruling: on-device recognition and the offline preference only for the device’s own language; an explicitly picked other language uses the default recogniser online — on-device packs exist for the device language only, and the language-unavailable error codes do not exist before Android 13 — cost if wrong: network recognition for a language that does have an on-device pack.

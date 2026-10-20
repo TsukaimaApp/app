@@ -19,8 +19,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
+import labs.suchattai.tsukaima.domain.voice.RecognizerRouting
 import labs.suchattai.tsukaima.domain.voice.SpeechEvent
 import labs.suchattai.tsukaima.domain.voice.SpeechInput
+import java.util.Locale
 
 /**
  * [SpeechInput] on the platform [SpeechRecognizer]. Each [listen] run owns its own recogniser (created on Main,
@@ -28,7 +30,13 @@ import labs.suchattai.tsukaima.domain.voice.SpeechInput
  * cancelled. The flow runs on `Dispatchers.Main.immediate` regardless of the collector, because
  * [SpeechRecognizer] must be created and used on the main thread. Recognised text is never logged.
  *
- * On Android 12+ the on-device recogniser is preferred, but [SpeechRecognizer.isOnDeviceRecognitionAvailable] does
+ * Routing ([RecognizerRouting]): the on-device recogniser (Android 12+) and the offline preference are used only for
+ * the device's own language (the default, or an explicit tag with the same language), because on-device packs exist
+ * for the device language only. An explicitly picked other language goes to the default, network-capable recogniser
+ * with no offline preference; before Android 13 a missing on-device pack produces no language error, so the fallback
+ * below could not catch it.
+ *
+ * For the device language the on-device recogniser is preferred, but [SpeechRecognizer.isOnDeviceRecognitionAvailable] does
  * not look at the language: without the language pack every on-device run fails with `ERROR_LANGUAGE_UNAVAILABLE` /
  * `ERROR_LANGUAGE_NOT_SUPPORTED`. The first such failure turns the on-device recogniser off for the rest of the
  * process ([preferOnDevice]) and is reported once as retryable, so the next run uses the default recogniser; only
@@ -73,17 +81,24 @@ class AndroidSpeechInput(
         ?.let { ComponentName(it.packageName, it.name) }
 
     override fun listen(): Flow<SpeechEvent> {
-        val onDevice = onDeviceAvailable()
-        val explicit = if (!onDevice && stubIsDefault()) {
+        val tag = language()
+        val choice = RecognizerRouting.choose(tag, Locale.getDefault().stripExtensions().toLanguageTag(), onDeviceAvailable())
+        val explicit = if (!choice.onDevice && stubIsDefault()) {
             systemRecognizer() ?: return flowOf(SpeechEvent.Error(UNAVAILABLE, retry = false))
         } else {
             null
         }
-        return recognize(onDevice, explicit, language())
+        Log.i(TAG, "Speech recogniser: onDevice=${choice.onDevice} offline=${choice.preferOffline} language=${tag ?: "default"}")
+        return recognize(choice.onDevice, choice.preferOffline, explicit, tag)
     }
 
     /** [explicit] null = the system default recogniser; [tag] null = its default language. */
-    private fun recognize(onDevice: Boolean, explicit: ComponentName?, tag: String?): Flow<SpeechEvent> = callbackFlow {
+    private fun recognize(
+        onDevice: Boolean,
+        preferOffline: Boolean,
+        explicit: ComponentName?,
+        tag: String?,
+    ): Flow<SpeechEvent> = callbackFlow {
         val recognizer = when {
             onDevice && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> SpeechRecognizer.createOnDeviceSpeechRecognizer(context) // S: spelled out for lint
             explicit != null -> SpeechRecognizer.createSpeechRecognizer(context, explicit)
@@ -131,7 +146,7 @@ class AndroidSpeechInput(
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-            .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+        if (preferOffline) intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
         if (tag != null) {
             intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, tag)
             intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, tag)

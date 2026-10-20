@@ -25,7 +25,8 @@ import kotlin.coroutines.resume
  * app (not a duck) stops the speech; the [speak] in flight then returns. Spoken text is never logged.
  *
  * [language] is the voice language setting (a BCP-47 tag, null = the engine's default), applied before each
- * utterance when it changed. A language the engine lacks (no voice data, not supported) reverts to the engine's
+ * utterance when it changed. A language the engine lacks (no voice data, not supported — by `isLanguageAvailable` or
+ * by `setLanguage`) reverts to the engine's
  * default and is reported to [onUnsupported] once per tag per process, on the main thread.
  */
 class AndroidSpeechOutput(
@@ -152,8 +153,11 @@ class AndroidSpeechOutput(
         if (tag == appliedTag) return
         appliedTag = tag
         if (tag == null) return restoreDefault(engine)
-        val result = engine.setLanguage(Locale.forLanguageTag(tag))
-        if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+        val locale = Locale.forLanguageTag(tag)
+        // Checked first: some engines accept setLanguage for a locale they then cannot speak.
+        val availability = engine.isLanguageAvailable(locale)
+        val result = if (availability < 0) availability else engine.setLanguage(locale)
+        if (result < 0) { // LANG_MISSING_DATA, LANG_NOT_SUPPORTED (ERROR shares LANG_MISSING_DATA's value)
             Log.w(TAG, "TextToSpeech language unavailable: $tag ($result)")
             restoreDefault(engine)
             if (reported.add(tag)) main.post { onUnsupported(tag) }
