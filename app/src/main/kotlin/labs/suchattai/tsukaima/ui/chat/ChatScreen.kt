@@ -29,7 +29,9 @@ import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ChatItem
@@ -80,8 +82,17 @@ fun ChatScreen(
     showMenu: Boolean,
     onStatus: () -> Unit,
     onDeleted: () -> Unit,
+    visibleSession: MutableStateFlow<String?>? = null,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    // While resumed, this chat's live session is "on screen": its approvals show here, not as notifications.
+    val live = state.chat.liveSessionId
+    if (visibleSession != null) {
+        LifecycleResumeEffect(live, visibleSession) {
+            if (live != null) visibleSession.value = live
+            onPauseOrDispose { if (live != null) visibleSession.compareAndSet(live, null) }
+        }
+    }
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     LaunchedEffect(vm) { vm.closed.collect { onDeleted() } }

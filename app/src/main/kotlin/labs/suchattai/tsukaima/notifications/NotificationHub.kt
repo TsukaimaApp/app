@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import labs.suchattai.tsukaima.data.HermesState
+import labs.suchattai.tsukaima.data.RecentIds
 import labs.suchattai.tsukaima.data.api.CronJobDto
 import labs.suchattai.tsukaima.data.api.PairingDto
 import labs.suchattai.tsukaima.data.gateway.Frame
@@ -97,10 +98,16 @@ class NotificationHub(
     private val pairing: suspend () -> Result<PairingDto>,
     private val poster: NotificationPoster,
     private val foreground: () -> Boolean,
+    /** Live id of the chat on screen (null when none): its approvals are not notified in the foreground. */
+    private val visibleSession: () -> String? = { null },
+    /** Live → stored session id, so an approval notification opens the chat that asked. */
+    storedFor: (String) -> String? = { null },
+    /** Withdrawn request ids, shared with chat ([labs.suchattai.tsukaima.data.ConnectionManager.closedRequestIds]). */
+    closed: RecentIds = RecentIds(),
     private val pollMs: Long = 60_000,
     private val logger: (String, Throwable?) -> Unit = { _, _ -> },
 ) {
-    private val coordinator = NotificationCoordinator(answered)
+    private val coordinator = NotificationCoordinator(answered, storedFor = storedFor, closedIds = closed)
     private val started = AtomicBoolean(false)
     private val lock = Any()
     private var backgroundJob: Job? = null
@@ -109,7 +116,7 @@ class NotificationHub(
         if (!started.compareAndSet(false, true)) return
         answered.addListener { apply(coordinator.onAnswered(it)) }
         scope.launch {
-            serverRequests.collect { req -> coordinator.onServerRequest(req, foreground())?.let(poster::post) }
+            serverRequests.collect { req -> coordinator.onServerRequest(req, foreground(), visibleSession())?.let(poster::post) }
         }
         scope.launch {
             events.collect { ev -> coordinator.onEvent(ev, foreground()).forEach(::apply) }

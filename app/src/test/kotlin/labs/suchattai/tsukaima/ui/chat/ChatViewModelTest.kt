@@ -18,6 +18,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import labs.suchattai.tsukaima.data.HermesState
+import labs.suchattai.tsukaima.data.RecentIds
 import labs.suchattai.tsukaima.data.api.HermesJson
 import labs.suchattai.tsukaima.data.api.ModelOptionsDto
 import labs.suchattai.tsukaima.data.api.WorkspacesDto
@@ -81,10 +82,14 @@ class ChatViewModelTest {
             return if (queue.size > 1) queue.removeFirst() else queue.first()
         }
 
+        /** What [respond] reports: false = not enqueued on a live socket. */
+        var respondOk = true
+
         override fun respond(id: String, result: JsonObject): Boolean {
             responses += id to result
-            return true
+            return respondOk
         }
+        override fun respondError(id: String, code: Int, message: String): Boolean = true
     }
 
     private class FakeBackend(settings: Settings) : ChatBackend {
@@ -93,6 +98,7 @@ class ChatViewModelTest {
         override val connection = MutableStateFlow(ConnectionState.Connected)
         override val serverRequests = MutableSharedFlow<Frame.ServerRequest>(replay = 16, extraBufferCapacity = 64)
         override val answeredRequestIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
+        override val closedRequestIds = RecentIds()
         override val hermes = MutableStateFlow(HermesState())
         override val settings = MutableStateFlow<Settings?>(settings)
         val toasts = mutableListOf<String>()
@@ -100,6 +106,10 @@ class ChatViewModelTest {
 
         override suspend fun updateSettings(block: (Settings) -> Settings) {
             settings.value = block(settings.value ?: Settings())
+        }
+        val bound = mutableListOf<Pair<String, String?>>()
+        override suspend fun bindSession(live: String, stored: String?) {
+            bound += live to stored
         }
         override suspend fun modelOptions() = Result.success(ModelOptionsDto(model = "m-1", provider = "p"))
         override suspend fun workspaces() = Result.success(WorkspacesDto(defaultCwd = "/home/hermes"))
@@ -279,6 +289,70 @@ class ChatViewModelTest {
 
         val cards = vm.state.value.chat.items.filterIsInstance<ChatItem.Approval>()
         assertEquals(listOf("srq-open"), cards.map { it.id })
+    }
+
+    @Test
+    fun withdrawnApprovalNotReadoptedFromReplay() = runTest(dispatcher) {
+        // New chat: a withdrawn request still sits in the 16-entry replay, but the container saw it closed.
+        val b = backend()
+        b.serverRequests.emit(approval("srq-withdrawn"))
+        b.serverRequests.emit(approval("srq-open"))
+        b.closedRequestIds.add("srq-withdrawn")
+        val vm = vm(b)
+        advanceUntilIdle()
+        assertEquals(listOf("srq-open"), vm.state.value.chat.items.filterIsInstance<ChatItem.Approval>().map { it.id })
+
+        // Resumed chat: the snapshot's open_requests is authoritative; a replayed id it does not list is dead.
+        val r = backend().apply {
+            transport.on(
+                "session.resume",
+                obj(
+                    resumeJson.replace(
+                        "\"running\":false",
+                        "\"running\":true,\"open_requests\":[{\"id\":\"srq-live\",\"method\":\"approval\"," +
+                            "\"params\":{\"request_id\":\"req-live\",\"command\":\"ls\"}}]",
+                    ),
+                ),
+            )
+        }
+        r.serverRequests.emit(approval("srq-stale"))
+        r.serverRequests.emit(approval("srq-live"))
+        val resumed = vm(r, stored)
+        advanceUntilIdle()
+        assertEquals(listOf("srq-live"), resumed.state.value.chat.items.filterIsInstance<ChatItem.Approval>().map { it.id })
+
+        // A genuinely new request after the snapshot is still shown.
+        r.serverRequests.emit(approval("srq-new"))
+        advanceUntilIdle()
+        assertEquals(
+            listOf("srq-live", "srq-new"),
+            resumed.state.value.chat.items.filterIsInstance<ChatItem.Approval>().map { it.id },
+        )
+    }
+
+    @Test
+    fun approveNotSentRevertsCard() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.serverRequests.emit(approval("srq-1"))
+        advanceUntilIdle()
+
+        b.transport.respondOk = false
+        vm.approve("srq-1")
+        advanceUntilIdle()
+        val card = vm.state.value.chat.items.single() as ChatItem.Approval
+        assertFalse("not sent: the user can answer again", card.answered)
+        assertFalse("srq-1" in b.answeredRequestIds)
+        assertNull(vm.state.value.decisions["srq-1"])
+        assertEquals(AgentStatus.Approval, vm.state.value.status)
+        assertTrue(b.toasts.any { it.startsWith("Couldn’t send the answer") })
+
+        b.transport.respondOk = true
+        vm.approve("srq-1")
+        advanceUntilIdle()
+        assertTrue((vm.state.value.chat.items.single() as ChatItem.Approval).answered)
+        assertTrue("srq-1" in b.answeredRequestIds)
     }
 
     @Test

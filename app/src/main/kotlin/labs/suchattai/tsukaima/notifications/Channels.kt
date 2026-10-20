@@ -54,7 +54,7 @@ class AndroidNotificationPoster(context: Context) : NotificationPoster {
     private val manager = NotificationManagerCompat.from(this.context)
 
     fun build(spec: NotificationSpec): Notification {
-        val open = openApp(spec.openScreen, spec.id, "content")
+        val open = openApp(spec.openScreen, spec.id, "content", spec.sessionId)
         val builder = NotificationCompat.Builder(context, spec.channel)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentTitle(spec.title)
@@ -78,10 +78,10 @@ class AndroidNotificationPoster(context: Context) : NotificationPoster {
         spec.actions.forEachIndexed { index, action ->
             val pending = when {
                 action.intentAction == ApprovalNotifier.ACTION_OPEN_CHAT ->
-                    openApp(ApprovalNotifier.SCREEN_CHAT, spec.id, index.toString())
+                    openApp(ApprovalNotifier.SCREEN_CHAT, spec.id, index.toString(), spec.sessionId)
                 // API 29–30 cannot demand an unlock for a button: open the app instead of acting.
                 action.requiresAuth && !canRequireAuth ->
-                    openApp(ApprovalNotifier.fallbackScreen(action.intentAction), spec.id, index.toString())
+                    openApp(ApprovalNotifier.fallbackScreen(action.intentAction), spec.id, index.toString(), spec.sessionId)
                 else -> {
                     val intent = Intent(action.intentAction)
                         .setClass(context, NotificationActionReceiver::class.java) // explicit component
@@ -97,11 +97,13 @@ class AndroidNotificationPoster(context: Context) : NotificationPoster {
         return builder.build()
     }
 
-    private fun openApp(screen: String?, id: Int, slot: String): PendingIntent {
+    /** Opens the app on [screen]; a chat screen also gets the stored [sessionId] (validated on receipt). */
+    private fun openApp(screen: String?, id: Int, slot: String, sessionId: String? = null): PendingIntent {
         val intent = Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .setData(uri(id, slot))
         if (screen != null) intent.putExtra(ApprovalNotifier.EXTRA_OPEN_SCREEN, screen)
+        if (screen == ApprovalNotifier.SCREEN_CHAT) DeepLink.sessionId(sessionId)?.let { intent.putExtra(DeepLink.EXTRA_SESSION_ID, it) }
         return PendingIntent.getActivity(context, id * 31 + slot.hashCode(), intent, FLAGS)
     }
 

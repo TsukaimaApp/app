@@ -21,6 +21,8 @@ import kotlinx.coroutines.launch
 import labs.suchattai.tsukaima.di.AppContainer
 import labs.suchattai.tsukaima.notifications.ApprovalNotifier
 import labs.suchattai.tsukaima.notifications.BackgroundPolicy
+import labs.suchattai.tsukaima.notifications.DeepLink
+import labs.suchattai.tsukaima.notifications.OpenScreen
 import java.io.IOException
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
@@ -80,13 +82,20 @@ class MainActivity : ComponentActivity() {
         handleOpenScreen(intent)
     }
 
-    /** A notification tap or button asked for a screen; only the known screens are accepted. */
+    /**
+     * A notification tap or button asked for a screen; only the known screens are accepted, and a chat's
+     * session id only if it is a plausible stored id ([DeepLink.sessionId]).
+     */
     private fun handleOpenScreen(intent: Intent?) {
         val screen = intent?.getStringExtra(ApprovalNotifier.EXTRA_OPEN_SCREEN) ?: return
-        if (screen == ApprovalNotifier.SCREEN_CHAT || screen == ApprovalNotifier.SCREEN_SETTINGS) {
-            (application as TsukaimaApp).container.openScreen.value = screen
+        val session = DeepLink.sessionId(intent.getStringExtra(DeepLink.EXTRA_SESSION_ID))
+        when (screen) {
+            ApprovalNotifier.SCREEN_CHAT -> (application as TsukaimaApp).container.openScreen.value = OpenScreen(screen, session)
+            ApprovalNotifier.SCREEN_SETTINGS -> (application as TsukaimaApp).container.openScreen.value = OpenScreen(screen)
         }
-        intent.removeExtra(ApprovalNotifier.EXTRA_OPEN_SCREEN) // not again on recreation
+        // Not again on recreation.
+        intent.removeExtra(ApprovalNotifier.EXTRA_OPEN_SCREEN)
+        intent.removeExtra(DeepLink.EXTRA_SESSION_ID)
     }
 
     private fun granted(): Boolean = Build.VERSION.SDK_INT < 33 ||

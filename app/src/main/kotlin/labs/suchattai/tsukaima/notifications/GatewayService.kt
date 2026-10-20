@@ -9,6 +9,7 @@ import android.util.Log
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
@@ -31,6 +32,9 @@ class GatewayService : Service() {
     /** The hand-off generation this instance was last started for ([BackgroundController.generation]). */
     private var generation = 0L
 
+    /** Stops the service once the app is in the foreground; replaced on every start, so each start has one. */
+    private var watcher: Job? = null
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         lastStartId = startId
         generation = container.background.generation
@@ -44,13 +48,12 @@ class GatewayService : Service() {
             stopSelf(startId)
             return START_NOT_STICKY
         }
-        if (scope == null) {
-            scope = MainScope().also { s ->
-                s.launch {
-                    container.background.inForeground.first { it }
-                    stopSelf(lastStartId) // back in the foreground: the connection already polls normally
-                }
-            }
+        val s = scope ?: MainScope().also { scope = it }
+        // A watcher that already fired stopped with an older start id, which a newer start outlives: relaunch.
+        watcher?.cancel()
+        watcher = s.launch {
+            container.background.inForeground.first { it }
+            stopSelf(lastStartId) // back in the foreground: the connection already polls normally
         }
         container.notifications.startBackground()
         return START_NOT_STICKY
@@ -64,6 +67,7 @@ class GatewayService : Service() {
     override fun onDestroy() {
         scope?.cancel()
         scope = null
+        watcher = null
         container.notifications.stopBackground()
         // Only while backgrounded: disconnect and clear approval buttons that can no longer work.
         container.background.onServiceEnded(generation)

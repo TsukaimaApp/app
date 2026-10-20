@@ -10,6 +10,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.longOrNull
 import labs.suchattai.tsukaima.data.HermesState
+import labs.suchattai.tsukaima.data.RecentIds
 import labs.suchattai.tsukaima.data.api.ModelOptionsDto
 import labs.suchattai.tsukaima.data.api.WorkspacesDto
 import labs.suchattai.tsukaima.data.gateway.ConnectionState
@@ -34,11 +35,17 @@ interface ChatBackend {
 
     /** Shared with notifications: skip requests in it, add an id when answering. */
     val answeredRequestIds: MutableSet<String>
+
+    /** Requests the server withdrew (container-wide): never adopted from the replay again. */
+    val closedRequestIds: RecentIds
     val hermes: StateFlow<HermesState>
 
     /** Null until DataStore has loaded. */
     val settings: StateFlow<Settings?>
     suspend fun updateSettings(block: (Settings) -> Settings)
+
+    /** This chat is bound to [live] (stored id [stored]): for notifications that only know the live id. */
+    suspend fun bindSession(live: String, stored: String?)
     suspend fun modelOptions(): Result<ModelOptionsDto>
     suspend fun workspaces(): Result<WorkspacesDto>
     suspend fun renameSession(id: String, title: String): Result<Unit>
@@ -53,6 +60,7 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override val connection get() = c.gateway.state
     override val serverRequests get() = c.connection.serverRequests
     override val answeredRequestIds get() = c.answeredRequestIds
+    override val closedRequestIds get() = c.connection.closedRequestIds
     override val hermes get() = c.connection.hermes
     override val settings get() = c.settings
     override suspend fun updateSettings(block: (Settings) -> Settings) {
@@ -61,6 +69,12 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
         } catch (e: IOException) {
             Log.w("Tsukaima", "chat: saving settings failed", e)
         }
+    }
+    override suspend fun bindSession(live: String, stored: String?) {
+        if (stored == null) return
+        c.sessionBindings.bind(live, stored)
+        // Also the fallback for a notification whose live id is unknown (e.g. after a process restart).
+        if (c.settings.value?.lastSessionId != stored) updateSettings { it.copy(lastSessionId = stored) }
     }
     override suspend fun modelOptions() = c.repository.modelOptions()
     override suspend fun workspaces() = c.repository.workspaces()

@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.json.Json
 import labs.suchattai.tsukaima.data.ConnectionManager
 import labs.suchattai.tsukaima.data.HermesRepository
+import labs.suchattai.tsukaima.data.SessionBindings
 import labs.suchattai.tsukaima.data.api.AuthException
 import labs.suchattai.tsukaima.data.api.AuthInterceptor
 import labs.suchattai.tsukaima.data.api.HermesApi
@@ -36,6 +37,7 @@ import labs.suchattai.tsukaima.notifications.BackgroundController
 import labs.suchattai.tsukaima.notifications.BackgroundPolicy
 import labs.suchattai.tsukaima.notifications.GatewayService
 import labs.suchattai.tsukaima.notifications.NotificationHub
+import labs.suchattai.tsukaima.notifications.OpenScreen
 import labs.suchattai.tsukaima.ui.components.ToastState
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -124,7 +126,7 @@ class AppContainer(context: Context) {
         logger = { m, t -> Log.w("Gateway", m, t) },
     )
 
-    val gatewaySession = GatewaySession(gateway)
+    val gatewaySession = GatewaySession(gateway) { settings.value?.profile }
 
     val connection: ConnectionManager = ConnectionManager(
         api = api,
@@ -156,7 +158,13 @@ class AppContainer(context: Context) {
     val inForeground = MutableStateFlow(false)
 
     /** A notification asked to open a screen (`chat` / `settings`); the shell navigates and clears it. */
-    val openScreen = MutableStateFlow<String?>(null)
+    val openScreen = MutableStateFlow<OpenScreen?>(null)
+
+    /** Live id of the chat on screen while it is resumed, else null (set by the chat screen). */
+    val visibleLiveSessionId = MutableStateFlow<String?>(null)
+
+    /** Live → stored session ids as chats bind them; notifications open the chat that asked. */
+    val sessionBindings = SessionBindings()
 
     /** Posts and cancels notifications for the five background events; started by the application. */
     val notifications = NotificationHub(
@@ -169,6 +177,9 @@ class AppContainer(context: Context) {
         pairing = { repository.pairing() },
         poster = AndroidNotificationPoster(appContext),
         foreground = { inForeground.value },
+        visibleSession = { visibleLiveSessionId.value },
+        storedFor = sessionBindings::storedFor,
+        closed = connection.closedRequestIds,
         logger = { m, t -> Log.w(TAG, m, t) },
     )
 

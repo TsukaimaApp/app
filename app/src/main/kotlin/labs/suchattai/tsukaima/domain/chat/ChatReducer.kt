@@ -125,16 +125,15 @@ object ChatReducer {
                     status = AgentStatus.Replying,
                 )
             }
-            "message.complete" -> onMessageComplete(s, p, ev.seq)
-            "turn.error" -> {
-                val message = p.string("message") ?: "unknown error"
-                val (counted, id) = nextId(s, ev.seq, "e")
-                counted.copy(
-                    items = abortTurn(counted.items) +
-                        ChatItem.AssistantMessage(id, "Something went wrong: $message", streaming = false, reasoning = null),
-                    status = AgentStatus.Idle,
-                )
-            }
+            "message.complete" ->
+                if (p.string("status") == "error" && p.string("text").isNullOrEmpty()) {
+                    // A failed turn with nothing to show: end it as an error, not as a silent empty reply.
+                    turnFailed(s, ev.seq, p.string("error") ?: p.string("message"))
+                } else {
+                    onMessageComplete(s, p, ev.seq)
+                }
+            // `error` is what the gateway emits (server.py, methods_prompt.py); `turn.error` is kept for older ones.
+            "turn.error", "error" -> turnFailed(s, ev.seq, p.string("message") ?: "unknown error")
             "session.title" -> s.copy(
                 title = p.string("title") ?: s.title,
                 storedSessionId = p.string("session_id")?.takeIf { it.isNotBlank() } ?: s.storedSessionId,
@@ -154,6 +153,16 @@ object ChatReducer {
             }
             else -> s
         }
+    }
+
+    /** Abnormal turn end: [abortTurn], then "Something went wrong[: reason]" as the reply. */
+    private fun turnFailed(s: ChatState, seq: Long?, reason: String?): ChatState {
+        val (counted, id) = nextId(s, seq, "e")
+        val text = if (reason.isNullOrBlank()) "Something went wrong" else "Something went wrong: $reason"
+        return counted.copy(
+            items = abortTurn(counted.items) + ChatItem.AssistantMessage(id, text, streaming = false, reasoning = null),
+            status = AgentStatus.Idle,
+        )
     }
 
     private fun onMessageStart(s: ChatState, seq: Long?, flair: () -> String): ChatState {

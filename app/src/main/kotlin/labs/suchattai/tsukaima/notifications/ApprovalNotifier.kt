@@ -31,6 +31,8 @@ data class NotificationSpec(
     val ongoing: Boolean = false,
     /** Screen the tap opens ([ApprovalNotifier.SCREEN_CHAT] / [ApprovalNotifier.SCREEN_SETTINGS]); null = as left. */
     val openScreen: String? = null,
+    /** Stored session the chat screen opens (taps, "Open to review", the API 29–30 Approve fallback). */
+    val sessionId: String? = null,
 )
 
 /** Pure builders for every notification the app posts. */
@@ -85,7 +87,7 @@ object ApprovalNotifier {
      * characters; otherwise the user gets Deny and "Open to review" (the full command in chat). Approve needs
      * the device unlocked. No usable srq id: informational, no buttons.
      */
-    fun forApproval(req: Frame.ServerRequest): NotificationSpec {
+    fun forApproval(req: Frame.ServerRequest, storedSessionId: String? = null): NotificationSpec {
         val command = req.params.str("command") ?: req.params.str("tool_name").orEmpty()
         val revealed = CommandText.reveal(command)
         val truncated = revealed.text.length > MAX_COMMAND
@@ -103,7 +105,8 @@ object ApprovalNotifier {
             )
         }
         return NotificationSpec(
-            Channels.APPROVALS, approvalId(req.id), "Hermes wants to run a tool", text, actions, openScreen = SCREEN_CHAT,
+            Channels.APPROVALS, approvalId(req.id), "Hermes wants to run a tool", text, actions,
+            openScreen = SCREEN_CHAT, sessionId = storedSessionId,
         )
     }
 

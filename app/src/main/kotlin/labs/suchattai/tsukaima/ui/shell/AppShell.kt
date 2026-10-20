@@ -123,16 +123,24 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
         }
     }
     LaunchedEffect(navController) {
-        // A notification asked for a screen: chat opens the last conversation, settings the pairing list.
-        container.openScreen.filterNotNull().collect { screen ->
+        // A notification asked for a screen: chat opens the session that asked (else the last conversation),
+        // settings the pairing list.
+        container.openScreen.filterNotNull().collect { request ->
             container.openScreen.value = null
             if (navController.currentBackStackEntry?.destination?.route == Route.Onboarding.path) return@collect
-            when (screen) {
-                ApprovalNotifier.SCREEN_CHAT -> navController.navigateTop(Route.Chat.create(container.settings.value?.lastSessionId))
+            when (request.screen) {
+                ApprovalNotifier.SCREEN_CHAT -> {
+                    val session = request.sessionId ?: container.settings.value?.lastSessionId
+                    val entryNow = navController.currentBackStackEntry
+                    val alreadyOpen = session != null && entryNow?.destination?.route == Route.Chat.path &&
+                        entryNow.arguments?.getString(Route.ARG_SESSION) == session
+                    if (!alreadyOpen) navController.navigateTop(Route.Chat.create(session))
+                }
                 ApprovalNotifier.SCREEN_SETTINGS -> navController.navigate(Route.Settings.path) { launchSingleTop = true }
             }
         }
     }
+    LaunchedEffect(Unit) { container.connection.hints.collect { container.toastState.show(it) } }
     LaunchedEffect(vm, navController) {
         vm.authPrompts.collect {
             navController.navigate(Route.Settings.path) { launchSingleTop = true }

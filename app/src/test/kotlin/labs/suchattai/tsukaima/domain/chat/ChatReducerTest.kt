@@ -228,6 +228,39 @@ class ChatReducerTest {
     }
 
     @Test
+    fun errorEventAbortsTurn() {
+        val s = live.feed(
+            ev("message.start", seq = 1),
+            ev("tool.start", """{"tool_id":"t1","name":"terminal"}""", 2),
+            ev("error", """{"message":"model provider rejected the request"}""", 3),
+        )
+        assertEquals(AgentStatus.Idle, s.status)
+        assertEquals(ToolStatus.Failed, s.items.filterIsInstance<ChatItem.ToolCall>().single().status)
+        val last = s.items.last() as ChatItem.AssistantMessage
+        assertEquals("Something went wrong: model provider rejected the request", last.text)
+        assertTrue(s.items.filterIsInstance<ChatItem.AssistantMessage>().none { it.streaming })
+    }
+
+    @Test
+    fun errorCompletionEndsTurnAsError() {
+        val withError = live.feed(
+            ev("message.start", seq = 1),
+            ev("message.complete", """{"text":"","status":"error","error":"context window exceeded"}""", 2),
+        )
+        assertEquals(AgentStatus.Idle, withError.status)
+        assertEquals(
+            "Something went wrong: context window exceeded",
+            (withError.items.last() as ChatItem.AssistantMessage).text,
+        )
+        val bare = live.feed(ev("message.complete", """{"text":"","status":"error"}""", 1))
+        assertEquals("Something went wrong", (bare.items.last() as ChatItem.AssistantMessage).text)
+        // An error completion that carries text keeps it (the server already rendered the failure).
+        val texted = live.feed(ev("message.complete", """{"text":"Error: boom","status":"error","error":"boom"}""", 1))
+        assertEquals("Error: boom", (texted.items.last() as ChatItem.AssistantMessage).text)
+        assertEquals(AgentStatus.Idle, texted.status)
+    }
+
+    @Test
     fun seqOnlyAdvances() {
         val s1 = live.feed(ev("session.info", seq = 5))
         assertEquals(5L, s1.lastSeq)

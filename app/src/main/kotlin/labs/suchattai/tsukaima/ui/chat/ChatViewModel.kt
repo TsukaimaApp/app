@@ -11,8 +11,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -43,7 +45,7 @@ class ChatViewModel(
     private val dispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
     private val flair: () -> String = ThinkingFlair::next,
 ) : ViewModel() {
-    private val session = GatewaySession(backend.transport)
+    private val session = GatewaySession(backend.transport) { backend.settings.value?.profile }
     private val _state = MutableStateFlow(ChatUiState(loading = storedSessionId != null, isNew = storedSessionId == null))
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
@@ -72,6 +74,12 @@ class ChatViewModel(
         launch { backend.events.collect(sync::onEvent) }
         launch { backend.serverRequests.collect(sync::onRequest) }
         launch { backend.connection.collect(::onConnection) }
+        launch {
+            // Lets notifications open the stored session that asked, knowing only its live id.
+            _state.map { it.chat.liveSessionId to it.chat.storedSessionId }.distinctUntilChanged().collect { (live, stored) ->
+                if (live != null) backend.bindSession(live, stored)
+            }
+        }
         open()
     }
 
@@ -200,19 +208,27 @@ class ChatViewModel(
             it.copy(chat = ChatReducer.onApprovalAnswered(it.chat, id, flair), decisions = it.decisions + (id to approved))
         }
         if (!id.startsWith(ChatSync.PENDING_PREFIX)) {
-            session.respondApproval(id, choice) // not sent offline: the server re-offers it on resume
+            if (!session.respondApproval(id, choice)) {
+                // Not enqueued on a live socket: the server still waits, so let the user try again.
+                backend.toast("Couldn’t send the answer: not connected to Hermes")
+                reopenAnswer(id)
+            }
             return
         }
         val live = chat.liveSessionId ?: return
         launch {
             if (!attempt("Couldn’t send the answer") { session.approvalRespond(live, card.requestId, choice) }) {
-                // Let the user try again: the RPC failed, so the server still waits for an answer.
-                backend.answeredRequestIds.remove(id)
-                _state.update { s ->
-                    val items = s.chat.items.map { if (it.id == id && it is ChatItem.Approval) it.copy(answered = false) else it }
-                    s.copy(chat = s.chat.copy(items = items, status = unlessOffline(s.chat.status, AgentStatus.Approval)), decisions = s.decisions - id)
-                }
+                reopenAnswer(id) // the RPC failed, so the server still waits for an answer
             }
+        }
+    }
+
+    /** Undoes an answer that was not delivered: the card is answerable again and the claim is released. */
+    private fun reopenAnswer(id: String) {
+        backend.answeredRequestIds.remove(id)
+        _state.update { s ->
+            val items = s.chat.items.map { if (it.id == id && it is ChatItem.Approval) it.copy(answered = false) else it }
+            s.copy(chat = s.chat.copy(items = items, status = unlessOffline(s.chat.status, AgentStatus.Approval)), decisions = s.decisions - id)
         }
     }
 

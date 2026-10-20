@@ -40,6 +40,9 @@ internal class ChatReconnector(
     private var held: MutableList<Frame.Event>? = null
     private val recentRequests = ArrayDeque<Frame.ServerRequest>()
 
+    /** Ids the latest resume snapshot listed as open (`open_requests` + `pending_approval`); null before one. */
+    private var snapshotOpenIds: Set<String>? = null
+
     private val chat get() = state.value.chat
     private fun setChat(block: (ChatState) -> ChatState) = state.update { it.copy(chat = block(it.chat)) }
 
@@ -53,8 +56,17 @@ internal class ChatReconnector(
         adopt(req)
     }
 
-    /** After the first bind: requests that arrived (or were replayed) before the live id was known. */
-    fun adoptRecent() = recentRequests.toList().forEach(::adopt)
+    /**
+     * After the first bind: requests that arrived (or were replayed) before the live id was known. The replay
+     * may hold requests withdrawn since, so ids the container saw closed are skipped, and once a resume
+     * snapshot exists so is every id it did not list as open.
+     */
+    fun adoptRecent() {
+        val open = snapshotOpenIds
+        recentRequests.toList()
+            .filter { open == null || it.id in open }
+            .forEach { adopt(it) }
+    }
 
     fun onLost() {
         job?.cancel()
@@ -132,11 +144,14 @@ internal class ChatReconnector(
      */
     fun adoptOpen(entries: List<JsonObject>, pending: JsonObject?) {
         val live = chat.liveSessionId ?: return
-        entries.mapNotNull { ChatSync.openRequest(it, live) }.forEach(::reopen)
-        if (pending != null) {
+        val open = entries.mapNotNull { ChatSync.openRequest(it, live) }
+        val pendingReq = pending?.let { ChatSync.pendingApproval(it, live) }
+        snapshotOpenIds = (open + listOfNotNull(pendingReq)).map { it.id }.toSet()
+        open.forEach(::reopen)
+        if (pending != null && pendingReq != null) {
             val rid = (pending["request_id"] as? JsonPrimitive)?.contentOrNull
             val shown = chat.items.any { it is ChatItem.Approval && !it.answered && rid != null && it.requestId == rid }
-            if (!shown) reopen(ChatSync.pendingApproval(pending, live))
+            if (!shown) reopen(pendingReq)
         }
     }
 
@@ -146,7 +161,7 @@ internal class ChatReconnector(
         state.update { s ->
             s.copy(chat = s.chat.copy(items = s.chat.items.filterNot { it.id == req.id }), decisions = s.decisions - req.id)
         }
-        adopt(req)
+        adopt(req, snapshot = true)
     }
 
     private fun applyEvent(ev: Frame.Event) {
@@ -160,9 +175,13 @@ internal class ChatReconnector(
         setChat { ChatReducer.reduce(it, ev, flair) }
     }
 
-    /** Approvals for this live session that nobody has answered yet; replays of answered ones are skipped. */
-    private fun adopt(req: Frame.ServerRequest) {
+    /**
+     * Approvals for this live session that nobody has answered yet; replays of answered ones are skipped, and
+     * so are withdrawn ones unless a resume [snapshot] (authoritative) lists them as open again.
+     */
+    private fun adopt(req: Frame.ServerRequest, snapshot: Boolean = false) {
         if (req.method != "approval" || req.id in backend.answeredRequestIds) return
+        if (!snapshot && backend.closedRequestIds.contains(req.id)) return
         val live = chat.liveSessionId ?: return
         if ((req.params["session_id"] as? JsonPrimitive)?.contentOrNull != live) return
         setChat { ChatReducer.reduce(it, req, flair) }

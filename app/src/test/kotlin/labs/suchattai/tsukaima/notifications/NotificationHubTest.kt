@@ -44,6 +44,7 @@ class NotificationHubTest {
             if (live) responses += id to result
             return live
         }
+        override fun respondError(id: String, code: Int, message: String): Boolean = live
     }
 
     private fun TestScope.hub(
@@ -62,6 +63,7 @@ class NotificationHubTest {
         pairing = { Result.success(PairingDto()) },
         poster = poster,
         foreground = foreground,
+        visibleSession = { "live-1" }, // the chat on screen, whose approvals it shows itself
     )
 
     @Test
@@ -116,7 +118,13 @@ class NotificationHubTest {
         job.cancelAndJoin()
     }
 
-    private fun approval(id: String) = Frame.ServerRequest(id, "approval", buildJsonObject { put("command", "ls") })
+    private fun approval(id: String) = Frame.ServerRequest(
+        id, "approval",
+        buildJsonObject {
+            put("session_id", "live-1")
+            put("command", "ls")
+        },
+    )
 
     @Test
     fun answeredElsewhereCancelsNotificationAndBackgroundPollsCron() = runTest(UnconfinedTestDispatcher()) {
@@ -138,6 +146,7 @@ class NotificationHubTest {
             pairing = { Result.success(PairingDto()) },
             poster = poster,
             foreground = { foreground },
+            visibleSession = { "live-1" },
             pollMs = 60_000,
         )
         hub.start()

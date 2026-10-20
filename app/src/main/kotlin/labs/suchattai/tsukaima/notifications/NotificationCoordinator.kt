@@ -4,6 +4,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import labs.suchattai.tsukaima.data.RecentIds
 import labs.suchattai.tsukaima.data.api.CronJobDto
 import labs.suchattai.tsukaima.data.gateway.Frame
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
@@ -14,35 +15,16 @@ sealed interface NotificationCommand {
     data class Cancel(val id: Int) : NotificationCommand
 }
 
-/** Bounded set of recently seen ids: once [capacity] is reached, the oldest is forgotten. Thread-safe. */
-class RecentIds(val capacity: Int = 64) {
-    private val ids = object : LinkedHashMap<String, Unit>(capacity, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Unit>?) = size > capacity
-    }
-
-    /** True if [id] was not present (and is now recorded). */
-    @Synchronized
-    fun add(id: String): Boolean = ids.put(id, Unit) == null
-
-    @Synchronized
-    fun contains(id: String): Boolean = ids.containsKey(id)
-
-    @Synchronized
-    fun remove(id: String) {
-        ids.remove(id)
-    }
-
-    @get:Synchronized
-    val size: Int get() = ids.size
-}
-
 /**
  * The decisions behind every notification, free of Android and coroutines. Inputs are fed by
  * [NotificationHub]; each method returns what to post or cancel. All methods are synchronized.
  *
- * - Approvals: notified at most once per id ([RecentIds] of 64), never when already in [answered], never in
- *   the foreground (chat shows them). `request.cancel` / `approval.cancelled` cancel the notification.
- * - Task done: `message.complete` in the background, titled by the last `session.title` for that session.
+ * - Approvals: notified at most once per id ([RecentIds] of 64), never when already in [answered] or [closed],
+ *   and in the foreground only when the chat on screen is not the session that asked (that chat shows it).
+ *   `request.cancel` / `approval.cancelled` cancel the notification. The notification carries the stored
+ *   session id ([storedFor], else learned from `session.title`) so a tap opens the chat that asked.
+ * - Task done: `message.complete` in the background, titled by the last `session.title` for that session;
+ *   not for a failed turn (`status: "error"`).
  * - Gateway: posted on the transition to Stopped/Offline only (and only in the background), cancelled when
  *   the gateway is back. The transition is tracked in the foreground too, so returning to a known-down
  *   gateway does not alert.
@@ -50,14 +32,20 @@ class RecentIds(val capacity: Int = 64) {
  *   [resetCron] only seeds.
  * - Pairing: each pending request notified once in the background; cancelled when it leaves the list.
  */
-class NotificationCoordinator(private val answered: Set<String>, capacity: Int = 64) {
-    private val notified = RecentIds(capacity)
-
+class NotificationCoordinator(
+    private val answered: Set<String>,
+    capacity: Int = 64,
+    private val storedFor: (String) -> String? = { null },
     /**
      * Requests the server withdrew (`request.cancel` / `approval.cancelled`), recorded in the foreground too:
-     * the server-request replay still holds them, and they must never be notified later.
+     * the server-request replay still holds them, and they must never be notified later. Shared with chat.
      */
-    private val closedIds = RecentIds(capacity)
+    private val closedIds: RecentIds = RecentIds(capacity),
+) {
+    private val notified = RecentIds(capacity)
+
+    /** Stored session id by live id, from `session.title` events (their payload names the stored id). */
+    private val storedByLive = bounded<String>(capacity)
 
     /** Server-request id by the approval's `request_id`, for `approval.cancelled` (which names the latter). */
     private val srqByRequestId = bounded<String>(capacity)
@@ -70,14 +58,21 @@ class NotificationCoordinator(private val answered: Set<String>, capacity: Int =
     private var cronSnapshot: Map<String, CronJobDto>? = null
     private val postedPairing = mutableSetOf<String>()
 
+    /**
+     * [visibleSession] is the live id of the chat on screen, if any: in the foreground only its own approvals
+     * are left to it, so one for another session (or with no chat open) is still notified.
+     */
     @Synchronized
-    fun onServerRequest(req: Frame.ServerRequest, foreground: Boolean): NotificationSpec? {
+    fun onServerRequest(req: Frame.ServerRequest, foreground: Boolean, visibleSession: String? = null): NotificationSpec? {
         if (!ApprovalNotifier.isApproval(req)) return null
         // Recorded even when suppressed, so a foreground `approval.cancelled` can close it.
         req.params.str("request_id")?.let { srqByRequestId[it] = req.id }
-        if (foreground || req.id in answered || closedIds.contains(req.id)) return null
+        val live = req.params.str("session_id")
+        val shownInChat = foreground && visibleSession != null && live == visibleSession
+        if (shownInChat || req.id in answered || closedIds.contains(req.id)) return null
         if (!notified.add(req.id)) return null
-        return ApprovalNotifier.forApproval(req).also { postedApprovals[req.id] = it }
+        val stored = live?.let { storedFor(it) ?: storedByLive[it] }
+        return ApprovalNotifier.forApproval(req, stored).also { postedApprovals[req.id] = it }
     }
 
     /**
@@ -112,9 +107,10 @@ class NotificationCoordinator(private val answered: Set<String>, capacity: Int =
     fun onEvent(ev: Frame.Event, foreground: Boolean): List<NotificationCommand> = when (ev.type) {
         "session.title" -> {
             ev.payload.str("title")?.let { titles[ev.sessionId] = it }
+            ev.payload.str("session_id")?.takeIf { ev.sessionId.isNotEmpty() }?.let { storedByLive[ev.sessionId] = it }
             emptyList()
         }
-        "message.complete" -> if (foreground) {
+        "message.complete" -> if (foreground || ev.payload.str("status") == "error") {
             emptyList()
         } else {
             listOf(NotificationCommand.Post(ApprovalNotifier.forTaskDone(titles[ev.sessionId], ev.sessionId)))

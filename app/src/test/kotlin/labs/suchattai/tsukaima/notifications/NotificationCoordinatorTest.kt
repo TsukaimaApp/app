@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import labs.suchattai.tsukaima.data.RecentIds
 import labs.suchattai.tsukaima.data.api.CronJobDto
 import labs.suchattai.tsukaima.data.gateway.Frame
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
@@ -47,7 +48,7 @@ class NotificationCoordinatorTest {
 
     @Test
     fun foregroundSuppressesApprovalNotifications() {
-        assertNull(c.onServerRequest(approval("srq-1"), foreground = true))
+        assertNull(c.onServerRequest(approval("srq-1"), foreground = true, visibleSession = "live-1"))
         val pairing = listOf(
             buildJsonObject {
                 put("platform", "telegram")
@@ -140,6 +141,40 @@ class NotificationCoordinatorTest {
     }
 
     @Test
+    fun errorCompletionNotNotifiedAsDone() {
+        val failed = buildJsonObject {
+            put("text", "")
+            put("status", "error")
+            put("error", "boom")
+        }
+        assertTrue(c.onEvent(event("message.complete", payload = failed), foreground = false).isEmpty())
+        assertTrue(c.onEvent(event("error", payload = buildJsonObject { put("message", "boom") }), foreground = false).isEmpty())
+        assertEquals(1, c.onEvent(event("message.complete"), foreground = false).size)
+    }
+
+    @Test
+    fun approvalNotificationOpensTheSessionThatAsked() {
+        val bound = NotificationCoordinator(answered, storedFor = { if (it == "live-1") "stored-1" else null })
+        assertEquals("stored-1", bound.onServerRequest(approval("srq-1"), foreground = false)!!.sessionId)
+        // Unknown to the chat binding: learned from the session's own title event (payload names the stored id).
+        val learned = NotificationCoordinator(answered)
+        learned.onEvent(event("session.title", payload = buildJsonObject {
+            put("session_id", "stored-9")
+            put("title", "t")
+        }), foreground = true)
+        assertEquals("stored-9", learned.onServerRequest(approval("srq-2"), foreground = false)!!.sessionId)
+        assertNull(NotificationCoordinator(answered).onServerRequest(approval("srq-3"), foreground = false)!!.sessionId)
+    }
+
+    @Test
+    fun foregroundApprovalForOtherSessionIsNotified() {
+        // In the foreground, only the approval for the chat on screen is left to that chat.
+        assertNull(c.onServerRequest(approval("srq-1"), foreground = true, visibleSession = "live-1"))
+        assertNotNull(c.onServerRequest(approval("srq-2"), foreground = true, visibleSession = "live-other"))
+        assertNotNull(c.onServerRequest(approval("srq-3"), foreground = true, visibleSession = null))
+    }
+
+    @Test
     fun pairingNotifiedOnceAndCancelledWhenGone() {
         val p1 = buildJsonObject {
             put("platform", "telegram")
@@ -166,7 +201,7 @@ class NotificationCoordinatorTest {
     @Test
     fun requestCancelledInForegroundNotReplayedOnBackground() {
         val req = approval("srq-1")
-        assertNull(c.onServerRequest(req, foreground = true))
+        assertNull(c.onServerRequest(req, foreground = true, visibleSession = "live-1"))
         c.onEvent(event("request.cancel", payload = buildJsonObject { put("id", "srq-1") }), foreground = true)
         assertTrue(c.onBackground(listOf(req)).isEmpty())
         assertNull(c.onServerRequest(req, foreground = false))
@@ -176,8 +211,8 @@ class NotificationCoordinatorTest {
     fun approvalCancelledInForegroundNotReplayedOnBackground() {
         val req = approval("srq-2", requestId = "r-x")
         val other = approval("srq-3", requestId = "r-y")
-        assertNull(c.onServerRequest(req, foreground = true))
-        assertNull(c.onServerRequest(other, foreground = true))
+        assertNull(c.onServerRequest(req, foreground = true, visibleSession = "live-1"))
+        assertNull(c.onServerRequest(other, foreground = true, visibleSession = "live-1"))
         val withdrawn = event(
             "approval.cancelled",
             payload = JsonObject(mapOf("request_ids" to JsonArray(listOf(JsonPrimitive("r-x"))))),
