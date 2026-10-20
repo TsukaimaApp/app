@@ -125,7 +125,7 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override fun toast(text: String) = c.toastState.show(text)
     override fun speechInput() = c.speechInput()
     override val speechOutput get() = c.speechOutput
-    override fun voiceLanguages() = c.voiceLanguages()
+    override fun voiceLanguages() = c.voiceLanguages(includeEngine = true)
 }
 
 /** Result of `session.events.since`. */

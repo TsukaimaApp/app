@@ -151,7 +151,7 @@ fun TsukaimaNavHost(
                             container.repository, container.settingsStore, container.credentials, container.connection,
                             onSignedOut = container::signedOut,
                             toast = container.toastState::show,
-                            voiceLanguages = container::voiceLanguages,
+                            voiceLanguages = { includeEngine -> container.voiceLanguages(includeEngine) },
                         )
                     }
                 },

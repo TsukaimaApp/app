@@ -140,13 +140,17 @@ class SettingsViewModelTest {
     @Test
     fun setVoiceLanguagePersists() = runBlocking<Unit> {
         val options = listOf(VoiceLanguage(null, "System default"), VoiceLanguage("pl-PL", "Polish (Poland)"))
-        var loads = 0
-        val vm = SettingsViewModel(repo, store, creds, connection, voiceLanguages = { loads++; options }).also { vms += it }
-        assertEquals(0, loads) // opening Settings must not start the TTS engine
-        assertTrue(vm.state.value.voiceLanguages.isEmpty())
+        val cheap = options.take(1)
+        val loads = java.util.concurrent.CopyOnWriteArrayList<Boolean>()
+        val vm = SettingsViewModel(
+            repo, store, creds, connection,
+            voiceLanguages = { includeEngine -> loads += includeEngine; if (includeEngine) options else cheap },
+        ).also { vms += it }
+        assertEquals(cheap, vm.await { it.voiceLanguages.isNotEmpty() }.voiceLanguages) // labels the row at once
+        assertEquals(listOf(false), loads.toList()) // opening Settings must not start the TTS engine
         vm.loadVoiceLanguages() // the Language sheet opens
-        assertEquals(options, vm.await { it.voiceLanguages.isNotEmpty() }.voiceLanguages)
-        assertEquals(1, loads)
+        assertEquals(options, vm.await { it.voiceLanguages == options }.voiceLanguages)
+        assertEquals(listOf(false, true), loads.toList())
         assertNull(vm.state.value.voiceLanguage)
 
         vm.setVoiceLanguage("pl-PL")

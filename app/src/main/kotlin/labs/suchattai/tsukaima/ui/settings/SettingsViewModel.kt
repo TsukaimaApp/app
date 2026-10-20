@@ -88,7 +88,10 @@ data class SettingsUiState(
     val assistantRoleHeld: Boolean = false,
     /** The voice language setting (BCP-47 tag); null = system default. */
     val voiceLanguage: String? = null,
-    /** The voice language picker's options, "System default" first; loaded when the sheet opens. */
+    /**
+     * The voice language picker's options, "System default" first: device locales and the fallback list at start,
+     * the full list (with the TTS engine's languages) once the sheet opened.
+     */
     val voiceLanguages: List<VoiceLanguage> = emptyList(),
 ) {
     /** The URL field was edited to a different server than the one signed in to, and not yet signed in again. */
@@ -107,8 +110,11 @@ class SettingsViewModel(
     private val onSignedOut: () -> Unit = {},
     /** Shows a transient message (the app's toast). */
     private val toast: (String) -> Unit = {},
-    /** The voice language picker's options (`AppContainer.voiceLanguages`); read on [io] when the sheet opens. */
-    private val voiceLanguages: () -> List<VoiceLanguage> = { emptyList() },
+    /**
+     * The voice language picker's options (`AppContainer.voiceLanguages`), read on [io]: without the TTS engine's
+     * languages (`false`, cheap) at start for the row's label, with them (`true`) when the sheet opens.
+     */
+    private val voiceLanguages: (includeEngine: Boolean) -> List<VoiceLanguage> = { emptyList() },
 ) : ViewModel() {
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
@@ -126,6 +132,10 @@ class SettingsViewModel(
     val signedOut: Flow<Unit> = _signedOut.receiveAsFlow()
 
     init {
+        viewModelScope.launch {
+            val options = withContext(io) { voiceLanguages(false) }
+            _state.update { if (it.voiceLanguages.isEmpty()) it.copy(voiceLanguages = options) else it } // the sheet's list wins
+        }
         viewModelScope.launch {
             settings.settings.collect { s ->
                 val firstLoad = !seeded
@@ -420,7 +430,7 @@ class SettingsViewModel(
     /** The Language sheet opens: (re)loads its options off the main thread (the TTS engine's list may have come in). */
     fun loadVoiceLanguages() {
         viewModelScope.launch {
-            val options = withContext(io) { voiceLanguages() }
+            val options = withContext(io) { voiceLanguages(true) }
             _state.update { it.copy(voiceLanguages = options) }
         }
     }
