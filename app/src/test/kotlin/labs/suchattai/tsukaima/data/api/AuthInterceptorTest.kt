@@ -1,5 +1,6 @@
 package labs.suchattai.tsukaima.data.api
 
+import labs.suchattai.tsukaima.data.prefs.CredentialStore
 import labs.suchattai.tsukaima.data.prefs.InMemoryCredentialStore
 import labs.suchattai.tsukaima.data.prefs.Settings
 import mockwebserver3.Dispatcher
@@ -66,6 +67,21 @@ class AuthInterceptorTest {
         creds.save("pw", "tok", baseUrl())
         server.enqueue(ok())
         assertEquals(200, get(client()))
+        assertEquals("Bearer tok", server.takeRequest(1, TimeUnit.SECONDS)!!.headers["Authorization"])
+    }
+
+    @Test
+    fun bearerComesFromOneConsistentReadOfOriginAndToken() {
+        // A sign-in to another server lands between two separate reads: origin() still says this server, but
+        // accessToken() already holds the other server's token. The interceptor must not pair them.
+        creds.save("pw", "tok", baseUrl())
+        val racing = object : CredentialStore by creds {
+            override fun accessToken(): String = "other-server-token"
+        }
+        val interceptor = AuthInterceptor(racing, { Settings(serverUrl = baseUrl(), username = "u") }) { _, _, _ -> "x" }
+        server.enqueue(ok())
+        OkHttpClient.Builder().addInterceptor(interceptor).build()
+            .newCall(Request.Builder().url(baseUrl() + "/api/sessions").build()).execute().close()
         assertEquals("Bearer tok", server.takeRequest(1, TimeUnit.SECONDS)!!.headers["Authorization"])
     }
 

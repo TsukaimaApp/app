@@ -25,6 +25,10 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import labs.suchattai.tsukaima.data.api.AuthException
+import labs.suchattai.tsukaima.data.api.CleartextGuard
+import labs.suchattai.tsukaima.data.api.TrustedHost
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -48,6 +52,9 @@ import java.util.concurrent.atomic.AtomicLong
  * Shared outside the actor, all thread-safe: [pending], the [wanted] flag, and the public flows.
  *
  * A request timeout throws a plain [IOException] (not [GatewayClosedException]): the socket may be healthy.
+ *
+ * A plain-http [baseUrl] that [cleartextAllowed] refuses ([CleartextGuard]) is never connected to: the attempt
+ * stops before the ticket is fetched, as after an auth failure, until the next [connect].
  */
 class GatewayClient(
     private val client: OkHttpClient,
@@ -60,6 +67,7 @@ class GatewayClient(
     private val backoffMs: List<Long> = listOf(1_000L, 2_000L, 5_000L, 10_000L),
     private val ticketTimeoutMs: Long = 15_000,
     private val logger: (String, Throwable?) -> Unit = { _, _ -> },
+    private val cleartextAllowed: (HttpUrl) -> Boolean = TrustedHost::allowsCleartext,
 ) : RpcTransport {
     init {
         require(heartbeatMs > 0 && deadlineMs > 0 && ticketTimeoutMs > 0) { "intervals must be positive" }
@@ -254,6 +262,13 @@ class GatewayClient(
     private fun current(e: Long) = e == epoch
 
     private fun startAttempt(s: ConnectionState) {
+        val base = baseUrl().toHttpUrlOrNull()
+        if (base != null && CleartextGuard.refuses(base, cleartextAllowed)) {
+            logger("gateway: ${CleartextGuard.MESSAGE}", null)
+            wanted.value = false
+            teardown()
+            return
+        }
         val e = ++epoch
         _state.value = s
         ticketJob = scope.launch {

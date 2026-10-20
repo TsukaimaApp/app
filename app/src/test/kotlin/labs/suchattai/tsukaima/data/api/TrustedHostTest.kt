@@ -5,7 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class TrustedHostTest {
-    private fun allows(url: String) = TrustedHost.allowsCleartextReplay(url.toHttpUrl())
+    private fun allows(url: String) = TrustedHost.allowsCleartext(url.toHttpUrl())
 
     @Test
     fun cleartextReplayTable() {

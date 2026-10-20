@@ -1,9 +1,8 @@
-@file:Suppress("DEPRECATION") // security-crypto is deprecated upstream but is the specified store
-
 package labs.suchattai.tsukaima.data.prefs
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.core.content.edit
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
@@ -14,20 +13,19 @@ interface CredentialStore {
     /** Normalized server URL (`scheme://host[:port]`) the password and token belong to. */
     fun origin(): String?
 
+    /** [origin] and [accessToken] in one consistent read: a concurrent [save] or [clear] lands wholly before or after it. */
+    fun originAndToken(): OriginToken
+
     /** Stores credentials bound to [origin]; they are only ever sent to that origin. */
     fun save(password: String?, accessToken: String?, origin: String?)
     fun clear()
 }
 
+data class OriginToken(val origin: String?, val accessToken: String?)
+
 /** Thin wrapper over EncryptedSharedPreferences; Android-only, exercised via [InMemoryCredentialStore] in tests. */
 class EncryptedCredentialStore(context: Context) : CredentialStore {
-    private val prefs: SharedPreferences = EncryptedSharedPreferences.create(
-        context,
-        "tsukaima_creds",
-        MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-    )
+    private val prefs: SharedPreferences = encryptedPrefs(context)
 
     override fun password(): String? = prefs.getString(PASSWORD, null)
 
@@ -35,16 +33,22 @@ class EncryptedCredentialStore(context: Context) : CredentialStore {
 
     override fun origin(): String? = prefs.getString(ORIGIN, null)
 
+    /** One `getAll()`: SharedPreferences applies an edit to its in-memory map atomically, so this is a snapshot. */
+    override fun originAndToken(): OriginToken {
+        val all = prefs.all
+        return OriginToken(all[ORIGIN] as? String, all[ACCESS_TOKEN] as? String)
+    }
+
     override fun save(password: String?, accessToken: String?, origin: String?) {
-        prefs.edit()
-            .putOrRemove(PASSWORD, password)
-            .putOrRemove(ACCESS_TOKEN, accessToken)
-            .putOrRemove(ORIGIN, origin)
-            .apply()
+        prefs.edit {
+            putOrRemove(PASSWORD, password)
+            putOrRemove(ACCESS_TOKEN, accessToken)
+            putOrRemove(ORIGIN, origin)
+        }
     }
 
     override fun clear() {
-        prefs.edit().clear().apply()
+        prefs.edit { clear() }
     }
 
     private fun SharedPreferences.Editor.putOrRemove(key: String, value: String?) =
@@ -54,6 +58,20 @@ class EncryptedCredentialStore(context: Context) : CredentialStore {
         const val PASSWORD = "password"
         const val ACCESS_TOKEN = "access_token"
         const val ORIGIN = "origin"
+
+        /**
+         * security-crypto is deprecated upstream without a drop-in successor; it stays the specified store (moving
+         * the stored credentials to another scheme is a migration of its own), so the deprecation is suppressed here
+         * and only here.
+         */
+        @Suppress("DEPRECATION")
+        fun encryptedPrefs(context: Context): SharedPreferences = EncryptedSharedPreferences.create(
+            context,
+            "tsukaima_creds",
+            MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
     }
 }
 
@@ -71,6 +89,9 @@ class InMemoryCredentialStore : CredentialStore {
 
     @Synchronized
     override fun origin(): String? = origin
+
+    @Synchronized
+    override fun originAndToken(): OriginToken = OriginToken(origin, accessToken)
 
     @Synchronized
     override fun save(password: String?, accessToken: String?, origin: String?) {
@@ -114,6 +135,8 @@ class LazyCredentialStore(
     override fun accessToken(): String? = delegate.accessToken()
 
     override fun origin(): String? = delegate.origin()
+
+    override fun originAndToken(): OriginToken = delegate.originAndToken()
 
     override fun save(password: String?, accessToken: String?, origin: String?) =
         delegate.save(password, accessToken, origin)

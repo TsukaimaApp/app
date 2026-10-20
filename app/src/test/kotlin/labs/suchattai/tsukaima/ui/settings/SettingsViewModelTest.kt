@@ -20,6 +20,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import labs.suchattai.tsukaima.data.ConnectionManager
 import labs.suchattai.tsukaima.data.HermesRepository
+import labs.suchattai.tsukaima.data.api.CleartextGuard
 import labs.suchattai.tsukaima.data.api.HermesApi
 import labs.suchattai.tsukaima.data.gateway.GatewayClient
 import labs.suchattai.tsukaima.data.prefs.InMemoryCredentialStore
@@ -184,6 +185,17 @@ class SettingsViewModelTest {
         vm.setServerUrl(hostPort())
         vm.testConnection()
         assertEquals("Hermes 0.9.2", vm.await { it.testResult != null && !it.testing }.testResult)
+    }
+
+    @Test
+    fun plainHttpToAPublicHostIsRefusedInlineOnTestAndSignIn() = runBlocking<Unit> {
+        val vm = vm()
+        vm.setServerUrl("example.com:9119"); vm.setUsername("a"); vm.setPassword("b")
+        vm.testConnection()
+        assertEquals(CleartextGuard.MESSAGE, vm.await { it.testResult != null && !it.testing }.testResult)
+        assertTrue(vm.signIn().isFailure)
+        assertEquals(CleartextGuard.MESSAGE, vm.state.value.signInError)
+        assertTrue("nothing was sent", requests.isEmpty())
     }
 
     @Test

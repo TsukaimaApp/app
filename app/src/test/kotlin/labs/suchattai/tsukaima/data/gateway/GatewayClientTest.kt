@@ -104,6 +104,7 @@ class GatewayClientTest {
         ticket: suspend () -> String = { "tk-${ticketCounter.incrementAndGet()}" },
         baseUrl: () -> String = { serverUrl() },
         ticketTimeoutMs: Long = 15_000,
+        cleartextAllowed: (okhttp3.HttpUrl) -> Boolean = { true },
     ) = GatewayClient(
         client = okHttp,
         baseUrl = baseUrl,
@@ -113,6 +114,7 @@ class GatewayClientTest {
         heartbeatMs = heartbeatMs,
         deadlineMs = deadlineMs,
         backoffMs = backoffMs,
+        cleartextAllowed = cleartextAllowed,
     ).also { gateways += it }
 
     private fun serverUrl() = server.url("/").toString().trimEnd('/')
@@ -331,6 +333,35 @@ class GatewayClientTest {
     }
 
     @Test
+    fun plainHttpToUntrustedHostNeverConnects() = runBlocking {
+        upgrade(FakeServer())
+        val calls = AtomicInteger()
+        val gw = gateway(ticket = { calls.incrementAndGet(); "tk" }, cleartextAllowed = { false })
+        gw.connect()
+        val ex = withTimeout(TIMEOUT_S * 1000) { runCatching { gw.request("session.list") }.exceptionOrNull() }
+        assertTrue("expected GatewayClosedException, got $ex", ex is GatewayClosedException)
+        assertEquals(ConnectionState.Disconnected, gw.state.value)
+        assertEquals(0, calls.get()) // stopped before the ticket: nothing went out
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun cleartextCheckUsesTrustedHostByDefault() = runBlocking {
+        val calls = AtomicInteger()
+        val gw = GatewayClient(
+            client = okHttp,
+            baseUrl = { "http://example.com:9119" },
+            ticket = { calls.incrementAndGet(); "tk" },
+            scope = scope,
+            backoffMs = listOf(20L),
+        ).also { gateways += it }
+        gw.connect()
+        val ex = withTimeout(TIMEOUT_S * 1000) { runCatching { gw.request("session.list") }.exceptionOrNull() }
+        assertTrue("expected GatewayClosedException, got $ex", ex is GatewayClosedException)
+        assertEquals(0, calls.get())
+    }
+
+    @Test
     fun ticketIoFailureBacksOffThenConnects() = runBlocking {
         upgrade(FakeServer())
         val calls = AtomicInteger()
@@ -372,7 +403,8 @@ class GatewayClientTest {
         })
         gw.connect()
         gw.awaitState(ConnectionState.Connected)
-        assertEquals(2, urlCalls.get())
+        // The first read (the cleartext pre-check) threw; the retry reads it for the check and for the socket.
+        assertEquals(3, urlCalls.get())
         assertEquals(1, server.requestCount)
     }
 

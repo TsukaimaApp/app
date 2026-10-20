@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Plain http stays permitted here because LAN and tailnet Hermes instances are a supported setup (the tailnet is
+    WireGuard-encrypted). Which hosts may be reached over http is decided in code, by CleartextGuard and
+    TrustedHost (loopback, RFC 1918, 100.64.0.0/10, *.ts.net, single-label names): a domain-config allowlist here
+    can only name domains, not CIDR ranges, so it cannot express that rule.
+
+    Trust anchors are the system CAs only: a user-installed CA cannot intercept the app's https.
+-->
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
+    <!-- Deliberate (see above): the cleartext policy is enforced per host in code, which lint cannot see. -->
+    <base-config cleartextTrafficPermitted="true" tools:ignore="InsecureBaseConfiguration">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

@@ -24,6 +24,7 @@ import kotlinx.serialization.json.contentOrNull
 import labs.suchattai.tsukaima.data.ConnectionManager
 import labs.suchattai.tsukaima.data.HermesRepository
 import labs.suchattai.tsukaima.data.api.AuthException
+import labs.suchattai.tsukaima.data.api.CleartextGuard
 import labs.suchattai.tsukaima.data.api.ModelOptionsDto
 import labs.suchattai.tsukaima.data.api.PairingDto
 import labs.suchattai.tsukaima.data.api.ProfileDto
@@ -158,6 +159,8 @@ class SettingsViewModel(
             val target = ServerUrl.normalize(input)
             val text = if (target == null) {
                 "Enter a valid server URL"
+            } else if (CleartextGuard.refuses(target)) {
+                CleartextGuard.MESSAGE
             } else {
                 repo.health(target).fold(
                     onSuccess = { h -> if (h.version.isNullOrBlank()) "Hermes reachable" else "Hermes ${h.version}" },
@@ -185,6 +188,10 @@ class SettingsViewModel(
             _state.update { it.copy(signInError = e.message) }
             return Result.failure(e)
         }
+        if (ServerUrl.normalize(s.serverUrl)?.let(CleartextGuard::refuses) == true) {
+            _state.update { it.copy(signInError = CleartextGuard.MESSAGE) }
+            return Result.failure(CleartextGuard.refused())
+        }
         _state.update { it.copy(signingIn = true, signInError = null) }
         val result = repo.signIn(s.serverUrl, s.username, s.password)
         result.onSuccess {
@@ -205,9 +212,10 @@ class SettingsViewModel(
         return result
     }
 
-    private fun signInErrorText(e: Throwable, url: String): String = when (e) {
-        is AuthException -> e.message ?: "Authentication failed"
-        is IllegalArgumentException -> "Enter a valid server URL"
+    private fun signInErrorText(e: Throwable, url: String): String = when {
+        e is AuthException -> e.message ?: "Authentication failed"
+        e is IllegalArgumentException -> "Enter a valid server URL"
+        e.message == CleartextGuard.MESSAGE -> CleartextGuard.MESSAGE
         else -> "Can't reach Hermes at ${ServerUrl.normalize(url) ?: url}"
     }
 

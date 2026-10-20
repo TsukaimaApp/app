@@ -24,7 +24,7 @@ import kotlin.concurrent.withLock
 class AuthInterceptor(
     private val creds: CredentialStore,
     private val settings: () -> Settings,
-    private val cleartextReplayAllowed: (HttpUrl) -> Boolean = TrustedHost::allowsCleartextReplay,
+    private val cleartextReplayAllowed: (HttpUrl) -> Boolean = TrustedHost::allowsCleartext,
     private val login: (url: String, username: String, password: String) -> String,
 ) : Interceptor {
     private val lock = ReentrantLock()
@@ -33,10 +33,12 @@ class AuthInterceptor(
         val request = chain.request()
         if (request.tag(NoAuth::class.java) != null) return chain.proceed(request)
 
-        val origin = creds.origin()?.toHttpUrlOrNull()
+        // One read: a token saved for another origin can never be paired with this one.
+        val stored = creds.originAndToken()
+        val origin = stored.origin?.toHttpUrlOrNull()
         if (origin == null || !sameOrigin(request.url, origin)) return chain.proceed(request)
 
-        val usedToken = creds.accessToken()
+        val usedToken = stored.accessToken
         val first = chain.proceed(request.withBearer(usedToken))
         if (first.code != 401) return first
         val configured = settings().serverUrl.toHttpUrlOrNull()

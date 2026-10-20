@@ -3,15 +3,17 @@ package labs.suchattai.tsukaima.data.api
 import okhttp3.HttpUrl
 
 /**
- * Where the stored password may be replayed automatically over cleartext `http://`.
+ * Where cleartext `http://` is allowed at all: hosts that are local or private, i.e. loopback (`127.0.0.0/8`,
+ * `localhost`, `::1`), RFC 1918 (`10/8`, `172.16/12`, `192.168/16`), CGNAT/Tailscale (`100.64.0.0/10`), MagicDNS
+ * names (`*.ts.net`) and single-label hostnames (`hermes`). https is always allowed.
  *
- * Plain http stays allowed for normal requests (the user's tailnet is WireGuard-encrypted), but an automatic
- * re-login sends the password itself, so over http it is limited to hosts that are local or private:
- * loopback (`127.0.0.0/8`, `localhost`, `::1`), RFC 1918 (`10/8`, `172.16/12`, `192.168/16`), CGNAT/Tailscale
- * (`100.64.0.0/10`), MagicDNS names (`*.ts.net`) and single-label hostnames (`hermes`). https is always allowed.
+ * [CleartextGuard] refuses every other plain-http request (and [labs.suchattai.tsukaima.data.gateway.GatewayClient]
+ * the socket), so neither the bearer token nor the password replayed by an automatic re-login goes out unencrypted
+ * to a public host. Android's network security config cannot express this (it allowlists domains, not CIDRs), which
+ * is why the check lives in code.
  */
 object TrustedHost {
-    fun allowsCleartextReplay(url: HttpUrl): Boolean {
+    fun allowsCleartext(url: HttpUrl): Boolean {
         if (url.isHttps) return true
         val host = url.host.lowercase()
         if (host == "localhost" || host == "::1") return true

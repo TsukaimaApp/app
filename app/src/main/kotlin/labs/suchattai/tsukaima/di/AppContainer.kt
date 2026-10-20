@@ -20,6 +20,7 @@ import labs.suchattai.tsukaima.data.HermesRepository
 import labs.suchattai.tsukaima.data.SessionBindings
 import labs.suchattai.tsukaima.data.api.AuthException
 import labs.suchattai.tsukaima.data.api.AuthInterceptor
+import labs.suchattai.tsukaima.data.api.CleartextGuard
 import labs.suchattai.tsukaima.data.api.HermesApi
 import labs.suchattai.tsukaima.data.api.HermesJson
 import labs.suchattai.tsukaima.data.files.FileSaver
@@ -81,8 +82,14 @@ class AppContainer(context: Context) {
     private val settingsSnapshot: () -> Settings = { settings.value ?: Settings() }
     private val baseUrl: () -> String = { settingsSnapshot().serverUrl }
 
-    /** No interceptor: password login and the WebSocket upgrade (which authenticates with its ticket). */
+    /**
+     * No auth interceptor: password login and the WebSocket upgrade (which authenticates with its ticket). Every
+     * client derives from it, so [CleartextGuard] (plain http only to trusted hosts) covers them all.
+     */
+    private val cleartextGuard = CleartextGuard()
     private val plainClient: OkHttpClient = OkHttpClient.Builder()
+        .addInterceptor(cleartextGuard)
+        .addNetworkInterceptor(cleartextGuard)
         .callTimeout(20, TimeUnit.SECONDS)
         .pingInterval(0, TimeUnit.SECONDS)
         .build()
