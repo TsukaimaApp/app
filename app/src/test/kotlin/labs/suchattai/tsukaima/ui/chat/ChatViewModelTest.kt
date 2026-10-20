@@ -42,6 +42,7 @@ import labs.suchattai.tsukaima.domain.chat.running
 import labs.suchattai.tsukaima.domain.chat.ToolStatus
 import labs.suchattai.tsukaima.domain.voice.FakeSpeechInput
 import labs.suchattai.tsukaima.domain.voice.FakeSpeechOutput
+import labs.suchattai.tsukaima.domain.voice.VoiceMode
 import labs.suchattai.tsukaima.domain.voice.SpeechEvent
 import labs.suchattai.tsukaima.domain.voice.VoicePhase
 import org.junit.After
@@ -1923,6 +1924,66 @@ class ChatViewModelTest {
         vm.openVoice() // already open: nothing restarts
         advanceUntilIdle()
         assertEquals(1, b.speech.listenCount)
+    }
+
+    @Test
+    fun assistVoiceOpenedWhileResumingStartsAfterTheHistory() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("session.resume", obj(resumeJson)) }
+        val gate = CompletableDeferred<Unit>()
+        b.transport.gateNext["session.resume"] = gate
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+
+        vm.openVoice(VoiceMode.Assist)
+        advanceUntilIdle()
+        assertEquals(VoicePhase.Idle, vm.state.value.voice?.phase) // the sheet's resting look meanwhile
+        assertFalse(b.speech.active)
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+        val s = vm.state.value
+        assertEquals(2, s.chat.items.size)
+        assertEquals(s.chat.items.size, s.voice?.startIndex)
+        assertTrue("nothing from history is spoken", b.speechOutput.spoken.isEmpty())
+        assertEquals(VoicePhase.Listening, s.voice?.phase)
+        assertTrue(b.speech.active)
+    }
+
+    @Test
+    fun assistVoiceWaitsForAResumeRetriedOnConnected() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("session.resume", obj(resumeJson)) }
+        b.connection.value = ConnectionState.Disconnected
+        b.transport.failNext["session.resume"] = null // not connected yet: the first open fails
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        vm.openVoice(VoiceMode.Assist)
+        advanceUntilIdle()
+        assertFalse(vm.state.value.loading)
+        assertFalse(b.speech.active)
+
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+        val s = vm.state.value
+        assertEquals(2, s.chat.items.size)
+        assertEquals(2, s.voice?.startIndex)
+        assertTrue(b.speechOutput.spoken.isEmpty())
+    }
+
+    @Test
+    fun voiceOpenedWithoutListeningRestsUntilTapped() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+
+        vm.openVoice(VoiceMode.Assist, listen = false)
+        advanceUntilIdle()
+        assertEquals(VoicePhase.Idle, vm.state.value.voice?.phase)
+        assertFalse(b.speech.active)
+
+        vm.tapVoiceIndicator()
+        advanceUntilIdle()
+        assertEquals(VoicePhase.Listening, vm.state.value.voice?.phase)
+        assertTrue(b.speech.active)
     }
 
     @Test

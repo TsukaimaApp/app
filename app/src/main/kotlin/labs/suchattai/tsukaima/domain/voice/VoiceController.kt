@@ -59,13 +59,16 @@ class VoiceController(
 
     private val speaking get() = current != null || queue.any { it.text != null }
 
-    /** Starts voice mode on the chat as it is now: earlier items stay out of the voice transcript. */
-    fun start() {
+    /**
+     * Starts voice mode on the chat as it is now: earlier items stay out of the voice transcript. [listen] false
+     * starts at rest (Idle, "Tap to speak") until [tapIndicator].
+     */
+    fun start(listen: Boolean = true) {
         if (started) return
         started = true
         awaitingTurn = false
         turnSeen = false
-        resting = false
+        resting = !listen
         listOf(chunkers.keys, finished, silenced, handledRequests).forEach { it.clear() }
         _state.value = VoiceState(
             muted = _state.value.muted,

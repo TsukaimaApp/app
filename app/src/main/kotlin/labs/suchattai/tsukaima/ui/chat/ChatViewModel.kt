@@ -83,7 +83,10 @@ class ChatViewModel(
 
     private val media = ChatMedia(backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), io, _state)
 
-    private val voice = ChatVoice(backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state, ::sendText)
+    /** The chat holds its history: a new chat at once, a stored one once `session.resume` has bound it. */
+    private val historyLoaded = MutableStateFlow(storedSessionId == null)
+
+    private val voice = ChatVoice(backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state, ::sendText, historyLoaded)
 
     private val chat get() = _state.value.chat
     private fun setChat(block: (ChatState) -> ChatState) = _state.update { it.copy(chat = block(it.chat)) }
@@ -127,6 +130,7 @@ class ChatViewModel(
                     sync.syncWatermark(r.sessionId)
                 }
                 opened = true
+                historyLoaded.value = true
                 sync.adoptRecent()
                 if (storedSessionId != null) checkArchived(storedSessionId)
             } catch (c: CancellationException) {
@@ -414,8 +418,13 @@ class ChatViewModel(
 
     // ---- voice ------------------------------------------------------------------------------------
 
-    /** Opens voice mode on this chat (no-op while open); see [ChatVoice]. Needs `RECORD_AUDIO`, asked by the screen. */
-    fun openVoice(mode: VoiceMode = VoiceMode.InApp, onApprovalNeeded: () -> Unit = {}) = voice.open(mode, onApprovalNeeded)
+    /**
+     * Opens voice mode on this chat (no-op while open); see [ChatVoice]. Needs `RECORD_AUDIO`, asked by the screen.
+     * A resumed chat starts voice only once its history is in, so nothing said before is spoken; [listen] false
+     * waits for a tap on the indicator instead of listening at once.
+     */
+    fun openVoice(mode: VoiceMode = VoiceMode.InApp, onApprovalNeeded: () -> Unit = {}, listen: Boolean = true) =
+        voice.open(mode, onApprovalNeeded, listen)
 
     /** Leaves voice mode: listening and speech stop, the running turn goes on. */
     fun closeVoice() = voice.close()

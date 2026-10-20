@@ -5,8 +5,6 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -79,7 +77,7 @@ class SettingsActions(
     val onAskRevoke: (PairingEntry?) -> Unit = {},
     val onToolset: (name: String, enabled: Boolean) -> Unit = { _, _ -> },
     val onNotifications: ((NotificationPrefs) -> NotificationPrefs) -> Unit = {},
-    /** "Use as device assistant": asks for the assistant role, or opens the system's assistant settings. */
+    /** "Use as device assistant": opens the system's assistant settings. */
     val onAssistant: () -> Unit = {},
     val onTheme: (ThemeMode) -> Unit = {},
     val onMaterialYou: (Boolean) -> Unit = {},
@@ -99,21 +97,13 @@ fun SettingsScreen(
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val roleManager = remember(context) { context.getSystemService(RoleManager::class.java) }
-    val requestRole = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        vm.setAssistantRoleHeld(roleManager?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true)
-    }
-    // Re-read on every resume: the role may have changed in the system's settings meanwhile.
+    // Re-read on every resume: the user picks the assistant in the system's settings and comes back.
     LifecycleResumeEffect(roleManager) {
         vm.setAssistantRoleHeld(roleManager?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true)
         onPauseOrDispose {}
     }
-    val onAssistant: () -> Unit = {
-        if (roleManager?.isRoleAvailable(RoleManager.ROLE_ASSISTANT) == true) {
-            requestRole.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
-        } else {
-            openAssistantSettings(context, vm::assistantSettingsUnavailable)
-        }
-    }
+    // ROLE_ASSISTANT cannot be requested through the role dialog: the system's own picker is the way.
+    val onAssistant: () -> Unit = { openAssistantSettings(context, vm::assistantSettingsUnavailable) }
     SettingsContent(
         state = state,
         actions = SettingsActions(
@@ -375,8 +365,8 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
 }
 
 /**
- * The system's assistant settings where the assistant role cannot be requested in-app: voice input settings, else
- * the default-apps list; [onUnavailable] when neither opens.
+ * The system's assistant picker: voice input settings (assistant and voice input), else the default-apps list;
+ * [onUnavailable] when neither opens.
  */
 private fun openAssistantSettings(context: Context, onUnavailable: () -> Unit) {
     for (action in listOf(Settings.ACTION_VOICE_INPUT_SETTINGS, Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) {

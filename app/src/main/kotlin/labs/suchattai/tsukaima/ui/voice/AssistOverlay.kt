@@ -79,7 +79,8 @@ private val SheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
  * bottom sheet with the mark, Keyboard and Open icons ([onKeyboard], [onOpenApp]), the [VoiceIndicator] (tap =
  * [onTap]: barge-in, or listen again when idle) beside the voice status line and the latest utterance, then this
  * exchange's results (tool rows, the reply as it is spoken) and "Continue in Tsukaima". A downward drag on the sheet
- * dismisses it. Request cards are never shown here: the voice controller opens the app on them.
+ * dismisses it. Request cards are never shown here: the voice controller opens the app on them. [canOpenApp] false
+ * (the chat has no stored id yet) disables the three ways into the app.
  */
 @Composable
 fun AssistOverlay(
@@ -90,6 +91,7 @@ fun AssistOverlay(
     onTap: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    canOpenApp: Boolean = true,
 ) {
     val colors = MaterialTheme.tsukaima
     val items = state.chat.items.drop(voice.startIndex)
@@ -100,6 +102,7 @@ fun AssistOverlay(
     val results = items.drop(lastUser + 1).filter { it is ChatItem.ToolCall || it is ChatItem.AssistantMessage }
     val dismissPx = with(LocalDensity.current) { DismissDrag.toPx() }
     val noInteraction = remember { MutableInteractionSource() }
+    val openAlpha = if (canOpenApp) 1f else 0.45f // the disabled look of ChatTopBar's More
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val maxSheet = maxHeight * 0.85f
@@ -150,8 +153,8 @@ fun AssistOverlay(
                 )
                 Text("Tsukaima", style = TsukaimaType.wordmark.copy(fontSize = 17.sp), color = colors.ink1)
                 Spacer(Modifier.weight(1f))
-                IconButton44(IconName.Keyboard, "Type", onKeyboard, size = 40.dp)
-                IconButton44(IconName.OpenInNew, "Open Tsukaima", onOpenApp, size = 40.dp)
+                IconButton44(IconName.Keyboard, "Type", onKeyboard, Modifier.alpha(openAlpha), enabled = canOpenApp, size = 40.dp)
+                IconButton44(IconName.OpenInNew, "Open Tsukaima", onOpenApp, Modifier.alpha(openAlpha), enabled = canOpenApp, size = 40.dp)
             }
             Row(
                 modifier = Modifier.clickable(interactionSource = noInteraction, indication = null, role = Role.Button, onClick = onTap),
@@ -171,7 +174,7 @@ fun AssistOverlay(
             }
             if (results.isNotEmpty()) Results(results, voice, Modifier.weight(1f, fill = false))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                GhostButton("Continue in Tsukaima", onOpenApp, size = ButtonSize.Sm)
+                GhostButton("Continue in Tsukaima", onOpenApp, enabled = canOpenApp, size = ButtonSize.Sm)
             }
             // The design's gesture bar stands in for the system's: draw it only where the system draws none.
             if (WindowInsets.navigationBars.getBottom(LocalDensity.current) == 0) {

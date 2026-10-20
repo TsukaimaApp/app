@@ -2,6 +2,8 @@ package labs.suchattai.tsukaima.voice
 
 import android.content.ComponentName
 import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.content.pm.ServiceInfo
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -15,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import labs.suchattai.tsukaima.domain.voice.SpeechEvent
 import labs.suchattai.tsukaima.domain.voice.SpeechInput
@@ -27,34 +30,50 @@ import labs.suchattai.tsukaima.domain.voice.SpeechInput
  */
 class AndroidSpeechInput(private val context: Context) : SpeechInput {
     override val available: Boolean
-        get() = onDeviceAvailable() || recognizers().isNotEmpty()
+        get() = onDeviceAvailable() || if (stubIsDefault()) systemRecognizer() != null else recognizers().isNotEmpty()
 
     private fun onDeviceAvailable() =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
 
     /** Installed recognition services other than Tsukaima's own stub (`assist.TsukaimaRecognitionService`). */
-    private fun recognizers(): List<ComponentName> =
+    private fun recognizers(): List<ServiceInfo> =
         context.packageManager.queryIntentServices(Intent(RecognitionService.SERVICE_INTERFACE), 0)
             .map { it.serviceInfo }
             .filter { it.packageName != context.packageName }
-            .map { ComponentName(it.packageName, it.name) }
 
     /**
-     * On Android 10/11, making Tsukaima the device assistant also makes its stub recogniser the default one; skip it
-     * there in favour of another installed recogniser. Null means "the system default" (always the case on 12+).
+     * On Android 10/11, making Tsukaima the device assistant also makes its stub recogniser the default one (12+ keep
+     * the default apart from the assistant).
      */
-    private fun explicitRecognizer(): ComponentName? {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return null
+    private fun stubIsDefault(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return false
         val current = Settings.Secure.getString(context.contentResolver, DEFAULT_RECOGNIZER_SETTING)
             ?.let(ComponentName::unflattenFromString)
-        if (current?.packageName != context.packageName) return null
-        return recognizers().firstOrNull()
+        return current?.packageName == context.packageName
     }
 
-    override fun listen(): Flow<SpeechEvent> = callbackFlow {
-        val explicit = explicitRecognizer()
+    /**
+     * The recogniser to use instead of the stub: a system one only (preinstalled or its update), never an arbitrary
+     * third-party app the user did not pick for the microphone. Null when there is none.
+     */
+    private fun systemRecognizer(): ComponentName? = recognizers()
+        .firstOrNull { (it.applicationInfo.flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0 }
+        ?.let { ComponentName(it.packageName, it.name) }
+
+    override fun listen(): Flow<SpeechEvent> {
+        val onDevice = onDeviceAvailable()
+        val explicit = if (!onDevice && stubIsDefault()) {
+            systemRecognizer() ?: return flowOf(SpeechEvent.Error(UNAVAILABLE, retry = false))
+        } else {
+            null
+        }
+        return recognize(onDevice, explicit)
+    }
+
+    /** [explicit] null = the system default recogniser. */
+    private fun recognize(onDevice: Boolean, explicit: ComponentName?): Flow<SpeechEvent> = callbackFlow {
         val recognizer = when {
-            onDeviceAvailable() -> SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+            onDevice && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> SpeechRecognizer.createOnDeviceSpeechRecognizer(context) // S: spelled out for lint
             explicit != null -> SpeechRecognizer.createSpeechRecognizer(context, explicit)
             else -> SpeechRecognizer.createSpeechRecognizer(context)
         }
@@ -124,5 +143,7 @@ class AndroidSpeechInput(private val context: Context) : SpeechInput {
 
         /** `Settings.Secure.VOICE_RECOGNITION_SERVICE` (hidden): the default recogniser, as a flattened component. */
         const val DEFAULT_RECOGNIZER_SETTING = "voice_recognition_service"
+
+        const val UNAVAILABLE = "Speech recognition isn’t available on this device"
     }
 }

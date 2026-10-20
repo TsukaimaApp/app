@@ -1,6 +1,7 @@
 package labs.suchattai.tsukaima.assist
 
 import android.Manifest
+import android.app.role.RoleManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -41,13 +42,17 @@ import labs.suchattai.tsukaima.ui.voice.AssistOverlay
 
 /**
  * The device-assistant sheet ([AssistOverlay]) in a translucent window over the current app, started by
- * [TsukaimaVoiceSession] (or `ACTION_ASSIST`). It opens voice mode in [VoiceMode.Assist] on the chat the sheet used
- * within the last half hour ([AssistSessionPolicy]), else a new one, after asking for the microphone. Back, a tap on
+ * [TsukaimaVoiceSession] (or `ACTION_ASSIST`). A trusted launch ([AssistLaunch]) opens voice mode in
+ * [VoiceMode.Assist], listening, on the chat the sheet used within the last half hour ([AssistSessionPolicy]), else a
+ * new one; any other launch gets a new chat at rest until the indicator is tapped. The microphone is asked first. Back, a tap on
  * the scrim, a swipe down and leaving it (`noHistory`) close it; "Continue in Tsukaima", the Open and Keyboard icons
  * and any approval the turn needs open the app on the chat. Not shown over the lock screen.
  */
 class AssistActivity : ComponentActivity() {
     private lateinit var container: AppContainer
+
+    /** Decided once per launch (kept across recreation): see [AssistLaunch]. */
+    private var trusted = false
 
     /** The chat's stored id once it has one, for [openApp]. */
     private var storedSessionId: String? = null
@@ -56,6 +61,11 @@ class AssistActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         container = (application as TsukaimaApp).container
+        trusted = savedInstanceState?.getBoolean(STATE_TRUSTED) ?: run {
+            val roleHeld = getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true
+            val nonceValid = AssistNonce.consume(intent?.getStringExtra(AssistNonce.EXTRA))
+            AssistLaunch.trust(intent?.action, nonceValid, roleHeld) == AssistLaunch.Trusted
+        }
         setContent {
             val settings by container.settings.collectAsStateWithLifecycle()
             TsukaimaTheme(darkTheme = isDarkTheme(settings?.theme), dynamicColor = settings?.materialYou == true) {
@@ -65,16 +75,25 @@ class AssistActivity : ComponentActivity() {
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(STATE_TRUSTED, trusted)
+    }
+
     @Composable
     private fun AssistContent(settings: Settings) {
         LaunchedEffect(Unit) { if (!settings.onboarded) openApp() } // not signed in yet: onboarding is in the app
         if (!settings.onboarded) return
         val backend = remember { ContainerChatBackend(container) }
-        // One chat per activity; the resumed id is read once, when the view model is created.
+        // One chat per activity; the resumed id is read once, when the view model is created. An untrusted launch
+        // never resumes the assist chat.
         val vm: ChatViewModel = viewModel(
             key = "assist-chat",
             factory = viewModelFactory {
-                initializer { ChatViewModel(backend, AssistSessionPolicy.sessionToResume(settings, System.currentTimeMillis())) }
+                initializer {
+                    val resume = if (trusted) AssistSessionPolicy.sessionToResume(settings, System.currentTimeMillis()) else null
+                    ChatViewModel(backend, resume)
+                }
             },
         )
         // The voice controller outlives a configuration change, so it reaches this activity only through a flag.
@@ -82,19 +101,24 @@ class AssistActivity : ComponentActivity() {
         val state by vm.state.collectAsStateWithLifecycle()
 
         val stored = state.chat.storedSessionId
+        var persisted by rememberSaveable { mutableStateOf<String?>(null) }
         LaunchedEffect(stored) {
             storedSessionId = stored
-            if (stored != null) {
+            // Once per chat id and activity (not again on rotation); an untrusted launch's chat is not remembered.
+            if (trusted && stored != null && stored != persisted) {
+                persisted = stored
                 val now = System.currentTimeMillis()
                 backend.updateSettings { it.copy(assistSessionId = stored, assistSessionAt = now) }
             }
         }
         LaunchedEffect(bridge) { bridge.openApp.filter { it }.collect { openApp() } }
 
+        // The view model waits for a resumed chat's history before voice starts; untrusted launches wait for a tap.
+        val startVoice = { vm.openVoice(VoiceMode.Assist, onApprovalNeeded = { bridge.openApp.value = true }, listen = trusted) }
         var started by rememberSaveable { mutableStateOf(false) }
         val mic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) {
-                vm.openVoice(VoiceMode.Assist, onApprovalNeeded = { bridge.openApp.value = true })
+                startVoice()
             } else {
                 // The app's own toast host is not in this window and would vanish with it.
                 Toast.makeText(this@AssistActivity, "Microphone access is needed for voice mode", Toast.LENGTH_SHORT).show()
@@ -105,7 +129,7 @@ class AssistActivity : ComponentActivity() {
             if (started) return@LaunchedEffect
             started = true
             if (ContextCompat.checkSelfPermission(this@AssistActivity, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                vm.openVoice(VoiceMode.Assist, onApprovalNeeded = { bridge.openApp.value = true })
+                startVoice()
             } else {
                 mic.launch(Manifest.permission.RECORD_AUDIO)
             }
@@ -120,6 +144,8 @@ class AssistActivity : ComponentActivity() {
             onOpenApp = ::openApp,
             onTap = vm::tapVoiceIndicator,
             onDismiss = ::finish,
+            // Without a stored id the app would open some other chat.
+            canOpenApp = stored != null,
         )
     }
 
@@ -131,6 +157,10 @@ class AssistActivity : ComponentActivity() {
         storedSessionId?.let { intent.putExtra(DeepLink.EXTRA_SESSION_ID, it) }
         startActivity(intent)
         finish()
+    }
+
+    private companion object {
+        const val STATE_TRUSTED = "assist_trusted"
     }
 }
 

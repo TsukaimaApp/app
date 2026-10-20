@@ -15,7 +15,11 @@ class TsukaimaVoiceSession(context: Context) : VoiceInteractionSession(context) 
 
     override fun onShow(args: Bundle?, showFlags: Int) {
         super.onShow(args, showFlags)
-        startAssistantActivity(Intent(context, AssistActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        startAssistantActivity(
+            Intent(context, AssistActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(AssistNonce.EXTRA, AssistNonce.issue()), // marks the launch as the system's (AssistLaunch)
+        )
         finish()
     }
 }
