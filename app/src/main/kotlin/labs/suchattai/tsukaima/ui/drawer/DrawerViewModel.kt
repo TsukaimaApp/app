@@ -40,6 +40,8 @@ data class DrawerUiState(
     val searching: Boolean = false,
     /** The last server search for [query] failed (shown instead of "Searching…"; cleared by the next query). */
     val searchFailed: Boolean = false,
+    /** The "Cron runs" section is unfolded (collapsed by default: runs pile up and are rarely what you came for). */
+    val showCron: Boolean = false,
 ) {
     /** [query] is long enough for the server search ([MIN_SEARCH] characters); shorter filters the list locally. */
     val searchActive: Boolean get() = query.trim().length >= MIN_SEARCH
@@ -60,13 +62,19 @@ data class DrawerUiState(
      * order in which they first appear in [sessions] (the server's order, most recent first).
      */
     val grouped: Map<String, List<SessionDto>> by lazy {
-        val groups = matching.filterNot { it.archived }.groupBy { it.profileKey }
+        val groups = matching.filterNot { it.archived || it.isCron }.groupBy { it.profileKey }
         val default = groups[DEFAULT_PROFILE]
         if (default == null) groups else linkedMapOf(DEFAULT_PROFILE to default) + groups
     }
 
-    /** Archived sessions matching [query] (the archived view). */
+    /** Archived sessions matching [query] (the archived view); cron runs included, labelled by the row. */
     val archived: List<SessionDto> by lazy { matching.filter { it.archived } }
+
+    /** Unarchived cron-run sessions matching [query], for the collapsible "Cron runs" section. */
+    val cron: List<SessionDto> by lazy { matching.filter { it.isCron && !it.archived } }
+
+    /** Every unarchived cron run, whatever the query: the count on the section row. */
+    val cronCount: Int by lazy { sessions.count { it.isCron && !it.archived } }
 
     /** Every archived session, whatever the query: the count on the "Archived" row. */
     val archivedCount: Int by lazy { sessions.count { it.archived } }
@@ -179,6 +187,8 @@ class DrawerViewModel(
     }
 
     fun setShowArchived(show: Boolean) = _state.update { it.copy(showArchived = show) }
+
+    fun setShowCron(show: Boolean) = _state.update { it.copy(showCron = show) }
 
     /** The session the main pane is showing (null for a new chat or a non-chat screen). */
     fun select(id: String?) = _state.update { it.copy(selectedId = id) }

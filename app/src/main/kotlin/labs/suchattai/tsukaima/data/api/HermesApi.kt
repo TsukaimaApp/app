@@ -1,6 +1,8 @@
 package labs.suchattai.tsukaima.data.api
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
@@ -98,17 +100,25 @@ class HermesApi(
         limit: Int = MAX_SESSIONS,
         archived: String? = null,
         excludeSources: String? = null,
+        source: String? = null,
     ): List<SessionDto> =
         get(
             "api/sessions", "sessions", SessionDto.serializer(),
             "limit" to limit.coerceIn(0, MAX_SESSIONS).toString(),
             "archived" to archived,
             "exclude_sources" to excludeSources,
+            "source" to source,
         )
 
-    /** The drawer's list: archived ones too (split client-side), without cron-run sessions. */
-    suspend fun drawerSessions(): List<SessionDto> =
-        sessions(MAX_SESSIONS, archived = "include", excludeSources = "cron")
+    /**
+     * The drawer's list: archived ones too (split client-side), and the cron-run sessions as their own list
+     * (`source=cron`, as the dashboard does) so the 100-row cap applies to each, not to both together.
+     */
+    suspend fun drawerSessions(): List<SessionDto> = coroutineScope {
+        val chats = async { sessions(MAX_SESSIONS, archived = "include", excludeSources = "cron") }
+        val cron = async { sessions(MAX_SESSIONS, archived = "include", source = "cron") }
+        chats.await() + cron.await()
+    }
 
     suspend fun renameSession(id: String, title: String) {
         sendUnit("PATCH", "api/sessions", id, body = withProfile { put("title", title) })

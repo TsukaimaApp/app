@@ -58,6 +58,8 @@ class DrawerViewModelTest {
         SessionDto(id = "d", title = "Old migration notes", profile = "ops", archived = true),
         SessionDto(id = "e", title = "Untitled", archived = true),
         SessionDto(id = "f", title = "Dataset licence check"),
+        SessionDto(id = "cron_j1_20261020_150205", title = "backup · Oct 20 15:02", source = "cron", profileName = "default"),
+        SessionDto(id = "cron_j1_20261019_150205", title = "backup · Oct 19 15:02", source = "cron", archived = true),
     )
 
     private val settings = MutableStateFlow<Settings?>(Settings(serverUrl = "http://hermes:9119", onboarded = true))
@@ -69,6 +71,25 @@ class DrawerViewModelTest {
     fun tearDown() = Dispatchers.resetMain()
 
     private fun vm(list: List<SessionDto> = sessions) = DrawerViewModel(FakeSessions(list), settings)
+
+    @Test
+    fun cronRunsAreListedApartAndCollapsedByDefault() = runTest {
+        val vm = vm()
+        val state = vm.state.value
+        assertFalse(state.showCron)
+        assertEquals(listOf("cron_j1_20261020_150205"), state.cron.map { it.id })
+        assertEquals(1, state.cronCount) // the archived run counts under Archived, not here
+        assertTrue(state.grouped.values.flatten().none { it.isCron })
+        assertTrue(state.archived.any { it.isCron })
+
+        vm.setShowCron(true)
+        assertTrue(vm.state.value.showCron)
+        vm.setQuery("Oct 20")
+        assertEquals(listOf("cron_j1_20261020_150205"), vm.state.value.cron.map { it.id })
+        vm.setQuery("nothing-here")
+        assertTrue(vm.state.value.cron.isEmpty())
+        assertEquals("the count ignores the query", 1, vm.state.value.cronCount)
+    }
 
     @Test
     fun groupsByProfileExcludingArchived() = runTest {
@@ -120,9 +141,9 @@ class DrawerViewModelTest {
     @Test
     fun archivedCountMatches() = runTest {
         val vm = vm()
-        assertEquals(2, vm.state.value.archivedCount)
+        assertEquals("two archived chats plus one archived cron run", 3, vm.state.value.archivedCount)
         vm.setShowArchived(true)
-        assertEquals(listOf("d", "e"), vm.state.value.archived.map { it.id })
+        assertEquals(listOf("d", "e", "cron_j1_20261019_150205"), vm.state.value.archived.map { it.id })
     }
 
     @Test

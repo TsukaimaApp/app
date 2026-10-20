@@ -262,12 +262,20 @@ class HermesApiTest {
     }
 
     @Test
-    fun drawerRequestIncludesArchivedAndExcludesCron() = runBlocking {
-        json("""{"sessions":[]}""")
-        api().drawerSessions()
+    fun drawerFetchesChatsAndCronRunsAsTwoLists() = runBlocking {
+        // Two concurrent requests, each under the server's 100-row cap: chats without cron, and the cron runs.
+        json("""{"sessions":[{"id":"s1","title":"chat"}]}""")
+        json("""{"sessions":[{"id":"cron_j_1","title":"job · now","source":"cron"}]}""")
+        val got = api().drawerSessions()
+        assertEquals(setOf("s1", "cron_j_1"), got.map { it.id }.toSet())
+        assertTrue(got.single { it.id == "cron_j_1" }.isCron)
+        val targets = List(2) { server.takeRequest(1, TimeUnit.SECONDS)!!.target }.toSet()
         assertEquals(
-            "/api/sessions?limit=100&archived=include&exclude_sources=cron",
-            server.takeRequest(1, TimeUnit.SECONDS)!!.target,
+            setOf(
+                "/api/sessions?limit=100&archived=include&exclude_sources=cron",
+                "/api/sessions?limit=100&archived=include&source=cron",
+            ),
+            targets,
         )
     }
 

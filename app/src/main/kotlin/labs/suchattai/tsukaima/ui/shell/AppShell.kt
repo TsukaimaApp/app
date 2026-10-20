@@ -183,6 +183,7 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
                 onSettings = { go(Route.Settings.path) },
                 onQuery = drawerVm::setQuery,
                 onShowArchived = drawerVm::setShowArchived,
+            onShowCron = drawerVm::setShowCron,
                 modifier = Modifier.width(width),
             )
             VerticalDivider(thickness = 1.dp, color = colors.hairline)

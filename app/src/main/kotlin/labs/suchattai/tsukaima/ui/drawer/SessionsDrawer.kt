@@ -68,6 +68,7 @@ fun SessionsDrawer(
     onSettings: () -> Unit,
     onQuery: (String) -> Unit,
     onShowArchived: (Boolean) -> Unit,
+    onShowCron: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     now: Long = System.currentTimeMillis(),
 ) {
@@ -99,7 +100,7 @@ fun SessionsDrawer(
                     items(hits, key = { "q:${it.id}" }) { s ->
                         ConversationItem(
                             title = s.searchTitle,
-                            meta = if (s.archived) "archived" else ageLabel(s.startedAt, now),
+                            meta = if (s.archived) "archived" else if (s.isCron) "cron" else ageLabel(s.startedAt, now),
                             selected = s.id == state.selectedId,
                             onClick = { onOpen(s.id) },
                             onLongClick = { menuFor = s.id },
@@ -138,6 +139,29 @@ fun SessionsDrawer(
                     }
                 }
                 if (state.grouped.isEmpty() && !state.loading) item(key = "none") { EmptyCaption("No sessions match.") }
+                if (state.cronCount > 0) {
+                    item(key = "cron-runs") {
+                        ConversationItem(
+                            "Cron runs",
+                            meta = state.cronCount.toString(),
+                            icon = if (state.showCron) IconName.ExpandMore else IconName.ChevronRight,
+                            onClick = { onShowCron(!state.showCron) },
+                        )
+                    }
+                    if (state.showCron) {
+                        items(state.cron, key = { "c:${it.id}" }) { s ->
+                            ConversationItem(
+                                title = s.displayTitle,
+                                meta = ageLabel(s.startedAt, now),
+                                selected = s.id == state.selectedId,
+                                onClick = { onOpen(s.id) },
+                                onLongClick = { menuFor = s.id },
+                                modifier = Modifier.padding(start = 12.dp),
+                            )
+                        }
+                        if (state.cron.isEmpty()) item(key = "cron-none") { EmptyCaption("No cron runs match.") }
+                    }
+                }
                 item(key = "gap") { Spacer(Modifier.height(8.dp)) }
                 item(key = "archived") {
                     ConversationItem(
@@ -281,7 +305,7 @@ private fun DrawerPreview(dark: Boolean, archived: Boolean = false) {
                 loading = false,
             ),
             onNewChat = {}, onStatus = {}, onCron = {}, onOpen = {}, onRename = { _, _ -> },
-            onArchive = { _, _ -> }, onDelete = {}, onSettings = {}, onQuery = {}, onShowArchived = {},
+            onArchive = { _, _ -> }, onDelete = {}, onSettings = {}, onQuery = {}, onShowArchived = {}, onShowCron = {},
             modifier = Modifier.width(296.dp),
             now = PREVIEW_NOW,
         )

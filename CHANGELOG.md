@@ -3,6 +3,13 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.5.6 — 2026-10-20 (versionCode 12)
+
+### Added
+- Cron-run sessions (`source: "cron"`) are listed in their own "Cron runs" section of the drawer, collapsed by
+  default with a count; they no longer hide among chats and are fetched as a separate list (`source=cron`), so
+  the server's 100-row cap applies to chats and runs independently. Search hits from cron runs are labelled.
+
 ## 0.5.5 — 2026-10-20 (versionCode 11)
 
 ### Fixed

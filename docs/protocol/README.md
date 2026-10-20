@@ -236,3 +236,4 @@ All need the bearer header unless marked public. Management endpoints accept `?p
   records `known_*_toolsets`), so later Hermes releases' new default toolsets are not auto-enabled for that
   platform. Toggling back on does not restore the preset.
 
+- **Cron-run sessions** (verified 2026-10-20): a job run is stored as a normal session with `source: "cron"`, id `cron_<jobid>_<YYYYMMDD_HHMMSS>`, title `"<job name> · Oct 20 15:02"`, preview starting `[IMPORTANT: You are running as a scheduled cron job…`. `GET /api/sessions` takes `source=`/`sources=`/`exclude_sources=`; the dashboard lists chats (`exclude_sources=cron`) and runs (`source=cron`) as two independent lists, each under the 100-row cap — the app does the same.

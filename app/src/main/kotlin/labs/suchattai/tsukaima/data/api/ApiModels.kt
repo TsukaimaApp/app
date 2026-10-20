@@ -58,7 +58,10 @@ data class SessionDto(
     @SerialName("profile_name") val profileName: String? = null,
     /** Search hits only: the matching text with `>>>` / `<<<` around the match. */
     val snippet: String? = null,
-)
+) {
+    /** A scheduled job's run (`source: "cron"`, id `cron_<job>_<time>`), listed apart from chats. */
+    val isCron: Boolean get() = source == CRON_SOURCE
+}
 
 @Serializable
 data class ProviderDto(
@@ -166,3 +169,6 @@ data class AuthMeDto(
     val provider: String? = null,
     @SerialName("expires_at") val expiresAt: Long = 0L,
 )
+
+/** `SessionDto.source` of a cron job's run. */
+const val CRON_SOURCE = "cron"
