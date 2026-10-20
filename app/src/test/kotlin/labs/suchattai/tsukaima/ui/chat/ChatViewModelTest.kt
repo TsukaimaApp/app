@@ -2470,6 +2470,37 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun anEditIsDroppedWhenTheLiveSessionChanges() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("session.resume", obj(twoTurnsJson))
+            transport.on("session.events.since", obj("""{"events":[],"latest_seq":0,"truncated":false}"""))
+        }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        vm.editMessage("h-3")
+        assertEquals(3L, vm.state.value.pendingEdit)
+
+        // Same live session: the row is still there to edit.
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+        assertEquals(3L, vm.state.value.pendingEdit)
+
+        // A new live session: the edit can no longer be sent; the text stays as a draft.
+        b.transport.on("session.resume", obj(twoTurnsJson.replace(live, "beef0001")))
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+        val s = vm.state.value
+        assertEquals("beef0001", s.chat.liveSessionId)
+        assertNull(s.pendingEdit)
+        assertFalse(s.editDropsAttachments)
+        assertEquals("and the distro?", s.input)
+    }
+
+    @Test
     fun editFallsBackWhenTheRowIsGone() = runTest(dispatcher) {
         val b = backend().apply {
             transport.on("session.resume", obj(twoTurnsJson))
@@ -2750,6 +2781,44 @@ class ChatViewModelTest {
         vm.sendAside(SideKind.Question) // empty composer: nothing sent
         advanceUntilIdle()
         assertEquals(1, b.transport.methods().count { it == "prompt.btw" })
+    }
+
+    @Test
+    fun aPendingSideNoteSurvivesARebuildFromHistory() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("prompt.btw", obj("""{"task_id":"btw_1"}""")) }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("what time is it?")
+        vm.sendAside(SideKind.Question)
+        advanceUntilIdle()
+        val pending = ChatItem.SideNote("side-btw_1", SideKind.Question, "what time is it?", "", pending = true)
+
+        // The replay ring lost events: the transcript is rebuilt from history, which never holds side notes.
+        b.transport.on("session.resume", obj(resumeJson))
+        b.transport.on("session.events.since", obj("""{"events":[],"latest_seq":7,"truncated":true}"""))
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+        assertEquals(listOf("h-1", "h-2", "side-btw_1"), vm.state.value.chat.items.map { it.id })
+        assertEquals(pending, vm.state.value.chat.items.last())
+
+        // A new live session rebuilds too; the note is still there for its completion.
+        b.transport.on("session.resume", obj(resumeJson.replace(live, "beef0001")))
+        b.transport.on("session.events.since", obj("""{"events":[],"latest_seq":0,"truncated":false}"""))
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+        assertEquals(listOf("h-1", "h-2", "side-btw_1"), vm.state.value.chat.items.map { it.id })
+
+        b.events.emit(ev("btw.complete", 1, """{"task_id":"btw_1","text":"Noon."}""", session = "beef0001"))
+        advanceUntilIdle()
+        val done = vm.state.value.chat.items.last() as ChatItem.SideNote
+        assertEquals("Noon.", done.text)
+        assertEquals("what time is it?", done.question)
+        assertFalse(done.pending)
+        assertEquals(3, vm.state.value.chat.items.size)
     }
 
     @Test

@@ -19,7 +19,8 @@ import kotlin.concurrent.withLock
  * origin (so the username matches) and, over cleartext http, a [cleartextReplayAllowed] host.
  *
  * OkHttp interceptors are blocking, so [login] is a plain blocking function executed on the OkHttp
- * thread; it is called with the stored origin as `url`. Requests tagged [NoAuth] are passed through untouched.
+ * thread; it is called with the stored origin as `url`. Requests tagged [NoAuth] are passed through untouched;
+ * requests tagged [NoReLogin] get the bearer but their 401 is returned as-is.
  */
 class AuthInterceptor(
     private val creds: CredentialStore,
@@ -40,7 +41,7 @@ class AuthInterceptor(
 
         val usedToken = stored.accessToken
         val first = chain.proceed(request.withBearer(usedToken))
-        if (first.code != 401) return first
+        if (first.code != 401 || request.tag(NoReLogin::class.java) != null) return first
         val configured = settings().serverUrl.toHttpUrlOrNull()
         if (configured == null || !sameOrigin(configured, origin)) return first // origin is mid-switch: no replay
         first.close()

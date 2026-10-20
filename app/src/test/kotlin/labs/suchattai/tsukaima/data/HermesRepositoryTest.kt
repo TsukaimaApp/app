@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import labs.suchattai.tsukaima.data.api.AuthException
+import labs.suchattai.tsukaima.data.api.AuthInterceptor
 import labs.suchattai.tsukaima.data.api.HermesApi
 import labs.suchattai.tsukaima.data.api.ImageTooLargeException
 import labs.suchattai.tsukaima.data.gateway.GatewayClient
@@ -128,6 +129,30 @@ class HermesRepositoryTest {
         snapshot.value = Settings(serverUrl = serverUrl())
         server.enqueue(MockResponse.Builder().addHeader("Content-Type", "application/json").body("""{"active":"work"}""").build())
         assertEquals("work", repo.activeProfile().getOrThrow())
+    }
+
+    @Test
+    fun sameOriginImage401NeverReLogsInOrRequiresAuth() = runBlocking<Unit> {
+        val origin = serverUrl()
+        creds.save("pw", "tok", origin)
+        snapshot.value = Settings(serverUrl = origin, username = "u")
+        var logins = 0
+        val authed = okHttp.newBuilder()
+            .addInterceptor(AuthInterceptor(creds, { snapshot.value }) { _, _, _ -> logins++; "fresh" })
+            .build()
+        val api = HermesApi(authed, { snapshot.value.serverUrl }, { snapshot.value }, plainClient = okHttp)
+        val images = HermesRepository(api, store, creds, connection, loginApi = { url -> HermesApi(okHttp, { url }) })
+
+        server.enqueue(MockResponse.Builder().code(401).build())
+        server.enqueue(MockResponse.Builder().code(401).build())
+        val result = images.fetchImage(server.url("/api/files/x.png").toString())
+
+        assertTrue(result.isFailure)
+        assertEquals("Bearer tok", server.takeRequest(1, TimeUnit.SECONDS)!!.headers["Authorization"])
+        assertEquals("no password re-login for an image", 0, logins)
+        assertEquals(1, server.requestCount)
+        assertEquals("tok", creds.accessToken())
+        assertFalse(connection.authRequired.value)
     }
 
     @Test

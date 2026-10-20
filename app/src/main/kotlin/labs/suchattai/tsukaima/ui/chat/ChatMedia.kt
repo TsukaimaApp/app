@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import labs.suchattai.tsukaima.data.api.ApiException
+import labs.suchattai.tsukaima.data.api.AuthException
 import labs.suchattai.tsukaima.data.api.ImageOrigin
 import labs.suchattai.tsukaima.data.api.ImageTooLargeException
 import labs.suchattai.tsukaima.data.api.userMessage
@@ -189,10 +190,13 @@ internal class ChatMedia(
         }
     }
 
-    /** A failure worth retrying: a dropped connection or timeout, or a 5xx / 429 answer (busy, not a verdict). */
+    /**
+     * A failure worth retrying: a dropped connection or timeout, or a 5xx / 429 answer (busy, not a verdict). An
+     * [AuthException] (an [IOException]) is final: retrying it on every recomposition would only repeat it.
+     */
     private fun transientImageFailure(e: Exception): Boolean = when (e) {
         is ApiException -> e.code >= 500 || e.code == 429
-        is ImageTooLargeException -> false
+        is ImageTooLargeException, is AuthException -> false
         else -> e is IOException
     }
 

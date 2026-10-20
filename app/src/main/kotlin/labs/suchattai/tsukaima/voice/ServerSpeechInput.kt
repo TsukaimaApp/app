@@ -143,7 +143,10 @@ internal class Uploader(
         when {
             event is SpeechEvent.Final -> emptyMaxLength = 0
             event is SpeechEvent.Error && event.silence && maxLength -> {
-                if (++emptyMaxLength >= 2) return SpeechEvent.Error(TOO_NOISY, retry = false)
+                if (++emptyMaxLength >= 2) {
+                    emptyMaxLength = 0 // "tap to retry" starts with two fresh chances
+                    return SpeechEvent.Error(TOO_NOISY, retry = false)
+                }
             }
         }
         return event

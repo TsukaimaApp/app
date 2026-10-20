@@ -151,8 +151,11 @@ class HermesRepository(
     /** A file the agent delivered (`MEDIA:`), streaming; the caller closes it. */
     suspend fun download(path: String): Result<FileDownload> = call { api.download(path) }
 
-    /** An image a reply shows (`![alt](url)`): bearer only on the server's own origin, at most 8 MB. */
-    suspend fun fetchImage(url: String): Result<ByteArray> = call { api.fetchImage(url) }
+    /**
+     * An image a reply shows (`![alt](url)`): bearer only on the server's own origin, at most 8 MB. A 401 is that
+     * image's verdict, never a sign-in prompt, so failures are not reported to the connection ([attempt]).
+     */
+    suspend fun fetchImage(url: String): Result<ByteArray> = attempt { api.fetchImage(url) }
 
     /** One utterance ([mime]: WAV, or Opus in Ogg) through the server's speech-to-text relay. */
     suspend fun transcribe(audio: ByteArray, mime: String = "audio/wav"): Result<TranscriptionDto> =

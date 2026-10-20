@@ -46,6 +46,9 @@ internal class ChatEdits(
     /** A tap on the "Editing" caption: leaves edit mode and clears the composer. */
     fun cancel() = state.update { if (it.pendingEdit == null) it else it.copy(input = "", pendingEdit = null, editDropsAttachments = false) }
 
+    /** A new live session: an edit of the old session's row can no longer be sent, so the text stays as a draft. */
+    fun onLiveChanged() = state.update { if (it.pendingEdit == null) it else it.copy(pendingEdit = null, editDropsAttachments = false) }
+
     /** Send while editing row [row]: [text] and the composer's ready attachments replace that message. */
     fun send(live: String, text: String, row: Long) {
         if (!rewindable(state.value)) return backend.toast(WAIT)

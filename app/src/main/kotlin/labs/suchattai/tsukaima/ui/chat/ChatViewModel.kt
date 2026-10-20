@@ -80,9 +80,10 @@ class ChatViewModel(
     private val failedSends = mutableMapOf<String, FailedSend>()
     private val sync = ChatReconnector(
         session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), storedSessionId, flair, _state,
-        onRebuilt = { before ->
+        onRebuilt = { before, liveChanged ->
             restoreFailedSends()
             voice.rebased(before)
+            if (liveChanged) edits.onLiveChanged()
         },
     )
 

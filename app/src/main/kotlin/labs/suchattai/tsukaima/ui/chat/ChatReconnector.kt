@@ -38,9 +38,9 @@ internal class ChatReconnector(
     private val state: MutableStateFlow<ChatUiState>,
     /**
      * Runs after the transcript was replaced by stored history (local-only items such as failed sends are gone),
-     * with the items it replaced.
+     * with the items it replaced and whether the live session id changed.
      */
-    private val onRebuilt: (before: List<ChatItem>) -> Unit = {},
+    private val onRebuilt: (before: List<ChatItem>, liveChanged: Boolean) -> Unit = { _, _ -> },
 ) {
     private var job: Job? = null
     private var held: MutableList<Frame.Event>? = null
@@ -96,15 +96,17 @@ internal class ChatReconnector(
             val sameLive = r.sessionId == previousLive
             val beforeBind = chat.items
             bindResumed(r, rebuild = !sameLive)
-            if (!sameLive) onRebuilt(beforeBind)
+            if (!sameLive) onRebuilt(beforeBind, true)
             // A chat that saw no seq yet sends 0, not the NO_SEQ sentinel: the server reads a negative
             // `last_seen` as "evicted" and would report truncation, replacing an optimistic bubble with history.
             val replay = ChatSync.replay(session.eventsSince(r.sessionId, if (sameLive) maxOf(chat.lastSeq, 0) else 0))
             if (replay.truncated) {
                 // The ring lost events we never saw: trust the stored history instead of a replay with holes.
                 val beforeTruncated = chat.items
-                setChat { it.copy(items = ChatSync.transcript(r), lastSeq = replay.latestSeq ?: it.lastSeq) }
-                onRebuilt(beforeTruncated)
+                setChat {
+                    it.copy(items = withPendingSides(ChatSync.transcript(r), it.items), lastSeq = replay.latestSeq ?: it.lastSeq)
+                }
+                onRebuilt(beforeTruncated, !sameLive)
             } else {
                 replay.events.forEach(::applyEvent)
             }
@@ -127,16 +129,23 @@ internal class ChatReconnector(
 
     /**
      * Binds a resume result; [rebuild] replaces the transcript with its history plus, while a turn runs, the reply
-     * it has streamed so far ([ChatSync.transcript]); live deltas then append to that bubble.
+     * it has streamed so far ([ChatSync.transcript]) and the pending side notes; live deltas then append to that bubble.
      */
     fun bindResumed(r: SessionResumed, rebuild: Boolean) {
         setChat { c ->
             val bound = ChatReducer.onSessionBound(c, r.sessionId, r.storedSessionId ?: routeStoredId)
-            val items = if (rebuild) bound.copy(items = ChatSync.transcript(r)) else bound
+            val items = if (rebuild) bound.copy(items = withPendingSides(ChatSync.transcript(r), c.items)) else bound
             val withInfo = ChatReducer.onSessionInfo(items, r.info).copy(resumeProgress = null)
             if (r.running) withInfo.copy(status = AgentStatus.Thinking(flair())) else ChatReducer.onConnectionRestored(withInfo)
         }
     }
+
+    /**
+     * History never holds side notes: a rebuild keeps the pending ones of [before] at the end, since their
+     * completion event may still arrive.
+     */
+    private fun withPendingSides(items: List<ChatItem>, before: List<ChatItem>): List<ChatItem> =
+        items + before.filter { it is ChatItem.SideNote && it.pending && items.none { kept -> kept.id == it.id } }
 
     /**
      * The server may re-attach a live session that already streamed events (another client, or this chat

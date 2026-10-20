@@ -49,6 +49,7 @@ import labs.suchattai.tsukaima.ui.theme.Dimens
 import labs.suchattai.tsukaima.ui.theme.TsukaimaShapes
 import labs.suchattai.tsukaima.ui.theme.TsukaimaType
 import labs.suchattai.tsukaima.ui.theme.tsukaima
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
  * Where an [ImageCard] is: waiting for a tap (a foreign origin), still loading, shown, or failed (then the alt text
@@ -121,8 +122,10 @@ private fun ImageCardContent(
                 try {
                     uriHandler.openUri(url)
                 } catch (e: Exception) {
-                    // No browser (ActivityNotFoundException) or a URI the platform rejects: nothing to open.
-                    Log.w("Tsukaima", "image: cannot open $url", e)
+                    // No browser (ActivityNotFoundException) or a URI the platform rejects: nothing to open. Only the
+                    // host and the failure's type are logged: the full URL (and a message quoting it) rides into
+                    // problem reports.
+                    Log.w("Tsukaima", "image: cannot open a link on ${url.toHttpUrlOrNull()?.host} (${e.javaClass.simpleName})")
                 }
             }
             .semantics(mergeDescendants = true) { contentDescription = label },

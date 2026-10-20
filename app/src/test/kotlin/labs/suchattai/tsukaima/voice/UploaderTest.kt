@@ -29,6 +29,16 @@ class UploaderTest {
     }
 
     @Test
+    fun tooNoisyResetsTheCountForTheRetry() = runTest {
+        // "Tap to retry" gets two fresh chances, not an immediate second "too noisy".
+        val u = uploader("", "", "", "")
+        assertEquals(silent, u.upload(pcm, maxLength = true))
+        assertEquals(noisy, u.upload(pcm, maxLength = true))
+        assertEquals(silent, u.upload(pcm, maxLength = true))
+        assertEquals(noisy, u.upload(pcm, maxLength = true))
+    }
+
+    @Test
     fun aTranscriptBetweenResetsTheCount() = runTest {
         val u = uploader("", "hello", "")
         assertEquals(silent, u.upload(pcm, maxLength = true))

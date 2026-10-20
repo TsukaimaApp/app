@@ -45,3 +45,6 @@ class AuthException(message: String = "Authentication failed") : IOException(mes
 
 /** Request tag: skip the bearer header and the 401 re-login retry (login, health, status, auth providers). */
 class NoAuth
+
+/** Request tag: attach the bearer but never re-login on a 401; that 401 is the answer (same-origin reply images). */
+class NoReLogin

@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import labs.suchattai.tsukaima.data.api.ApiException
+import labs.suchattai.tsukaima.data.api.AuthException
 import labs.suchattai.tsukaima.data.api.ImageTooLargeException
 import labs.suchattai.tsukaima.data.prefs.Settings
 import org.junit.Assert.assertEquals
@@ -99,6 +100,17 @@ class ChatMediaTest {
         assertNull(u.media.imagePreview(url))
         assertNull(u.media.imagePreview(url))
         assertEquals(1, inner.fetched.size)
+    }
+
+    @Test
+    fun authFailureIsCachedNotRetried() = runTest {
+        // A 401 on an image is final: retrying on every recomposition would only repeat it.
+        val b = Backend().apply { result = { Result.failure(AuthException()) } }
+        val h = Harness(this, b)
+        assertNull(h.media.imagePreview(url))
+        b.result = { Result.success(byteArrayOf(1)) }
+        assertNull(h.media.imagePreview(url))
+        assertEquals(1, b.fetched.size)
     }
 
     @Test

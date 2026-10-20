@@ -304,3 +304,6 @@ All need the bearer header unless marked public. Management endpoints accept `?p
   `vault.code {site?, hint?}` → `{"value":"<code>"}`; `vault.save_login {origin, site}` →
   `{"value":"{\"identifier\":\"…\",\"password\":\"…\"}"}` (a JSON *string*). `site` is the host Hermes derives from
   `origin` (`tools/browser_vault_tool.py`), never agent text; the app shows the full `origin` too when it differs.
+- **Reply images** (`![alt](url)`): "same origin" is scheme + host + port only, so a Hermes mounted under a path
+  prefix on a shared host sends its bearer to sibling paths on that host too; a 401 on an image is final (no
+  re-login, no sign-in prompt).
