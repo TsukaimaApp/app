@@ -55,6 +55,9 @@ class ChatViewModel(
     private var opened = false
     private var opening = false
     private var lost = false
+
+    /** One automatic open() retry per connection-state transition; reset whenever the state changes. */
+    private var openRetried = false
     private var userCounter = 0L
     private val sync = ChatReconnector(
         session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), storedSessionId, flair, _state,
@@ -105,7 +108,10 @@ class ChatViewModel(
                 _state.update { it.copy(loading = false) }
             }
             // A Connected that arrived while this attempt was in flight found `opening` set and did nothing.
-            if (notConnected && backend.connection.value == ConnectionState.Connected) open()
+            if (notConnected && backend.connection.value == ConnectionState.Connected && !openRetried) {
+                openRetried = true
+                open()
+            }
         }
         if (_state.value.models == null) {
             launch { backend.modelOptions().onSuccess { m -> _state.update { it.copy(models = m, model = it.model ?: m.model, provider = it.provider ?: m.provider) } } }
@@ -128,6 +134,7 @@ class ChatViewModel(
     }
 
     private fun onConnection(s: ConnectionState) {
+        openRetried = false
         if (s == ConnectionState.Connected) {
             when {
                 lost -> {
@@ -159,7 +166,7 @@ class ChatViewModel(
                 throw c
             } catch (e: Exception) {
                 // Undo the optimistic bubble: the text goes back to the composer, so a retry must not duplicate it.
-                setChat { c -> c.copy(items = c.items.filterNot { it.id == localId }, status = AgentStatus.Idle) }
+                setChat { c -> c.copy(items = c.items.filterNot { it.id == localId }, status = unlessOffline(c.status, AgentStatus.Idle)) }
                 _state.update { if (it.input.isEmpty()) it.copy(input = text) else it }
                 backend.toast("Message not sent: ${e.message ?: "gateway error"}")
             }
@@ -200,7 +207,7 @@ class ChatViewModel(
                 backend.answeredRequestIds.remove(id)
                 _state.update { s ->
                     val items = s.chat.items.map { if (it.id == id && it is ChatItem.Approval) it.copy(answered = false) else it }
-                    s.copy(chat = s.chat.copy(items = items, status = AgentStatus.Approval), decisions = s.decisions - id)
+                    s.copy(chat = s.chat.copy(items = items, status = unlessOffline(s.chat.status, AgentStatus.Approval)), decisions = s.decisions - id)
                 }
             }
         }
@@ -288,6 +295,10 @@ class ChatViewModel(
         copy(id)
         backend.toast("Session ID copied")
     }
+
+    /** A failure is usually a dropped socket: keep Offline (set by the loss) rather than re-enable the composer. */
+    private fun unlessOffline(current: AgentStatus, next: AgentStatus) =
+        if (current == AgentStatus.Offline) current else next
 
     /** Runs [block]; on failure shows "[failure]: reason" (if given) and returns false. */
     private suspend fun attempt(failure: String?, block: suspend () -> Unit): Boolean =

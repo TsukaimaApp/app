@@ -673,4 +673,65 @@ class ChatViewModelTest {
         advanceUntilIdle()
         assertEquals(listOf("hello"), vm.state.value.chat.items.map { (it as ChatItem.UserMessage).text })
     }
+
+    @Test
+    fun failedSendWhileOfflineKeepsOffline() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        val gate = CompletableDeferred<Unit>()
+        b.transport.failNext["prompt.submit"] = gate
+        vm.setInput("hello")
+        vm.send()
+        advanceUntilIdle() // submit parked
+        b.connection.value = ConnectionState.Reconnecting // the socket drops: Offline
+        advanceUntilIdle()
+        gate.complete(Unit) // ...and the pending submit fails because of it
+        advanceUntilIdle()
+
+        assertEquals(AgentStatus.Offline, vm.state.value.chat.status)
+        assertTrue(vm.state.value.offline)
+        assertTrue(vm.state.value.chat.items.isEmpty())
+        assertEquals("hello", vm.state.value.input)
+    }
+
+    @Test
+    fun failedFallbackAnswerWhileOfflineKeepsOffline() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val b = backend().apply {
+            transport.on("session.resume", obj(resumeJson.replace("\"running\":false", "\"running\":true,\"pending_approval\":{\"request_id\":\"r5\"}")))
+            transport.failNext["approval.respond"] = gate
+        }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        vm.approve("pending-r5")
+        advanceUntilIdle() // answer parked
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(AgentStatus.Offline, vm.state.value.chat.status)
+        assertTrue(vm.state.value.offline)
+        assertFalse((vm.state.value.chat.items.last() as ChatItem.Approval).answered) // still retryable
+    }
+
+    @Test
+    fun openRetryIsBoundedPerConnectionState() = runTest(dispatcher) {
+        val b = backend()
+        b.transport.failing += "session.create" // fails every time, while Connected
+        val vm = vm(b)
+        advanceUntilIdle()
+        assertEquals(2, b.transport.methods().count { it == "session.create" }) // the attempt + one retry
+        assertNull(vm.state.value.chat.liveSessionId)
+
+        // A new transition allows the normal reopen again, and a fresh retry budget.
+        b.transport.failing.clear()
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+        assertEquals(3, b.transport.methods().count { it == "session.create" })
+        assertEquals(live, vm.state.value.chat.liveSessionId)
+    }
 }
