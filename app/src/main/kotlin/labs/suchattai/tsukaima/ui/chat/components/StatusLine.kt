@@ -37,19 +37,22 @@ import labs.suchattai.tsukaima.ui.theme.tsukaima
 /** Dot colour and pulse flag for a status; pure so it can be unit-tested. */
 data class StatusVisual(val color: Color, val pulsing: Boolean)
 
-fun statusVisual(status: AgentStatus, colors: TsukaimaColors): StatusVisual = StatusVisual(
-    color = when (status.tone) {
+fun statusVisual(status: AgentStatus, colors: TsukaimaColors): StatusVisual = statusVisual(status.tone, status.pulsing, colors)
+
+/** [statusVisual] for a bare tone + pulse flag (the voice status line has no [AgentStatus] of its own). */
+fun statusVisual(tone: StatusTone, pulsing: Boolean, colors: TsukaimaColors): StatusVisual = StatusVisual(
+    color = when (tone) {
         StatusTone.Grey -> colors.ink3
         StatusTone.Accent -> colors.accent
         StatusTone.Amber -> colors.warn
         StatusTone.Red -> colors.danger
     },
-    pulsing = status.pulsing,
+    pulsing = pulsing,
 )
 
 /** The dot owns the animation so only it (via graphicsLayer) updates per frame. */
 @Composable
-private fun StatusDot(visual: StatusVisual) {
+internal fun StatusDot(visual: StatusVisual) {
     val alphaState = if (visual.pulsing) {
         val transition = rememberInfiniteTransition(label = "statusPulse")
         transition.animateFloat(
