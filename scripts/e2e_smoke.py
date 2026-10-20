@@ -1,5 +1,6 @@
-"""Tsukaima e2e smoke: login, WS session, one prompt, cron create/list/delete, session cleanup."""
-import asyncio, http.cookiejar, json, os, sys, time, urllib.request
+"""Tsukaima e2e smoke: login, REST contract (the app's exact GETs), WS session, one prompt,
+cron create/list/delete, session cleanup."""
+import asyncio, http.cookiejar, json, os, sys, time, urllib.error, urllib.request
 
 BASE = os.environ["HERMES_TEST_URL"].rstrip("/")
 USER, PASSWORD = os.environ["HERMES_TEST_USER"], os.environ["HERMES_TEST_PASSWORD"]
@@ -96,6 +97,37 @@ async def ws_part(token):
             rt.cancel()
 
 
+# Every REST read the app makes, with the app's exact query params (HermesApi.kt). A server-side cap or
+# param change (e.g. /api/sessions `limit` le=100) makes one of these non-2xx and fails the smoke.
+REST_CONTRACT = [
+    "/api/sessions?limit=100&archived=include&exclude_sources=cron",  # drawer
+    "/api/sessions?limit=10",  # status: last session
+    "/api/model/options",
+    "/api/chat/workspaces",
+    "/api/cron/jobs",
+    "/api/cron/delivery-targets",
+    "/api/pairing",
+    "/api/skills",
+    "/api/tools/toolsets",
+    "/api/profiles",
+    "/api/profiles/active",
+    "/api/logs?file=gateway&lines=300",
+    "/api/logs?file=agent&lines=300&level=WARNING",
+    "/api/analytics/usage?days=30",
+    "/api/system/stats",
+    "/api/auth/me",
+]
+
+
+def rest_contract_part(token):
+    for path in REST_CONTRACT:
+        try:
+            http_json("GET", path, token=token)
+        except urllib.error.HTTPError as e:
+            fail(f"GET {path} -> HTTP {e.code}: {e.read()[:200]!r}")
+    step(f"REST contract ({len(REST_CONTRACT)} GETs with the app's params, all 2xx)")
+
+
 def cron_part(token):
     name = f"tsukaima-smoke-{int(time.time())}"
     job = http_json("POST", "/api/cron/jobs", {"name": name, "schedule": "0 4 * * *",
@@ -116,6 +148,7 @@ def cron_part(token):
 def main():
     token = login()
     step("login")
+    rest_contract_part(token)
     asyncio.run(ws_part(token))
     cron_part(token)
     print("PASS")
