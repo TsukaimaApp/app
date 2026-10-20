@@ -53,7 +53,6 @@ import labs.suchattai.tsukaima.ui.components.ConfirmDialog
 import labs.suchattai.tsukaima.ui.components.GhostButton
 import labs.suchattai.tsukaima.ui.components.IconButton44
 import labs.suchattai.tsukaima.ui.components.IconName
-import labs.suchattai.tsukaima.ui.components.MenuItem
 import labs.suchattai.tsukaima.ui.components.MenuSheet
 import labs.suchattai.tsukaima.ui.components.PrimaryButton
 import labs.suchattai.tsukaima.ui.components.SecondaryButton
@@ -64,6 +63,7 @@ import labs.suchattai.tsukaima.ui.components.TsukaimaTextField
 import labs.suchattai.tsukaima.ui.theme.TsukaimaTheme
 import labs.suchattai.tsukaima.ui.theme.TsukaimaType
 import labs.suchattai.tsukaima.ui.theme.tsukaima
+import labs.suchattai.tsukaima.ui.voice.voiceLanguageItems
 
 /** Everything the stateless [SettingsContent] can ask for. */
 class SettingsActions(
@@ -85,6 +85,8 @@ class SettingsActions(
     val onNotifications: ((NotificationPrefs) -> NotificationPrefs) -> Unit = {},
     /** Voice language picked (null = system default). */
     val onVoiceLanguage: (String?) -> Unit = {},
+    /** The Language sheet opens: (re)load its options. */
+    val onVoiceLanguagesOpen: () -> Unit = {},
     /** "Use as device assistant": opens the system's assistant settings. */
     val onAssistant: () -> Unit = {},
     val onTheme: (ThemeMode) -> Unit = {},
@@ -132,6 +134,7 @@ fun SettingsScreen(
             onToolset = vm::toggleToolset,
             onNotifications = vm::setNotifications,
             onVoiceLanguage = vm::setVoiceLanguage,
+            onVoiceLanguagesOpen = vm::loadVoiceLanguages,
             onAssistant = onAssistant,
             onTheme = vm::setTheme,
             onMaterialYou = vm::setMaterialYou,
@@ -153,9 +156,7 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
     MenuSheet(
         visible = showVoiceLanguages,
         onDismiss = { showVoiceLanguages = false },
-        items = state.voiceLanguages.map { option ->
-            MenuItem(option.label, null, checked = option.tag == state.voiceLanguage) { actions.onVoiceLanguage(option.tag) }
-        },
+        items = voiceLanguageItems(state.voiceLanguages, state.voiceLanguage, actions.onVoiceLanguage),
     )
     Column(
         modifier
@@ -325,7 +326,10 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                     subtitle = VoiceLanguages.label(state.voiceLanguage, state.voiceLanguages),
                     leading = IconName.Translate,
                     trailing = { Chevron() },
-                    onClick = { showVoiceLanguages = true },
+                    onClick = {
+                        actions.onVoiceLanguagesOpen()
+                        showVoiceLanguages = true
+                    },
                     modifier = Modifier.bleed(12.dp),
                 )
                 TsukaimaRow(

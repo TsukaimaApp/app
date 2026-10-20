@@ -449,16 +449,22 @@ class ChatViewModel(
 
     /**
      * Saves the voice language ([tag] null = system default) and closes its sheet. The recogniser and TTS read the
-     * setting lazily, so the next run and the next sentence use it; a listening run in progress starts over once the
-     * setting is visible ([SETTINGS_SETTLE_MS] at most, in case the write failed).
+     * setting lazily, so the next run and the next sentence use it; once the saved value shows in the settings, a
+     * listening run in progress starts over in it. If it does not show within [SETTINGS_SETTLE_MS] (the write
+     * failed), the sheet's check goes back to the stored value and a toast says so.
      */
     fun setVoiceLanguage(tag: String?) {
         _state.update { it.copy(menu = null, voiceLanguage = tag) }
         launch {
             backend.updateSettings { it.copy(voiceLanguage = tag) }
-            withTimeoutOrNull(SETTINGS_SETTLE_MS) { backend.settings.first { it?.voiceLanguage == tag } }
+            val saved = withTimeoutOrNull(SETTINGS_SETTLE_MS) { backend.settings.first { it?.voiceLanguage == tag } }
+            if (saved == null) {
+                _state.update { it.copy(voiceLanguage = backend.settings.value?.voiceLanguage) }
+                backend.toast("Couldn’t save the voice language")
+                return@launch
+            }
             voice.restartListening()
-            val options = _state.value.voiceLanguages.ifEmpty { backend.voiceLanguages() }
+            val options = _state.value.voiceLanguages.ifEmpty { withContext(io) { backend.voiceLanguages() } }
             backend.toast("Voice language: ${VoiceLanguages.label(tag, options)}")
         }
     }
@@ -478,8 +484,11 @@ class ChatViewModel(
         if (menu == ChatMenu.Model && _state.value.models == null) {
             launch { backend.modelOptions().onSuccess { m -> _state.update { it.copy(models = m) } } }
         }
-        if (menu == ChatMenu.VoiceLanguage) {
-            _state.update { it.copy(voiceLanguages = backend.voiceLanguages()) } // the TTS engine's list may have come in
+        if (menu == ChatMenu.VoiceLanguage) { // reloaded each time: the TTS engine's list may have come in
+            launch {
+                val options = withContext(io) { backend.voiceLanguages() }
+                _state.update { it.copy(voiceLanguages = options) }
+            }
         }
         if (menu == ChatMenu.Workspace && _state.value.workspaces == null) {
             launch { backend.workspaces().onSuccess { w -> _state.update { it.copy(workspaces = w) } } }

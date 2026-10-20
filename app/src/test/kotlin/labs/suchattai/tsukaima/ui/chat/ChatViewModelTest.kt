@@ -132,7 +132,10 @@ class ChatViewModelTest {
         val toasts = mutableListOf<String>()
         val rest = mutableListOf<String>()
 
+        /** Simulates a failing settings write: [updateSettings] changes nothing. */
+        var dropSettingsWrites = false
         override suspend fun updateSettings(block: (Settings) -> Settings) {
+            if (dropSettingsWrites) return
             settings.value = block(settings.value ?: Settings())
         }
         val bound = mutableListOf<Pair<String, String?>>()
@@ -2228,6 +2231,22 @@ class ChatViewModelTest {
         advanceUntilIdle()
         assertNull(b.settings.value?.voiceLanguage)
         assertEquals("Voice language: System default", b.toasts.last())
+    }
+
+    @Test
+    fun voiceLanguagePickThatIsNotSavedRevertsAndSaysSo() = runTest(dispatcher) {
+        val b = backend(Settings(workspace = "/srv/work", model = "m-1", voiceLanguage = "en-US"))
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.openVoice()
+        advanceUntilIdle()
+        b.dropSettingsWrites = true
+
+        vm.setVoiceLanguage("pl-PL")
+        advanceUntilIdle() // past the settle timeout (virtual time)
+        assertEquals("en-US", vm.state.value.voiceLanguage)
+        assertEquals("Couldn’t save the voice language", b.toasts.last())
+        assertEquals(1, b.speech.listenCount) // nothing restarted
     }
 
     @Test

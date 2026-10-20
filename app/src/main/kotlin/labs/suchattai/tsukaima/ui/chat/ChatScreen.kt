@@ -81,6 +81,7 @@ import labs.suchattai.tsukaima.ui.chat.components.StatusLine
 import labs.suchattai.tsukaima.ui.chat.components.ToolRow
 import labs.suchattai.tsukaima.ui.chat.components.UserBubble
 import labs.suchattai.tsukaima.ui.voice.VoiceScreen
+import labs.suchattai.tsukaima.ui.voice.voiceLanguageItems
 import labs.suchattai.tsukaima.ui.voice.voiceText
 import labs.suchattai.tsukaima.ui.components.ConfirmDialog
 import labs.suchattai.tsukaima.ui.components.IconName
@@ -475,12 +476,6 @@ internal fun reasoningItems(state: ChatUiState, actions: ChatActions): List<Menu
         MenuItem(label, null, checked = state.chat.reasoningEffort == value) { actions.onReasoning(value) }
     }
 
-/** The voice language sheet: "System default" and every option, check on the current setting. */
-internal fun voiceLanguageItems(state: ChatUiState, actions: ChatActions): List<MenuItem> =
-    state.voiceLanguages.map { option ->
-        MenuItem(option.label, null, checked = option.tag == state.voiceLanguage) { actions.onVoiceLanguage(option.tag) }
-    }
-
 /** A message's long-press menu: Copy text, plus Copy reasoning for a reply that has some. */
 internal fun messageItems(state: ChatUiState, actions: ChatActions): List<MenuItem> {
     val item = state.chat.items.firstOrNull { it.id == state.messageMenu } ?: return emptyList()
@@ -498,7 +493,7 @@ private fun ChatSheets(state: ChatUiState, actions: ChatActions, overflow: List<
     MenuSheet(state.menu == ChatMenu.Workspace, dismiss, workspaceItems(state, actions))
     MenuSheet(state.menu == ChatMenu.Overflow && overflow.isNotEmpty(), dismiss, overflow)
     MenuSheet(state.menu == ChatMenu.Reasoning, dismiss, reasoningItems(state, actions))
-    MenuSheet(state.menu == ChatMenu.VoiceLanguage, dismiss, voiceLanguageItems(state, actions))
+    MenuSheet(state.menu == ChatMenu.VoiceLanguage, dismiss, voiceLanguageItems(state.voiceLanguages, state.voiceLanguage, actions.onVoiceLanguage))
     val messageMenu = messageItems(state, actions)
     MenuSheet(messageMenu.isNotEmpty(), { actions.onMessageMenu(null) }, messageMenu)
     when (state.dialog) {

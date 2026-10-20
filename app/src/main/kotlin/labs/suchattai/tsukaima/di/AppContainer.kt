@@ -189,11 +189,12 @@ class AppContainer(context: Context) {
     }
 
     /**
-     * The voice language picker's options: the device locales, the TTS engine's languages (once it is ready) and
-     * [VoiceLanguages.FALLBACK], each named in the current locale.
+     * The voice language picker's options: the device locales (Unicode extensions such as `-u-fw-mon` stripped), the
+     * TTS engine's languages (once it is ready) and [VoiceLanguages.FALLBACK], each named in the current locale.
+     * Starts the TTS engine; may make binder calls, so call it off the main thread.
      */
     fun voiceLanguages(): List<VoiceLanguage> {
-        val device = LocaleList.getDefault().let { list -> (0 until list.size()).map { list[it].toLanguageTag() } }
+        val device = LocaleList.getDefault().let { list -> (0 until list.size()).map { list[it].stripExtensions().toLanguageTag() } }
         return VoiceLanguages.options(device, speechOutput.languages().toList(), ::languageName)
     }
 

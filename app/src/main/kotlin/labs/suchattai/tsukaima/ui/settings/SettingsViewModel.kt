@@ -88,7 +88,7 @@ data class SettingsUiState(
     val assistantRoleHeld: Boolean = false,
     /** The voice language setting (BCP-47 tag); null = system default. */
     val voiceLanguage: String? = null,
-    /** The voice language picker's options, "System default" first. */
+    /** The voice language picker's options, "System default" first; loaded when the sheet opens. */
     val voiceLanguages: List<VoiceLanguage> = emptyList(),
 ) {
     /** The URL field was edited to a different server than the one signed in to, and not yet signed in again. */
@@ -107,7 +107,7 @@ class SettingsViewModel(
     private val onSignedOut: () -> Unit = {},
     /** Shows a transient message (the app's toast). */
     private val toast: (String) -> Unit = {},
-    /** The voice language picker's options (`AppContainer.voiceLanguages`); read once, when the screen opens. */
+    /** The voice language picker's options (`AppContainer.voiceLanguages`); read on [io] when the sheet opens. */
     private val voiceLanguages: () -> List<VoiceLanguage> = { emptyList() },
 ) : ViewModel() {
     private val _state = MutableStateFlow(SettingsUiState())
@@ -126,7 +126,6 @@ class SettingsViewModel(
     val signedOut: Flow<Unit> = _signedOut.receiveAsFlow()
 
     init {
-        _state.update { it.copy(voiceLanguages = voiceLanguages()) }
         viewModelScope.launch {
             settings.settings.collect { s ->
                 val firstLoad = !seeded
@@ -416,6 +415,14 @@ class SettingsViewModel(
 
     fun setMaterialYou(on: Boolean) {
         viewModelScope.launch { settings.update { it.copy(materialYou = on) } }
+    }
+
+    /** The Language sheet opens: (re)loads its options off the main thread (the TTS engine's list may have come in). */
+    fun loadVoiceLanguages() {
+        viewModelScope.launch {
+            val options = withContext(io) { voiceLanguages() }
+            _state.update { it.copy(voiceLanguages = options) }
+        }
     }
 
     /** Saves the voice language (null = system default); the next recogniser run and utterance use it. */

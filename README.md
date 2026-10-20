@@ -3,7 +3,7 @@
 Native Android client (Kotlin + Jetpack Compose) for a self-hosted [Hermes Agent](https://github.com/NousResearch/hermes-agent).
 Chat with your agent, browse sessions, manage cron jobs, and get actionable notifications from your phone.
 
-Version **0.6.0** (versionCode 13). Changes per release: [`CHANGELOG.md`](CHANGELOG.md).
+Version **0.6.1** (versionCode 14). Changes per release: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Features
 
