@@ -2,7 +2,9 @@ package labs.suchattai.tsukaima.ui.drawer
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -14,6 +16,8 @@ import labs.suchattai.tsukaima.data.prefs.Settings
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -177,5 +181,62 @@ class DrawerViewModelTest {
         vm2.delete("a")
         vm2.delete("a")
         assertEquals(listOf("Couldn't delete the session", "Couldn't delete the session"), toasts2)
+    }
+
+    // ---- v0.5.0: server search and live refresh ---------------------------------------------------------------
+
+    @Test
+    fun searchIsDebouncedAndNeedsTwoCharacters() = runTest {
+        val repo = FakeSessions(sessions).apply { hits = listOf(SessionDto(id = "z", snippet = ">>>cron<<< failed")) }
+        val vm = DrawerViewModel(repo, settings)
+        vm.setQuery("c")
+        advanceTimeBy(1_000)
+        assertFalse(vm.state.value.searchActive)
+        assertFalse(repo.calls.any { it.startsWith("search") })
+
+        vm.setQuery("cr")
+        vm.setQuery("cro")
+        advanceTimeBy(299)
+        assertFalse("still inside the 300 ms debounce", repo.calls.any { it.startsWith("search") })
+        vm.setQuery("cron")
+        advanceTimeBy(301)
+        assertEquals(listOf("search:cron"), repo.calls.filter { it.startsWith("search") })
+        val s = vm.state.value
+        assertTrue(s.searchActive)
+        assertEquals(listOf("z"), s.searchResults?.map { it.id })
+        assertEquals("cron failed", s.searchResults!!.single().searchTitle)
+
+        vm.setQuery("")
+        assertFalse(vm.state.value.searchActive)
+        assertNull(vm.state.value.searchResults)
+        advanceTimeBy(1_000)
+        assertEquals(1, repo.calls.count { it.startsWith("search") })
+    }
+
+    @Test
+    fun sessionsChangedRefreshesOnlyWhileVisible() = runTest {
+        val changes = MutableSharedFlow<Unit>(extraBufferCapacity = 8)
+        val repo = FakeSessions(sessions)
+        val vm = DrawerViewModel(repo, settings, changes = changes)
+        val loads = { repo.calls.count { it == "sessions" } }
+        val initial = loads()
+
+        changes.emit(Unit)
+        advanceTimeBy(2_000)
+        assertEquals("hidden: ignored", initial, loads())
+
+        vm.setVisible(true)
+        changes.emit(Unit)
+        advanceTimeBy(500)
+        changes.emit(Unit)
+        advanceTimeBy(999)
+        assertEquals("debounced", initial, loads())
+        advanceTimeBy(2)
+        assertEquals("one refresh for the burst", initial + 1, loads())
+
+        changes.emit(Unit)
+        vm.setVisible(false) // closed before the debounce fired
+        advanceTimeBy(2_000)
+        assertEquals(initial + 1, loads())
     }
 }

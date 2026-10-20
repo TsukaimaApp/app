@@ -40,7 +40,10 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import labs.suchattai.tsukaima.data.ServerChanges
 import labs.suchattai.tsukaima.data.prefs.Settings
+import labs.suchattai.tsukaima.data.ticks
 import labs.suchattai.tsukaima.di.AppContainer
 import labs.suchattai.tsukaima.ui.components.ToastHost
 import labs.suchattai.tsukaima.ui.drawer.DrawerViewModel
@@ -93,8 +96,16 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
     val startRoute = rememberSaveable { if (firstSettings.onboarded) Route.Status.path else Route.Onboarding.path }
     val navController = rememberNavController()
     val drawerVm: DrawerViewModel = viewModel(
-        factory = viewModelFactory { initializer { DrawerViewModel(container.repository, container.settings) { container.connection.hermes.value.reachable }
-        } },
+        factory = viewModelFactory {
+            initializer {
+                DrawerViewModel(
+                    container.repository,
+                    container.settings,
+                    isReachable = { container.connection.hermes.value.reachable },
+                    changes = container.gateway.events.ticks(ServerChanges.SESSIONS),
+                )
+            }
+        },
     )
     val drawerState by drawerVm.state.collectAsStateWithLifecycle()
     val drawerOpen by vm.drawerOpen.collectAsStateWithLifecycle()
@@ -110,6 +121,11 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
     // Phone: reload when the overlay opens. Wide: the pane is always visible, so reload on each screen change
     // (a chat created or archived elsewhere shows up when the user moves on).
     LaunchedEffect(drawerOpen) { if (drawerOpen) drawerVm.refresh() }
+    // Live refresh (`sessions.changed`) only while the drawer is on screen and the app is resumed.
+    LifecycleResumeEffect(drawerOpen, wide, onboarding) {
+        drawerVm.setVisible((drawerOpen || wide) && !onboarding)
+        onPauseOrDispose { drawerVm.setVisible(false) }
+    }
     LaunchedEffect(wide, entry?.id) { if (wide && entry != null) drawerVm.refresh() }
     LaunchedEffect(drawerVm) { drawerVm.errors.collect { container.toastState.show(it) } }
     LaunchedEffect(drawerVm, navController) {

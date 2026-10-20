@@ -76,7 +76,7 @@ fun SessionsDrawer(
     var renameFor by rememberSaveable { mutableStateOf<String?>(null) }
     var renameText by rememberSaveable { mutableStateOf("") }
     var deleteFor by rememberSaveable { mutableStateOf<String?>(null) }
-    val byId = state.sessions.associateBy { it.id }
+    val byId = (state.sessions + state.searchResults.orEmpty()).associateBy { it.id }
 
     Column(
         modifier
@@ -91,7 +91,23 @@ fun SessionsDrawer(
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp),
         ) {
-            if (state.showArchived) {
+            if (state.searchActive && !state.showArchived) {
+                val hits = state.searchResults
+                if (hits == null) {
+                    item(key = "searching") { EmptyCaption("Searching…") }
+                } else {
+                    items(hits, key = { "q:${it.id}" }) { s ->
+                        ConversationItem(
+                            title = s.searchTitle,
+                            meta = if (s.archived) "archived" else ageLabel(s.startedAt, now),
+                            selected = s.id == state.selectedId,
+                            onClick = { onOpen(s.id) },
+                            onLongClick = { menuFor = s.id },
+                        )
+                    }
+                    if (hits.isEmpty()) item(key = "none") { EmptyCaption("No sessions match.") }
+                }
+            } else if (state.showArchived) {
                 item(key = "back") {
                     ConversationItem("Archived", icon = IconName.ArrowBack, onClick = { onShowArchived(false) })
                 }
@@ -192,6 +208,12 @@ fun SessionsDrawer(
 
 private val SessionDto.displayTitle: String
     get() = title?.takeIf { it.isNotBlank() } ?: preview?.takeIf { it.isNotBlank() } ?: "Untitled"
+
+/** A search hit: its title, else the matched text without the server's `>>>` / `<<<` markers. */
+internal val SessionDto.searchTitle: String
+    get() = title?.takeIf { it.isNotBlank() }
+        ?: snippet?.replace(">>>", "")?.replace("<<<", "")?.trim()?.takeIf { it.isNotEmpty() }
+        ?: displayTitle
 
 @Composable
 private fun DrawerHeader(query: String, onQuery: (String) -> Unit) {

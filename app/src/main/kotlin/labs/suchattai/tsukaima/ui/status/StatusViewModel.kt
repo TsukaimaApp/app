@@ -2,7 +2,13 @@ package labs.suchattai.tsukaima.ui.status
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -30,6 +36,9 @@ import java.util.Locale
 /** The slice of [HermesRepository] + [ConnectionManager] the Status screen needs; a seam for tests. Never throws. */
 interface StatusSource {
     val hermes: StateFlow<HermesState>
+
+    /** One tick per gateway `platforms.changed`. */
+    val changes: Flow<Unit> get() = emptyFlow()
     suspend fun refreshNow()
     suspend fun systemStats(): Result<SystemStatsDto>
     suspend fun sessions(limit: Int): Result<List<SessionDto>>
@@ -41,7 +50,11 @@ interface StatusSource {
     suspend fun gatewayRestart(): Result<Unit>
 }
 
-class HermesStatusSource(private val repo: HermesRepository, private val connection: ConnectionManager) : StatusSource {
+class HermesStatusSource(
+    private val repo: HermesRepository,
+    private val connection: ConnectionManager,
+    override val changes: Flow<Unit> = emptyFlow(),
+) : StatusSource {
     override val hermes get() = connection.hermes
     override suspend fun refreshNow() = connection.refreshNow()
     override suspend fun systemStats() = repo.systemStats()
@@ -117,7 +130,10 @@ private fun memoryTitle(memory: JsonObject?): String {
 /**
  * Status home. Gateway actions call the API, then poll [StatusSource.refreshNow] every [pollMs] (up to
  * [maxPolls] times, 10 s by default) until the gateway reaches the expected state; [busy] covers the whole thing.
+ * A `platforms.changed` ([StatusSource.changes]) re-runs [refresh], debounced by [changeDebounceMs], while the
+ * screen is [setVisible].
  */
+@OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class StatusViewModel(
     private val source: StatusSource,
     private val clock: () -> Long = System::currentTimeMillis,
@@ -125,16 +141,26 @@ class StatusViewModel(
     private val maxPolls: Int = 10,
     /** Shows a transient message (the app's toast). */
     private val toast: (String) -> Unit = {},
+    private val changeDebounceMs: Long = 1_000,
 ) : ViewModel() {
     private val _state = MutableStateFlow(StatusUiState(hermes = source.hermes.value))
     val state: StateFlow<StatusUiState> = _state.asStateFlow()
 
     private var actionJob: Job? = null
     private var refreshJob: Job? = null
+    private val visible = MutableStateFlow(false)
 
     init {
         viewModelScope.launch { source.hermes.collect { h -> _state.update { it.copy(hermes = h) } } }
+        viewModelScope.launch {
+            visible.flatMapLatest { shown -> if (shown) source.changes.debounce(changeDebounceMs) else emptyFlow() }.collect { refresh() }
+        }
         refresh()
+    }
+
+    /** Whether the Status screen is resumed on screen (live refresh runs only then). */
+    fun setVisible(shown: Boolean) {
+        visible.value = shown
     }
 
     fun lastKnownLabel(): String = _state.value.lastKnownLabel(clock())

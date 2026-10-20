@@ -25,6 +25,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonObject
@@ -80,6 +81,10 @@ fun StatusScreen(
     onOpenCached: (String) -> Unit,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    LifecycleResumeEffect(vm) {
+        vm.setVisible(true)
+        onPauseOrDispose { vm.setVisible(false) }
+    }
     // Re-evaluated every 30 s so "N MIN AGO" keeps counting while the screen is open (offline emits no new state).
     val label by produceState(vm.lastKnownLabel(), state) {
         while (true) {

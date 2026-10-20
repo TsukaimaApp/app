@@ -35,6 +35,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import labs.suchattai.tsukaima.ui.components.IconButton44
 import labs.suchattai.tsukaima.ui.components.IconName
+import labs.suchattai.tsukaima.data.ServerChanges
+import labs.suchattai.tsukaima.data.ticks
 import labs.suchattai.tsukaima.di.AppContainer
 import labs.suchattai.tsukaima.ui.chat.ChatScreen
 import labs.suchattai.tsukaima.ui.chat.ChatViewModel
@@ -88,7 +90,10 @@ fun TsukaimaNavHost(
             val vm: StatusViewModel = viewModel(
                 factory = viewModelFactory {
                     initializer {
-                        StatusViewModel(HermesStatusSource(container.repository, container.connection), toast = container.toastState::show)
+                        StatusViewModel(
+                            HermesStatusSource(container.repository, container.connection, container.gateway.events.ticks(ServerChanges.PLATFORMS)),
+                            toast = container.toastState::show,
+                        )
                     }
                 },
             )
@@ -157,6 +162,7 @@ fun TsukaimaNavHost(
                         SettingsViewModel(
                             container.repository, container.settingsStore, container.credentials, container.connection,
                             onSignedOut = container::signedOut,
+                            toast = container.toastState::show,
                         )
                     }
                 },

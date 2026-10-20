@@ -5,6 +5,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -52,6 +53,7 @@ class StatusViewModelTest {
 
     private class FakeSource(initial: HermesState) : StatusSource {
         override val hermes = MutableStateFlow(initial)
+        override val changes = MutableSharedFlow<Unit>(extraBufferCapacity = 8)
         var statusCalls = 0
         var flipOnCall = Int.MAX_VALUE
         var flipTo: StatusDto? = null
@@ -206,5 +208,35 @@ class StatusViewModelTest {
         vm.refresh()
         advanceUntilIdle()
         assertEquals(2, src.statusCalls)
+    }
+
+    @Test
+    fun platformsChangedRefreshesWhileVisibleDebounced() = runTest {
+        val src = FakeSource(HermesState(status = running(), lastSeenAt = 0L))
+        val vm = vm(src)
+        advanceUntilIdle()
+        val initial = src.statusCalls
+
+        src.changes.emit(Unit)
+        advanceUntilIdle()
+        assertEquals("not on screen: ignored", initial, src.statusCalls)
+
+        vm.setVisible(true)
+        runCurrent()
+        src.changes.emit(Unit)
+        advanceTimeBy(400)
+        src.changes.emit(Unit)
+        advanceTimeBy(999)
+        runCurrent()
+        assertEquals("debounced", initial, src.statusCalls)
+        advanceTimeBy(2)
+        runCurrent()
+        assertEquals(initial + 1, src.statusCalls)
+
+        vm.setVisible(false)
+        runCurrent()
+        src.changes.emit(Unit)
+        advanceUntilIdle()
+        assertEquals(initial + 1, src.statusCalls)
     }
 }

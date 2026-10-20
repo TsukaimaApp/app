@@ -2,7 +2,13 @@ package labs.suchattai.tsukaima.ui.drawer
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,7 +35,13 @@ data class DrawerUiState(
     val showArchived: Boolean = false,
     val selectedId: String? = null,
     val loading: Boolean = true,
+    /** Server search hits for [query] (null: none yet for it); shown in place of the list while [searchActive]. */
+    val searchResults: List<SessionDto>? = null,
+    val searching: Boolean = false,
 ) {
+    /** [query] is long enough for the server search ([MIN_SEARCH] characters); shorter filters the list locally. */
+    val searchActive: Boolean get() = query.trim().length >= MIN_SEARCH
+
     private val matching: List<SessionDto> by lazy {
         val q = query.trim()
         if (q.isEmpty()) {
@@ -58,17 +70,28 @@ data class DrawerUiState(
     val archivedCount: Int by lazy { sessions.count { it.archived } }
 }
 
+/** Characters a query needs before the drawer asks the server (`/api/sessions/search`). */
+const val MIN_SEARCH = 2
+
 /**
  * Sessions drawer state: the session list, search, archived view and session mutations. Reloads whenever the
  * server URL in [settings] changes (and once DataStore has loaded); [refresh] reloads on demand. Each mutation
  * is followed by a [refresh]. Failures are reported on [errors] as toast text: every mutation failure, but a
  * load failure only for the first failure since the last successful load, and never while [isReachable] is
  * false (the status line already says Hermes is unreachable).
+ *
+ * Live refresh: each of [changes] (the gateway's `sessions.changed`) reloads the list, debounced by [changeDebounceMs],
+ * but only while the drawer is [setVisible]. Search: a query of [MIN_SEARCH]+ characters asks the server after
+ * [searchDebounceMs] of quiet; a newer query supersedes it.
  */
+@OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class DrawerViewModel(
     private val repo: SessionsSource,
     settings: StateFlow<Settings?>,
     private val isReachable: () -> Boolean = { true },
+    changes: Flow<Unit> = emptyFlow(),
+    private val changeDebounceMs: Long = 1_000,
+    private val searchDebounceMs: Long = 300,
 ) : ViewModel() {
     private val _state = MutableStateFlow(DrawerUiState())
     val state: StateFlow<DrawerUiState> = _state.asStateFlow()
@@ -91,6 +114,8 @@ class DrawerViewModel(
 
     private var serverUrl: String = ""
     private var refreshJob: Job? = null
+    private var searchJob: Job? = null
+    private val visible = MutableStateFlow(false)
 
     init {
         viewModelScope.launch {
@@ -106,6 +131,14 @@ class DrawerViewModel(
                 }
             }
         }
+        viewModelScope.launch {
+            visible.flatMapLatest { shown -> if (shown) changes.debounce(changeDebounceMs) else emptyFlow() }.collect { refresh() }
+        }
+    }
+
+    /** Whether the drawer is on screen (phone overlay open or the wide pane, while the app is resumed). */
+    fun setVisible(shown: Boolean) {
+        visible.value = shown
     }
 
     /** Reloads the list; a newer call supersedes one in flight. Keeps the old list if the load fails. */
@@ -115,7 +148,30 @@ class DrawerViewModel(
         refreshJob = viewModelScope.launch { load() }
     }
 
-    fun setQuery(query: String) = _state.update { it.copy(query = query) }
+    fun setQuery(query: String) {
+        val previous = _state.value.query.trim()
+        _state.update { it.copy(query = query) }
+        val q = query.trim()
+        if (q == previous && (_state.value.searchResults != null || _state.value.searching)) return
+        searchJob?.cancel()
+        if (q.length < MIN_SEARCH) {
+            _state.update { it.copy(searchResults = null, searching = false) }
+            return
+        }
+        _state.update { it.copy(searchResults = null) }
+        searchJob = viewModelScope.launch {
+            delay(searchDebounceMs)
+            search(q)
+        }
+    }
+
+    private suspend fun search(q: String) {
+        _state.update { it.copy(searching = true) }
+        repo.search(q)
+            .onSuccess { hits -> _state.update { if (it.query.trim() == q) it.copy(searchResults = hits) else it } }
+            .onFailure { if (isReachable()) _errors.trySend("Couldn't search sessions") }
+        _state.update { it.copy(searching = false) }
+    }
 
     fun setShowArchived(show: Boolean) = _state.update { it.copy(showArchived = show) }
 
@@ -139,6 +195,7 @@ class DrawerViewModel(
                 .onFailure { _errors.trySend(failure) }
             refreshJob?.cancel()
             load()
+            _state.value.query.trim().takeIf { it.length >= MIN_SEARCH }?.let { search(it) }
         }
     }
 
