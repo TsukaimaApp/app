@@ -104,7 +104,10 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
 
     LaunchedEffect(selectedSession) { drawerVm.select(selectedSession) }
     LaunchedEffect(wide) { if (wide) vm.closeDrawer() } // the pane replaces the overlay; don't reopen it later
+    // Phone: reload when the overlay opens. Wide: the pane is always visible, so reload on each screen change
+    // (a chat created or archived elsewhere shows up when the user moves on).
     LaunchedEffect(drawerOpen) { if (drawerOpen) drawerVm.refresh() }
+    LaunchedEffect(wide, entry?.id) { if (wide && entry != null) drawerVm.refresh() }
     LaunchedEffect(drawerVm) { drawerVm.errors.collect { container.toastState.show(it) } }
     LaunchedEffect(vm, navController) {
         vm.authPrompts.collect {
