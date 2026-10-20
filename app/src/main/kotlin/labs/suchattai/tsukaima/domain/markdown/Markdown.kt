@@ -5,75 +5,163 @@ sealed interface MdSpan {
     data class Bold(val s: String) : MdSpan
     data class Italic(val s: String) : MdSpan
     data class Code(val s: String) : MdSpan
+    data class Strike(val s: String) : MdSpan
+
+    /** `[text](url)` or a bare `http(s)://` autolink (then [text] is the URL). Only web and `mailto:` URLs. */
+    data class Link(val text: String, val url: String) : MdSpan
 }
+
+/** Column alignment from a table's separator row (`:--`, `:-:`, `--:`). */
+enum class MdAlign { Start, Center, End }
+
+/**
+ * One list entry. [depth] is its nesting (0 = top, at most 3); [number] is the shown number of an ordered
+ * entry and null for a bullet, so an ordered list can hold nested bullets and the other way round.
+ */
+data class MdListItem(val spans: List<MdSpan>, val depth: Int, val number: Int? = null)
 
 sealed interface MdBlock {
     data class Paragraph(val spans: List<MdSpan>) : MdBlock
     data class Code(val lang: String?, val code: String) : MdBlock
-    data class Bullets(val items: List<List<MdSpan>>) : MdBlock
+
+    /** A list whose top-level entries are bullets. */
+    data class Bullets(val items: List<MdListItem>) : MdBlock
+
+    /** A list whose top-level entries are numbered. */
+    data class Numbered(val items: List<MdListItem>) : MdBlock
+
+    /** `#`–`######` or a setext (`===` / `---` underlined) heading; [level] is 1–6. */
+    data class Heading(val level: Int, val spans: List<MdSpan>) : MdBlock
+
+    /** A GFM pipe table; every row has exactly as many cells as [header], and [align] one entry per column. */
+    data class Table(
+        val header: List<List<MdSpan>>,
+        val align: List<MdAlign>,
+        val rows: List<List<List<MdSpan>>>,
+    ) : MdBlock
+
+    /** Consecutive `>` lines, their content parsed as markdown of its own. */
+    data class Quote(val blocks: List<MdBlock>) : MdBlock
+
+    /** A horizontal rule (`---`, `***`, `___`). */
+    data object Rule : MdBlock
 
     /** A file the agent delivered with a whole-line `MEDIA:<path>` directive (`/…` or `~/…`). */
     data class Media(val path: String) : MdBlock
 }
 
 /**
- * Minimal markdown: fenced code, bullets, paragraphs, bold, italic, inline code, and Hermes `MEDIA:` file
- * deliveries. Never throws.
+ * The markdown agents emit: fenced code, GFM pipe tables, ATX and setext headings, bullet and numbered lists
+ * (nested), block quotes, rules, paragraphs; inline bold, italic, code, strikethrough and links (see
+ * [MarkdownInline]); plus Hermes `MEDIA:` file deliveries. Line-based and linear, since a streaming reply is
+ * re-parsed on every delta; a half-typed construct reads as text until it is complete enough. Never throws.
  */
 object Markdown {
     /**
      * With [streaming], the last line is never read as a `MEDIA:` directive: a half-streamed path would flash
      * a card for a file that does not exist.
      */
-    fun parse(text: String, streaming: Boolean = false): List<MdBlock> {
-        val lines = text.replace("\r\n", "\n").replace('\r', '\n').split('\n')
+    fun parse(text: String, streaming: Boolean = false): List<MdBlock> =
+        parseLines(text.replace("\r\n", "\n").replace('\r', '\n').split('\n'), streaming, quoteDepth = 0)
+
+    /** Quotes nest this deep at most; a deeper `>` is literal text (and the recursion stays shallow). */
+    private const val MAX_QUOTE_DEPTH = 5
+
+    private fun parseLines(lines: List<String>, streaming: Boolean, quoteDepth: Int): List<MdBlock> {
         val blocks = mutableListOf<MdBlock>()
         val para = mutableListOf<String>()
-        var bullets: MutableList<List<MdSpan>>? = null
+        var list: ListBuilder? = null
 
         fun flushPara() {
             if (para.isNotEmpty()) {
-                blocks += MdBlock.Paragraph(parseInline(para.joinToString("\n")))
+                blocks += MdBlock.Paragraph(MarkdownInline.parse(para.joinToString("\n")))
                 para.clear()
             }
         }
 
-        fun flushBullets() {
-            bullets?.let { blocks += MdBlock.Bullets(it.toList()) }
-            bullets = null
+        fun flushList() {
+            list?.let { blocks += it.build() }
+            list = null
         }
+
+        fun flush() { flushPara(); flushList() }
 
         var i = 0
         while (i < lines.size) {
             val line = lines[i]
             val trimmed = line.trim()
-            val media = if (streaming && i == lines.lastIndex) null else mediaPath(trimmed)
             val fence = fenceLength(trimmed)
-            when {
-                fence > 0 -> {
-                    flushPara(); flushBullets()
-                    val lang = trimmed.substring(fence).trim()
-                        .split(Regex("\\s+")).firstOrNull()?.takeIf { it.isNotEmpty() }
-                    val body = mutableListOf<String>()
+            if (fence > 0) {
+                flush()
+                val lang = trimmed.substring(fence).trim()
+                    .split(WHITESPACE).firstOrNull()?.takeIf { it.isNotEmpty() }
+                val indent = line.indexOfFirst { it != ' ' }
+                val body = mutableListOf<String>()
+                i++
+                while (i < lines.size && !closesFence(lines[i].trim(), fence)) {
+                    body += dedent(lines[i], indent); i++
+                }
+                blocks += MdBlock.Code(lang, body.joinToString("\n"))
+                i++ // past the closing fence (or the end)
+                continue
+            }
+            if (trimmed.isEmpty()) { flush(); i++; continue }
+
+            val media = if (streaming && i == lines.lastIndex) null else mediaPath(trimmed)
+            if (media != null) { flush(); blocks += MdBlock.Media(media); i++; continue }
+
+            val table = MarkdownTables.parse(lines, i)
+            if (table != null) {
+                flush()
+                blocks += table.first
+                i = table.second
+                continue
+            }
+
+            val heading = atxHeading(line)
+            if (heading != null) { flush(); blocks += heading; i++; continue }
+
+            val setext = if (para.isNotEmpty()) setextLevel(trimmed) else 0
+            if (setext > 0) {
+                val title = para.removeAt(para.lastIndex)
+                flushPara()
+                blocks += MdBlock.Heading(setext, MarkdownInline.parse(title.trim()))
+                i++
+                continue
+            }
+
+            if (isRule(line)) { flush(); blocks += MdBlock.Rule; i++; continue }
+
+            if (quoteDepth < MAX_QUOTE_DEPTH && indentOf(line) <= 3 && trimmed.startsWith('>')) {
+                flush()
+                val inner = mutableListOf<String>()
+                while (i < lines.size) {
+                    val q = lines[i].trimStart()
+                    if (!q.startsWith('>') || indentOf(lines[i]) > 3) break
+                    inner += q.substring(1).let { if (it.startsWith(' ')) it.substring(1) else it }
                     i++
-                    while (i < lines.size && !closesFence(lines[i].trim(), fence)) {
-                        body += lines[i]; i++
-                    }
-                    blocks += MdBlock.Code(lang, body.joinToString("\n"))
-                    // i is on the closing fence (or past the end); the increment below skips it.
                 }
-                trimmed.isEmpty() -> { flushPara(); flushBullets() }
-                media != null -> { flushPara(); flushBullets(); blocks += MdBlock.Media(media) }
-                line.startsWith("- ") || line.startsWith("* ") -> {
+                blocks += MdBlock.Quote(parseLines(inner, streaming && i == lines.size, quoteDepth + 1))
+                continue
+            }
+
+            val marker = listMarker(line)
+            val open = list
+            when {
+                marker != null -> {
                     flushPara()
-                    val list = bullets ?: mutableListOf<List<MdSpan>>().also { bullets = it }
-                    list += parseInline(line.substring(2).trim())
+                    val target = if (open != null && open.accepts(marker)) open else {
+                        flushList()
+                        ListBuilder(ordered = marker.number != null).also { list = it }
+                    }
+                    target.add(marker, line.substring(marker.textStart).trim())
                 }
-                else -> { flushBullets(); para += line }
+                open != null && indentOf(line) >= 2 -> open.continueWith(trimmed)
+                else -> { flushList(); para += line.trimStart() }
             }
             i++
         }
-        flushPara(); flushBullets()
+        flush()
         return blocks
     }
 
@@ -89,6 +177,126 @@ object Markdown {
     /** A closing fence is a line of only backticks, at least as many as opened it (```` ```` ```` closes ```` ```` ````). */
     private fun closesFence(trimmed: String, open: Int): Boolean =
         trimmed.length >= open && trimmed.all { it == '`' }
+
+    /** [line] without up to [n] leading spaces: the body of an indented fence (inside a list item) loses the fence's indent. */
+    private fun dedent(line: String, n: Int): String {
+        var k = 0
+        while (k < n && k < line.length && line[k] == ' ') k++
+        return line.substring(k)
+    }
+
+    /** Width of [line]'s leading whitespace, a tab counting as 4. */
+    private fun indentOf(line: String): Int {
+        var w = 0
+        for (c in line) {
+            when (c) {
+                ' ' -> w++
+                '\t' -> w += 4
+                else -> return w
+            }
+        }
+        return w
+    }
+
+    /** `#`–`######`, a space, then the text; a closing run of `#`s after a space is dropped (`## C#` keeps its `#`). */
+    private fun atxHeading(line: String): MdBlock.Heading? {
+        if (indentOf(line) > 3) return null
+        val s = line.trimStart()
+        val level = s.takeWhile { it == '#' }.length
+        if (level !in 1..6 || level >= s.length || (s[level] != ' ' && s[level] != '\t')) return null
+        val content = s.substring(level).trim()
+        val unclosed = content.trimEnd('#')
+        val text = when {
+            unclosed.isEmpty() -> ""
+            unclosed.last() == ' ' || unclosed.last() == '\t' -> unclosed.trimEnd()
+            else -> content
+        }
+        return MdBlock.Heading(level, MarkdownInline.parse(text))
+    }
+
+    /** 1 for a `===` underline, 2 for `---` (three or more, nothing else on the line), else 0. */
+    private fun setextLevel(trimmed: String): Int = when {
+        trimmed.length < 3 -> 0
+        trimmed.all { it == '=' } -> 1
+        trimmed.all { it == '-' } -> 2
+        else -> 0
+    }
+
+    /** Three or more of one of `-`, `*`, `_`, spaces allowed between (`- - -`), alone on the line. */
+    private fun isRule(line: String): Boolean {
+        if (indentOf(line) > 3) return false
+        val s = line.trim()
+        val mark = s.firstOrNull()?.takeIf { it == '-' || it == '*' || it == '_' } ?: return false
+        var count = 0
+        for (c in s) {
+            when (c) {
+                mark -> count++
+                ' ', '\t' -> Unit
+                else -> return false
+            }
+        }
+        return count >= 3
+    }
+
+    /** A list item's marker: [number] is null for `-`/`*`/`+`; [textStart] is where its text begins in the line. */
+    private class ListMarker(val indent: Int, val number: Int?, val textStart: Int)
+
+    private fun listMarker(line: String): ListMarker? {
+        var j = 0
+        while (j < line.length && (line[j] == ' ' || line[j] == '\t')) j++
+        if (j >= line.length) return null
+        val c = line[j]
+        if (c == '-' || c == '*' || c == '+') {
+            return if (j + 1 < line.length && line[j + 1].isWhitespace()) ListMarker(indentOf(line), null, j + 2) else null
+        }
+        var k = j
+        while (k < line.length && k - j < 9 && line[k].isDigit()) k++
+        if (k == j || k + 1 >= line.length) return null
+        if ((line[k] != '.' && line[k] != ')') || !line[k + 1].isWhitespace()) return null
+        return ListMarker(indentOf(line), line.substring(j, k).toInt(), k + 2)
+    }
+
+    /**
+     * Collects one list. Depth follows the indentation relative to the open items (so two- and four-space nesting
+     * both read as one level deeper); numbers continue from the first marker at each depth (`1.` `1.` `1.` shows
+     * 1, 2, 3, the way agents rely on).
+     */
+    private class ListBuilder(val ordered: Boolean) {
+        private val texts = mutableListOf<StringBuilder>()
+        private val depths = mutableListOf<Int>()
+        private val numbers = mutableListOf<Int?>()
+        private val indents = ArrayList<Int>()
+        private val counters = arrayOfNulls<Int>(MAX_DEPTH + 1)
+
+        /** A top-level marker of the other kind starts a new list; nested markers of either kind stay. */
+        fun accepts(marker: ListMarker): Boolean =
+            indents.any { it < marker.indent } || (marker.number != null) == ordered
+
+        fun add(marker: ListMarker, text: String) {
+            while (indents.isNotEmpty() && indents.last() >= marker.indent) indents.removeAt(indents.lastIndex)
+            val depth = minOf(indents.size, MAX_DEPTH)
+            indents += marker.indent
+            for (d in depth + 1..MAX_DEPTH) counters[d] = null
+            val number = marker.number?.let { start -> (counters[depth]?.plus(1) ?: start) }
+            counters[depth] = number
+            texts += StringBuilder(text)
+            depths += depth
+            numbers += number
+        }
+
+        fun continueWith(text: String) {
+            texts.lastOrNull()?.let { if (it.isEmpty()) it.append(text) else it.append(' ').append(text) }
+        }
+
+        fun build(): MdBlock {
+            val items = texts.indices.map { MdListItem(MarkdownInline.parse(texts[it].toString()), depths[it], numbers[it]) }
+            return if (ordered) MdBlock.Numbered(items) else MdBlock.Bullets(items)
+        }
+
+        private companion object {
+            const val MAX_DEPTH = 3
+        }
+    }
 
     /**
      * The path of a whole-line `MEDIA:` directive (Hermes TUI and desktop `MEDIA_LINE_RE`): the directive may
@@ -116,6 +324,7 @@ object Markdown {
         return path.takeIf { anchored && it.substringAfterLast('/').isNotBlank() }
     }
 
+    private val WHITESPACE = Regex("\\s+")
     private val MEDIA_LINE = Regex("[`\"']?MEDIA:\\s*(\\S.*)")
     private const val QUOTES = "`\"'"
     private const val TRAILING_PUNCT = ".,;:!?"
@@ -127,63 +336,4 @@ object Markdown {
         "xlsx", "xls", "ods", "csv", "tsv", "json", "xml", "yaml", "yml", "kmz", "kml", "geojson", "gpx",
         "pptx", "ppt", "odp", "key", "zip", "tar", "gz", "tgz", "bz2", "xz", "7z", "rar", "apk", "ipa", "html", "htm",
     )
-
-    private fun parseInline(s: String): List<MdSpan> {
-        val spans = mutableListOf<MdSpan>()
-        val lit = StringBuilder()
-        fun emit(span: MdSpan) {
-            if (lit.isNotEmpty()) { spans += MdSpan.Text(lit.toString()); lit.setLength(0) }
-            spans += span
-        }
-
-        var i = 0
-        while (i < s.length) {
-            val c = s[i]
-            when {
-                c == '`' -> {
-                    // A code span opens and closes with backtick runs of the same length (`a`, ``a`b``, ```a```).
-                    val run = backtickRun(s, i)
-                    val j = closingRun(s, i + run, run)
-                    if (j > i + run) { emit(MdSpan.Code(s.substring(i + run, j))); i = j + run }
-                    else { lit.append(s, i, i + run); i += run }
-                }
-                c == '*' && s.startsWith("**", i) -> {
-                    val j = s.indexOf("**", i + 2)
-                    if (j > i + 2) { emit(MdSpan.Bold(s.substring(i + 2, j))); i = j + 2 }
-                    else { lit.append("**"); i += 2 }
-                }
-                c == '*' -> {
-                    val j = s.indexOf('*', i + 1)
-                    if (j > i + 1 && !s[i + 1].isWhitespace()) { emit(MdSpan.Italic(s.substring(i + 1, j))); i = j + 1 }
-                    else { lit.append(c); i++ }
-                }
-                c == '_' && (i == 0 || !s[i - 1].isLetterOrDigit()) -> {
-                    var j = s.indexOf('_', i + 1)
-                    while (j != -1 && j + 1 < s.length && s[j + 1].isLetterOrDigit()) j = s.indexOf('_', j + 1)
-                    if (j > i + 1 && !s[i + 1].isWhitespace()) { emit(MdSpan.Italic(s.substring(i + 1, j))); i = j + 1 }
-                    else { lit.append(c); i++ }
-                }
-                else -> { lit.append(c); i++ }
-            }
-        }
-        if (lit.isNotEmpty()) spans += MdSpan.Text(lit.toString())
-        return spans
-    }
-
-    private fun backtickRun(s: String, from: Int): Int {
-        var j = from
-        while (j < s.length && s[j] == '`') j++
-        return j - from
-    }
-
-    /** Start of the next run of exactly [length] backticks at or after [from], or -1. */
-    private fun closingRun(s: String, from: Int, length: Int): Int {
-        var j = s.indexOf('`', from)
-        while (j != -1) {
-            val run = backtickRun(s, j)
-            if (run == length) return j
-            j = s.indexOf('`', j + run)
-        }
-        return -1
-    }
 }

@@ -11,8 +11,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -20,20 +23,30 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import labs.suchattai.tsukaima.domain.markdown.MdBlock
+import labs.suchattai.tsukaima.domain.markdown.MdListItem
 import labs.suchattai.tsukaima.domain.markdown.MdSpan
 import labs.suchattai.tsukaima.domain.markdown.Markdown
 import labs.suchattai.tsukaima.ui.theme.Motion
@@ -55,24 +68,33 @@ private fun AnnotatedString.Builder.appendSpans(spans: List<MdSpan>, colors: Tsu
                 background = colors.surfaceSunken,
             ),
         ) { append(span.s) }
+        is MdSpan.Strike -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough, color = colors.ink2)) { append(span.s) }
+        is MdSpan.Link -> withLink(
+            LinkAnnotation.Url(
+                span.url,
+                TextLinkStyles(SpanStyle(color = colors.accent, textDecoration = TextDecoration.Underline)),
+            ),
+        ) { append(span.text) }
     }
 }
 
-private fun inline(spans: List<MdSpan>, colors: TsukaimaColors, caret: Boolean): AnnotatedString =
+/** [spans] styled for a `Text`: links are tappable [LinkAnnotation.Url]s that open the browser. */
+internal fun markdownInline(spans: List<MdSpan>, colors: TsukaimaColors, caret: Boolean = false): AnnotatedString =
     buildAnnotatedString {
         appendSpans(spans, colors)
         if (caret) appendInlineContent(CaretId, "|")
     }
 
-/** [inline], rebuilt only when its input changes (not on every caret blink or parent recomposition). */
+/** [markdownInline], rebuilt only when its input changes (not on every caret blink or parent recomposition). */
 @Composable
 private fun rememberInline(spans: List<MdSpan>, colors: TsukaimaColors, caret: Boolean): AnnotatedString =
-    remember(spans, colors, caret) { inline(spans, colors, caret) }
+    remember(spans, colors, caret) { markdownInline(spans, colors, caret) }
 
 /**
- * Renders parsed markdown blocks; `MEDIA:` blocks become [MediaCard]s served by [media]. With [streaming], a
- * blinking accent caret is appended inline to the last text run (so it follows wrapping); after a trailing
- * code block or file card, or when empty, it sits on its own line.
+ * Renders parsed markdown blocks; `MEDIA:` blocks become [MediaCard]s served by [media] and tables
+ * [MarkdownTable]s. With [streaming], a blinking accent caret is appended inline to the last text run (so it
+ * follows wrapping) of a trailing paragraph, list or heading; after any other trailing block (code, table, quote,
+ * rule, file card), or when empty, it sits on its own line.
  */
 @Composable
 fun MarkdownText(
@@ -83,7 +105,8 @@ fun MarkdownText(
 ) {
     val colors = MaterialTheme.tsukaima
     val last = blocks.lastOrNull()
-    val caretInline = streaming && (last is MdBlock.Paragraph || last is MdBlock.Bullets)
+    val caretInline = streaming &&
+        (last is MdBlock.Paragraph || last is MdBlock.Bullets || last is MdBlock.Numbered || last is MdBlock.Heading)
     val caretContent = caretInlineContent()
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         blocks.forEachIndexed { index, block ->
@@ -95,22 +118,32 @@ fun MarkdownText(
                     color = colors.ink1,
                     inlineContent = caretContent,
                 )
+                is MdBlock.Heading -> Text(
+                    text = rememberInline(block.spans, colors, caret),
+                    style = headingStyle(block.level),
+                    color = colors.ink1,
+                    inlineContent = caretContent,
+                    modifier = if (index > 0) Modifier.padding(top = 4.dp) else Modifier,
+                )
                 is MdBlock.Code -> CodeBlock(code = block.code, lang = block.lang)
                 is MdBlock.Media -> MediaCard(block.path, media)
-                is MdBlock.Bullets -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    block.items.forEachIndexed { i, item ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("•", style = TsukaimaType.body, color = colors.ink2)
-                            Text(
-                                text = rememberInline(item, colors, caret && i == block.items.lastIndex),
-                                style = TsukaimaType.body,
-                                color = colors.ink1,
-                                inlineContent = caretContent,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                    }
-                }
+                is MdBlock.Bullets -> MarkdownList(block.items, caret, caretContent)
+                is MdBlock.Numbered -> MarkdownList(block.items, caret, caretContent)
+                is MdBlock.Table -> MarkdownTable(block)
+                is MdBlock.Quote -> MarkdownText(
+                    blocks = block.blocks,
+                    media = media,
+                    modifier = Modifier
+                        .drawBehind { drawRect(colors.accentSelected, size = Size(2.dp.toPx(), size.height)) }
+                        .padding(start = 12.dp),
+                )
+                MdBlock.Rule -> Box(
+                    Modifier
+                        .padding(vertical = 4.dp)
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(colors.hairline),
+                )
             }
         }
         if (streaming && !caretInline) {
@@ -119,6 +152,54 @@ fun MarkdownText(
                 style = TsukaimaType.body,
                 inlineContent = caretContent,
             )
+        }
+    }
+}
+
+/** Levels 1–2 in the serif (19sp, 17sp), 3 at 15sp semibold, 4–6 at UI size semibold. */
+private fun headingStyle(level: Int): TextStyle = when (level) {
+    1 -> TsukaimaType.titleSmall
+    2 -> TsukaimaType.sectionTitle
+    3 -> TsukaimaType.ui.copy(fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+    else -> TsukaimaType.ui.copy(fontWeight = FontWeight.SemiBold)
+}
+
+/**
+ * A bullet or numbered list: numbers right-aligned in a 22dp column, bullets `•` / `◦` / `▪` by depth, each
+ * nesting level 16dp further in. The caret, if any, follows the last item.
+ */
+@Composable
+private fun MarkdownList(items: List<MdListItem>, caret: Boolean, caretContent: Map<String, InlineTextContent>) {
+    val colors = MaterialTheme.tsukaima
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        items.forEachIndexed { i, item ->
+            Row(
+                modifier = Modifier.padding(start = 16.dp * item.depth),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                val number = item.number
+                if (number != null) {
+                    Text(
+                        "$number.",
+                        style = TsukaimaType.body,
+                        color = colors.ink2,
+                        textAlign = TextAlign.End,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.widthIn(min = 22.dp),
+                    )
+                } else {
+                    val glyph = when (item.depth) { 0 -> "•"; 1 -> "◦"; else -> "▪" }
+                    Text(glyph, style = TsukaimaType.body, color = colors.ink2)
+                }
+                Text(
+                    text = rememberInline(item.spans, colors, caret && i == items.lastIndex),
+                    style = TsukaimaType.body,
+                    color = colors.ink1,
+                    inlineContent = caretContent,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
 }
@@ -169,9 +250,16 @@ private fun Caret() {
 private const val SampleMd = "The cron job was failing because of a **missing path**. Try *this*:\n\n" +
     "```bash\nsystemctl restart hermes-agent\n```\n\n- first `item`\n- second item that is long enough to wrap across more than one line on a phone"
 
+private const val RichMd = "## Services\n\n| Service | State | Uptime |\n|:--|:-:|--:|\n| hermes-agent | **running** | 3 d |\n" +
+    "| matrix-bridge | running, though its last sync stalled twice overnight | 41 min |\n\n" +
+    "### Next steps\n\n1. Restart the bridge\n   - check `journalctl -u matrix-bridge`\n     - look for sync errors\n2. ~~Reboot the host~~ not needed\n\n" +
+    "> The watchdog restarted it at 03:12.\n> - once\n\n---\n\nDocs: [Hermes guide](https://example.com/hermes) or https://example.com/status."
+
 @Composable
 private fun MarkdownPreview(dark: Boolean) = PreviewPage(dark) {
     MarkdownText(Markdown.parse(SampleMd), modifier = Modifier.padding(16.dp))
+    MarkdownText(Markdown.parse(RichMd), modifier = Modifier.padding(16.dp))
+    MarkdownText(Markdown.parse("| a | b |\n|---|---|\n| 1 | 2", streaming = true), streaming = true, modifier = Modifier.padding(16.dp))
     MarkdownText(Markdown.parse("Here is the log:\nMEDIA:/home/hermes/workspace/output/agent.debug.txt"), modifier = Modifier.padding(16.dp))
     MarkdownText(Markdown.parse("Streaming reply that keeps going and going until it wraps onto a second line"), streaming = true, modifier = Modifier.padding(16.dp))
 }

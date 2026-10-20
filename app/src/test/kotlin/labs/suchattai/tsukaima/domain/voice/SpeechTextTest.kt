@@ -46,6 +46,18 @@ class SpeechTextTest {
         assertEquals(listOf("```x``` is code."), c.feed("Yes. ```x``` is code. Next"))
     }
 
+    @Test fun plainReadsTableRowsAsCommaSeparatedCells() =
+        assertEquals(
+            "Service, State\nhermes, running\nbridge, stopped | maybe",
+            SpeechText.plain("| Service | State |\n|:--|--:|\n| **hermes** | running |\n| bridge | stopped \\| maybe |"),
+        )
+
+    @Test fun plainDropsRulesAndSetextUnderlines() =
+        assertEquals("a\nTitle\nb\nc", SpeechText.plain("a\n\n---\nTitle\n===\nb\n* * *\n___\nc"))
+
+    @Test fun plainStripsNestedQuoteMarkers() =
+        assertEquals("deep", SpeechText.plain("> > deep"))
+
     @Test fun plainDropsBareUrls() =
         assertEquals("see now", SpeechText.plain("see https://example.com/a?b=1 now"))
 
