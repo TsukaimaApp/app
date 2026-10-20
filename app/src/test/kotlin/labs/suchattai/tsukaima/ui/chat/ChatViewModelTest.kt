@@ -40,6 +40,10 @@ import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.SecretKind
 import labs.suchattai.tsukaima.domain.chat.running
 import labs.suchattai.tsukaima.domain.chat.ToolStatus
+import labs.suchattai.tsukaima.domain.voice.FakeSpeechInput
+import labs.suchattai.tsukaima.domain.voice.FakeSpeechOutput
+import labs.suchattai.tsukaima.domain.voice.SpeechEvent
+import labs.suchattai.tsukaima.domain.voice.VoicePhase
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -160,6 +164,10 @@ class ChatViewModelTest {
         override fun toast(text: String) {
             toasts += text
         }
+
+        val speech = FakeSpeechInput()
+        override fun speechInput() = speech
+        override val speechOutput = FakeSpeechOutput(instant = true)
     }
 
     private object FakeBitmap : ImageBitmap {
@@ -1890,5 +1898,73 @@ class ChatViewModelTest {
         advanceUntilIdle()
         assertEquals("medium", vm.state.value.chat.reasoningEffort)
         assertEquals("the cumulative total (3.1M) is not the meter", "15.8k / 1M ctx · 2%", vm.state.value.chat.usage?.meter)
+    }
+
+    // ---- voice ------------------------------------------------------------------------------------
+
+    @Test
+    fun openVoiceListensAndSendsWhatWasHeard() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+
+        vm.openVoice()
+        advanceUntilIdle()
+        assertEquals(VoicePhase.Listening, vm.state.value.voice?.phase)
+        assertTrue(b.speech.active)
+        b.speech.emit(SpeechEvent.Final("hello"))
+        advanceUntilIdle()
+
+        assertEquals("hello", b.transport.last("prompt.submit")["text"]!!.jsonPrimitive.content)
+        assertEquals("hello", (vm.state.value.chat.items.single() as ChatItem.UserMessage).text)
+        assertEquals(VoicePhase.Thinking, vm.state.value.voice?.phase)
+        assertFalse(b.speech.active)
+
+        vm.openVoice() // already open: nothing restarts
+        advanceUntilIdle()
+        assertEquals(1, b.speech.listenCount)
+    }
+
+    @Test
+    fun closeVoiceStopsSpeechAndClearsState() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.openVoice()
+        advanceUntilIdle()
+        assertTrue(b.speech.active)
+
+        vm.closeVoice()
+        advanceUntilIdle()
+
+        assertTrue(b.speechOutput.stopped > 0)
+        assertFalse(b.speech.active)
+        assertNull(vm.state.value.voice)
+        assertFalse("session.interrupt" in b.transport.methods())
+    }
+
+    @Test
+    fun sendTextRefusedWhenOffline() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Disconnected
+        advanceUntilIdle()
+
+        assertFalse(vm.sendText("x"))
+        advanceUntilIdle()
+        assertEquals(listOf("Not connected to Hermes"), b.toasts)
+        assertFalse("prompt.submit" in b.transport.methods())
+        assertTrue(vm.state.value.chat.items.isEmpty())
+    }
+
+    @Test
+    fun voiceDeniedToasts() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.voiceDenied()
+        assertEquals(listOf("Microphone access is needed for voice mode"), b.toasts)
+        assertNull(vm.state.value.voice)
     }
 }

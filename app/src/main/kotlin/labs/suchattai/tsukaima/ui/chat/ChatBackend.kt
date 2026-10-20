@@ -26,6 +26,8 @@ import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.di.AppContainer
 import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.ChatReducer
+import labs.suchattai.tsukaima.domain.voice.SpeechInput
+import labs.suchattai.tsukaima.domain.voice.SpeechOutput
 import java.io.IOException
 
 /**
@@ -75,6 +77,12 @@ interface ChatBackend {
     /** An image preview decoded from [bytes] (downsampled), or null if they are not a decodable image. */
     fun decodePreview(bytes: ByteArray): ImageBitmap?
     fun toast(text: String)
+
+    /** A fresh speech recogniser for one voice-mode session (it holds the mic while listening). */
+    fun speechInput(): SpeechInput
+
+    /** The app's text-to-speech (shared, created on first use). */
+    val speechOutput: SpeechOutput
 }
 
 class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
@@ -111,6 +119,8 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override fun openFile(uri: String, mime: String) = c.openFile(uri, mime)
     override fun decodePreview(bytes: ByteArray) = ImagePreview.decode(bytes)?.asImageBitmap()
     override fun toast(text: String) = c.toastState.show(text)
+    override fun speechInput() = c.speechInput()
+    override val speechOutput get() = c.speechOutput
 }
 
 /** Result of `session.events.since`. */

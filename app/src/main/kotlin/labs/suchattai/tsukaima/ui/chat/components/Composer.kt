@@ -36,6 +36,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -82,7 +84,8 @@ fun composerAction(
  * send. The IME Send action and a hardware Enter send; hardware Shift+Enter inserts a newline. [canSend]
  * gates sending (text or a ready attachment); the caller clears [value] in [onSend]. While the agent is
  * [running] a turn, send becomes a danger-filled Stop ([onStop]) in the same 44dp slot, and Enter does nothing. When [onVoice] is set and there is nothing to send, send
- * becomes an accent mic that calls it (see [composerAction]).
+ * becomes an accent mic that calls it (see [composerAction]). [focusRequester], when set, is attached to the text
+ * field (leaving voice mode for the keyboard focuses it).
  */
 @Composable
 fun Composer(
@@ -101,6 +104,7 @@ fun Composer(
     onStop: () -> Unit = {},
     disabledPlaceholder: String = "Hermes is unreachable",
     onVoice: (() -> Unit)? = null,
+    focusRequester: FocusRequester? = null,
 ) {
     val colors = MaterialTheme.tsukaima
     val shape = TsukaimaShapes.composer
@@ -144,6 +148,7 @@ fun Composer(
                 modifier = Modifier
                     .weight(1f)
                     .heightIn(max = 120.dp)
+                    .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
                     .onPreviewKeyEvent { event ->
                         if (event.key == Key.Enter && !event.isShiftPressed) {
                             if (event.type == KeyEventType.KeyDown) send()

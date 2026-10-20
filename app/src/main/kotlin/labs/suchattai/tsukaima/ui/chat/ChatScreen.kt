@@ -1,8 +1,14 @@
 package labs.suchattai.tsukaima.ui.chat
 
+import android.Manifest
 import android.content.ClipData
+import android.content.pm.PackageManager
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -28,14 +35,22 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
@@ -49,6 +64,8 @@ import labs.suchattai.tsukaima.domain.chat.ChatState
 import labs.suchattai.tsukaima.domain.chat.ClarifyQuestion
 import labs.suchattai.tsukaima.domain.chat.ToolStatus
 import labs.suchattai.tsukaima.domain.chat.running
+import labs.suchattai.tsukaima.domain.voice.VoicePhase
+import labs.suchattai.tsukaima.domain.voice.VoiceState
 import labs.suchattai.tsukaima.data.gateway.ApprovalChoice
 import labs.suchattai.tsukaima.ui.chat.components.ApprovalCard
 import labs.suchattai.tsukaima.ui.chat.components.ArchivedBanner
@@ -63,11 +80,14 @@ import labs.suchattai.tsukaima.ui.chat.components.SecretCard
 import labs.suchattai.tsukaima.ui.chat.components.StatusLine
 import labs.suchattai.tsukaima.ui.chat.components.ToolRow
 import labs.suchattai.tsukaima.ui.chat.components.UserBubble
+import labs.suchattai.tsukaima.ui.voice.VoiceScreen
+import labs.suchattai.tsukaima.ui.voice.voiceText
 import labs.suchattai.tsukaima.ui.components.ConfirmDialog
 import labs.suchattai.tsukaima.ui.components.IconName
 import labs.suchattai.tsukaima.ui.components.MenuItem
 import labs.suchattai.tsukaima.ui.components.MenuSheet
 import labs.suchattai.tsukaima.ui.components.TsukaimaTextField
+import labs.suchattai.tsukaima.ui.theme.Motion
 import labs.suchattai.tsukaima.ui.theme.TsukaimaTheme
 import labs.suchattai.tsukaima.ui.theme.tsukaima
 
@@ -87,6 +107,12 @@ class ChatActions(
     val onSecretCancel: (String) -> Unit = {},
     val onStop: () -> Unit = {},
     val onVoice: () -> Unit = {},
+    val onVoiceClose: () -> Unit = {},
+    val onVoiceMute: (Boolean) -> Unit = {},
+    val onVoiceTap: () -> Unit = {},
+
+    /** Leave voice mode for the keyboard; [ChatContent] then focuses the composer. */
+    val onVoiceKeyboard: () -> Unit = {},
     val onClarify: (id: String, answers: Map<String, String?>) -> Unit = { _, _ -> },
     val onClarifySkip: (String) -> Unit = {},
     val onMenu: (ChatMenu?) -> Unit = {},
@@ -137,7 +163,14 @@ fun ChatScreen(
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) vm.attach(uris.map { ContentPickedFile(resolver, it) })
     }
+    val context = LocalContext.current
+    val mic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) vm.openVoice() else vm.voiceDenied()
+    }
     LaunchedEffect(vm) { vm.closed.collect { onDeleted() } }
+    // Voice mode ends when the chat leaves the screen (app in the background, another destination), not on rotation.
+    val activity = LocalActivity.current
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { if (activity?.isChangingConfigurations != true) vm.closeVoice() }
     ChatContent(
         state = state,
         showMenu = showMenu,
@@ -157,6 +190,17 @@ fun ChatScreen(
             onSecret = vm::answerSecret,
             onSecretCancel = vm::declineSecret,
             onStop = vm::interrupt,
+            onVoice = {
+                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                    vm.openVoice()
+                } else {
+                    mic.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            },
+            onVoiceClose = vm::closeVoice,
+            onVoiceMute = vm::setVoiceMuted,
+            onVoiceTap = vm::tapVoiceIndicator,
+            onVoiceKeyboard = vm::closeVoice,
             onClarify = vm::answerClarify,
             onClarifySkip = vm::skipClarify,
             onMenu = vm::showMenu,
@@ -188,7 +232,10 @@ fun ChatScreen(
     )
 }
 
-/** Stateless body of [ChatScreen], for previews. */
+/**
+ * Stateless body of [ChatScreen], for previews. While [ChatUiState.voice] is set the voice screen replaces the chat
+ * (crossfade), Back leaves it, the screen stays on, and listening starts with a light haptic; the sheets serve both.
+ */
 @Composable
 fun ChatContent(
     state: ChatUiState,
@@ -198,8 +245,64 @@ fun ChatContent(
     actions: ChatActions,
     listState: LazyListState = rememberLazyListState(),
 ) {
-    val colors = MaterialTheme.tsukaima
     val overflow = overflowItems(state, actions)
+    val voiceOpen = state.voice != null
+    val composerFocus = remember { FocusRequester() }
+    var focusPending by remember { mutableStateOf(false) }
+    // The voice screen fading out still needs a state to draw: the last one seen.
+    val lastVoice = remember { arrayOfNulls<VoiceState>(1) }
+    state.voice?.let { lastVoice[0] = it }
+
+    BackHandler(enabled = voiceOpen) { actions.onVoiceClose() }
+    if (voiceOpen) {
+        val view = LocalView.current
+        DisposableEffect(view) {
+            view.keepScreenOn = true
+            onDispose { view.keepScreenOn = false }
+        }
+    }
+    val haptics = LocalHapticFeedback.current
+    val phase = state.voice?.phase
+    LaunchedEffect(phase) { if (phase == VoicePhase.Listening) haptics.performHapticFeedback(HapticFeedbackType.Confirm) }
+    LaunchedEffect(focusPending, voiceOpen) {
+        if (!focusPending || voiceOpen) return@LaunchedEffect
+        delay(Motion.screen.toLong()) // after the crossfade, with the composer in place
+        focusPending = false
+        runCatching { composerFocus.requestFocus() } // not attached (e.g. still loading): nothing to focus
+    }
+
+    Crossfade(targetState = voiceOpen, animationSpec = tween(Motion.screen, easing = Motion.easing), label = "voiceMode") { open ->
+        val voice = state.voice ?: lastVoice[0]
+        if (open && voice != null) {
+            VoiceScreen(
+                state = state,
+                voice = voice,
+                actions = actions,
+                onModel = { actions.onMenu(ChatMenu.Model) },
+                onKeyboard = {
+                    actions.onVoiceKeyboard()
+                    focusPending = true
+                },
+            )
+        } else {
+            ChatColumn(state, showMenu, onDrawer, onStatus, actions, listState, overflow, composerFocus)
+        }
+    }
+    ChatSheets(state, actions, overflow)
+}
+
+@Composable
+private fun ChatColumn(
+    state: ChatUiState,
+    showMenu: Boolean,
+    onDrawer: () -> Unit,
+    onStatus: () -> Unit,
+    actions: ChatActions,
+    listState: LazyListState,
+    overflow: List<MenuItem>,
+    composerFocus: FocusRequester,
+) {
+    val colors = MaterialTheme.tsukaima
     Column(
         Modifier
             .fillMaxSize()
@@ -241,9 +344,9 @@ fun ChatContent(
             running = state.chat.status.running,
             onStop = actions.onStop,
             onVoice = actions.onVoice,
+            focusRequester = composerFocus,
         )
     }
-    ChatSheets(state, actions, overflow)
 }
 
 @Composable
@@ -265,49 +368,61 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(top = 6.dp),
     ) {
-        items(items, key = { it.id }, contentType = { it::class }) { item ->
-            when (item) {
-                is ChatItem.UserMessage -> UserBubble(
-                    item.text,
-                    attachments = item.attachments,
-                    failed = item.failed,
-                    onRetry = { actions.onRetrySend(item.id) },
-                    onDismiss = { actions.onDismissFailed(item.id) },
-                    onLongPress = { actions.onMessageMenu(item.id) },
-                )
-                is ChatItem.AssistantMessage -> AssistantMessage(
-                    item.text,
-                    item.streaming,
-                    item.reasoning,
-                    media = media,
-                    onLongPress = { actions.onMessageMenu(item.id) }.takeIf { !item.streaming },
-                    reasoningOpen = ChatReducer.reasoningOpen(state.chat, item),
-                    onToggleReasoning = { actions.onToggleReasoning(item.id) },
-                )
-                is ChatItem.ToolCall -> ToolRow(item)
-                is ChatItem.Subagent -> SubagentRow(item)
-                is ChatItem.Approval -> ApprovalCard(
-                    item = item,
-                    onApprove = { actions.onApprove(item.id) },
-                    onDeny = { actions.onDeny(item.id) },
-                    decision = state.decisions[item.id],
-                    answerable = ChatSync.answerable(item),
-                    onApproveFor = { actions.onApproveFor(item.id, it) },
-                )
-                is ChatItem.SecretPrompt -> SecretCard(
-                    item = item,
-                    onSend = { actions.onSecret(item.id, it) },
-                    onCancel = { actions.onSecretCancel(item.id) },
-                )
-                is ChatItem.Clarify -> ClarifyCard(
-                    item = item,
-                    onSend = { actions.onClarify(item.id, it) },
-                    onSkipAll = { actions.onClarifySkip(item.id) },
-                )
-                is ChatItem.Thinking -> Spacer(Modifier.height(0.dp))
-            }
-        }
+        items(items, key = { it.id }, contentType = { it::class }) { item -> TranscriptItem(item, state, actions, media) }
         item(key = "end") { Spacer(Modifier.height(10.dp)) }
+    }
+}
+
+/**
+ * One transcript row with the chat's own components and callbacks; shared by the chat and the voice screen. With
+ * [revealed] (voice mode, [VoiceState.revealed]) a reply shows only what was spoken so far ([voiceText]).
+ */
+@Composable
+internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatActions, media: MediaHost, revealed: Map<String, Int>? = null) {
+    when (item) {
+        is ChatItem.UserMessage -> UserBubble(
+            item.text,
+            attachments = item.attachments,
+            failed = item.failed,
+            onRetry = { actions.onRetrySend(item.id) },
+            onDismiss = { actions.onDismissFailed(item.id) },
+            onLongPress = { actions.onMessageMenu(item.id) },
+        )
+        is ChatItem.AssistantMessage -> {
+            // Voice mode reveals the reply as it is spoken, without its reasoning (the transcript is the spoken conversation).
+            val text = if (revealed == null) item.text else voiceText(item, revealed)
+            val streaming = item.streaming || text.length < item.text.length
+            AssistantMessage(
+                text,
+                streaming,
+                item.reasoning.takeIf { revealed == null },
+                media = media,
+                onLongPress = { actions.onMessageMenu(item.id) }.takeIf { !streaming },
+                reasoningOpen = ChatReducer.reasoningOpen(state.chat, item),
+                onToggleReasoning = { actions.onToggleReasoning(item.id) },
+            )
+        }
+        is ChatItem.ToolCall -> ToolRow(item)
+        is ChatItem.Subagent -> SubagentRow(item)
+        is ChatItem.Approval -> ApprovalCard(
+            item = item,
+            onApprove = { actions.onApprove(item.id) },
+            onDeny = { actions.onDeny(item.id) },
+            decision = state.decisions[item.id],
+            answerable = ChatSync.answerable(item),
+            onApproveFor = { actions.onApproveFor(item.id, it) },
+        )
+        is ChatItem.SecretPrompt -> SecretCard(
+            item = item,
+            onSend = { actions.onSecret(item.id, it) },
+            onCancel = { actions.onSecretCancel(item.id) },
+        )
+        is ChatItem.Clarify -> ClarifyCard(
+            item = item,
+            onSend = { actions.onClarify(item.id, it) },
+            onSkipAll = { actions.onClarifySkip(item.id) },
+        )
+        is ChatItem.Thinking -> Spacer(Modifier.height(0.dp))
     }
 }
 

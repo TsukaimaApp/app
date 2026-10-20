@@ -5,6 +5,7 @@ import labs.suchattai.tsukaima.data.api.WorkspacesDto
 import labs.suchattai.tsukaima.data.gateway.ApprovalChoice
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ChatState
+import labs.suchattai.tsukaima.domain.voice.VoiceState
 
 enum class ChatMenu { Model, Workspace, Overflow, Reasoning }
 enum class ChatDialog { Rename, DeleteConfirm, ModelConfirm }
@@ -56,6 +57,8 @@ data class ChatUiState(
     val pendingModel: PendingModel? = null,
     /** The message whose long-press menu (copy) is open. */
     val messageMenu: String? = null,
+    /** Voice mode's state; non-null while the voice screen is open. */
+    val voice: VoiceState? = null,
 ) {
     /** What the status line shows. */
     val status: AgentStatus get() = gatewayStatus ?: if (compacting && chat.status != AgentStatus.Offline) AgentStatus.Compacting else chat.status

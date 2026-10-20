@@ -34,6 +34,7 @@ import labs.suchattai.tsukaima.domain.chat.ChatReducer
 import labs.suchattai.tsukaima.domain.chat.ChatState
 import labs.suchattai.tsukaima.domain.chat.SecretKind
 import labs.suchattai.tsukaima.domain.chat.ThinkingFlair
+import labs.suchattai.tsukaima.domain.voice.VoiceMode
 
 /**
  * One chat: a new one when [storedSessionId] is null, else the stored session to resume.
@@ -81,6 +82,8 @@ class ChatViewModel(
     )
 
     private val media = ChatMedia(backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), io, _state)
+
+    private val voice = ChatVoice(backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state, ::sendText)
 
     private val chat get() = _state.value.chat
     private fun setChat(block: (ChatState) -> ChatState) = _state.update { it.copy(chat = block(it.chat)) }
@@ -187,10 +190,29 @@ class ChatViewModel(
         if (!_state.value.canSend) return
         val text = _state.value.input.trim()
         val live = chat.liveSessionId ?: return backend.toast("Still connecting to Hermes")
-        val sent = attachments.takeReady()
+        startTurn(live, text, attachments.takeReady(), fromComposer = true)
+    }
+
+    /**
+     * Sends [text] (trimmed) without attachments, leaving the composer alone (voice mode). False, with a toast,
+     * when Hermes is unreachable, the chat archived, or no live session is open yet. The status turns Thinking
+     * before this returns.
+     */
+    fun sendText(text: String): Boolean {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return false
+        if (!_state.value.writable) return false.also { backend.toast("Not connected to Hermes") }
+        val live = chat.liveSessionId ?: return false.also { backend.toast("Still connecting to Hermes") }
+        startTurn(live, trimmed, emptyList(), fromComposer = false)
+        return true
+    }
+
+    /** Adds the user bubble (status Thinking) and submits it; [fromComposer] also clears the typed text. */
+    private fun startTurn(live: String, text: String, sent: List<PendingAttachment>, fromComposer: Boolean) {
         val localId = "u-l${++userCounter}"
         _state.update {
-            it.copy(input = "", chat = ChatReducer.onSubmitted(it.chat, text, localId, flair, sent.map(PendingAttachment::name)))
+            val chat = ChatReducer.onSubmitted(it.chat, text, localId, flair, sent.map(PendingAttachment::name))
+            if (fromComposer) it.copy(input = "", chat = chat) else it.copy(chat = chat)
         }
         launch { submit(live, localId, text, sent) }
     }
@@ -388,6 +410,27 @@ class ChatViewModel(
             }
             s.copy(chat = s.chat.copy(items = items, status = unlessOffline(s.chat.status, waiting)), decisions = s.decisions - id)
         }
+    }
+
+    // ---- voice ------------------------------------------------------------------------------------
+
+    /** Opens voice mode on this chat (no-op while open); see [ChatVoice]. Needs `RECORD_AUDIO`, asked by the screen. */
+    fun openVoice(mode: VoiceMode = VoiceMode.InApp, onApprovalNeeded: () -> Unit = {}) = voice.open(mode, onApprovalNeeded)
+
+    /** Leaves voice mode: listening and speech stop, the running turn goes on. */
+    fun closeVoice() = voice.close()
+
+    fun setVoiceMuted(muted: Boolean) = voice.setMuted(muted)
+
+    /** A tap on the voice indicator: barge-in while speaking, listen again when idle. */
+    fun tapVoiceIndicator() = voice.tapIndicator()
+
+    /** The microphone permission was refused. */
+    fun voiceDenied() = backend.toast("Microphone access is needed for voice mode")
+
+    override fun onCleared() {
+        closeVoice()
+        super.onCleared()
     }
 
     // ---- menus and session actions ------------------------------------------------------------------
