@@ -47,6 +47,7 @@ import labs.suchattai.tsukaima.domain.chat.running
 import labs.suchattai.tsukaima.domain.chat.ToolStatus
 import labs.suchattai.tsukaima.domain.voice.FakeSpeechInput
 import labs.suchattai.tsukaima.domain.voice.FakeSpeechOutput
+import labs.suchattai.tsukaima.domain.voice.VoiceLanguage
 import labs.suchattai.tsukaima.domain.voice.VoiceMode
 import labs.suchattai.tsukaima.domain.voice.SpeechEvent
 import labs.suchattai.tsukaima.domain.voice.VoicePhase
@@ -179,6 +180,7 @@ class ChatViewModelTest {
         val speech = FakeSpeechInput()
         override fun speechInput() = speech
         override val speechOutput = FakeSpeechOutput(instant = true)
+        override fun voiceLanguages() = listOf(VoiceLanguage(null, "System default"), VoiceLanguage("pl-PL", "Polish (Poland)"))
     }
 
     private object FakeBitmap : ImageBitmap {
@@ -2197,5 +2199,45 @@ class ChatViewModelTest {
         assertNull(vm.state.value.voice)
         assertTrue(b.speechOutput.stopped > 0)
         assertFalse(b.speech.active)
+    }
+
+    @Test
+    fun voiceLanguagePickPersistsToastsAndRestartsListening() = runTest(dispatcher) {
+        val b = backend(Settings(workspace = "/srv/work", model = "m-1", voiceLanguage = "en-US"))
+        val vm = vm(b)
+        advanceUntilIdle()
+        assertEquals("en-US", vm.state.value.voiceLanguage)
+        vm.openVoice()
+        advanceUntilIdle()
+        assertEquals(1, b.speech.listenCount)
+
+        vm.showMenu(ChatMenu.VoiceLanguage)
+        advanceUntilIdle()
+        assertEquals(b.voiceLanguages(), vm.state.value.voiceLanguages)
+
+        vm.setVoiceLanguage("pl-PL")
+        advanceUntilIdle()
+        assertEquals("pl-PL", b.settings.value?.voiceLanguage)
+        assertEquals("pl-PL", vm.state.value.voiceLanguage)
+        assertNull(vm.state.value.menu)
+        assertEquals("Voice language: Polish (Poland)", b.toasts.last())
+        assertEquals(2, b.speech.listenCount) // the run in progress was restarted
+        assertTrue(b.speech.active)
+
+        vm.setVoiceLanguage(null)
+        advanceUntilIdle()
+        assertNull(b.settings.value?.voiceLanguage)
+        assertEquals("Voice language: System default", b.toasts.last())
+    }
+
+    @Test
+    fun voiceLanguagePickWithoutVoiceOpenOnlyPersists() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setVoiceLanguage("pl-PL")
+        advanceUntilIdle()
+        assertEquals("pl-PL", b.settings.value?.voiceLanguage)
+        assertEquals(0, b.speech.listenCount)
     }
 }

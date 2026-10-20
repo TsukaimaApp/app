@@ -91,6 +91,9 @@ internal class ChatVoice(
 
     fun tapIndicator() = controller?.tapIndicator() ?: Unit
 
+    /** The voice language changed: a recogniser run in progress starts over in it ([VoiceController.restartListening]). */
+    fun restartListening() = controller?.restartListening() ?: Unit
+
     /** The transcript was rebuilt from stored history; [itemsBefore] is the one it replaced ([VoiceController.rebased]). */
     fun rebased(itemsBefore: List<ChatItem>) = controller?.rebased(itemsBefore) ?: Unit
 

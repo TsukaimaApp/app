@@ -78,4 +78,6 @@ internal class FakeSpeechOutput(var instant: Boolean = false, override val avail
     override fun stop() {
         stopped++
     }
+
+    override fun languages(): Set<String> = emptySet()
 }

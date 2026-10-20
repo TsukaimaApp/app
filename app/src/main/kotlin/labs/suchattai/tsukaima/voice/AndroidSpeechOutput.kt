@@ -11,6 +11,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.suspendCancellableCoroutine
 import labs.suchattai.tsukaima.domain.voice.SpeechOutput
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -22,8 +23,16 @@ import kotlin.coroutines.resume
  * utterance. Cancelling [speak] stops the engine. Audio focus is held across a run of sentences: asked by the first
  * [speak], given back [FOCUS_RELEASE_DELAY_MS] after the last one ended with no new one. Losing the focus to another
  * app (not a duck) stops the speech; the [speak] in flight then returns. Spoken text is never logged.
+ *
+ * [language] is the voice language setting (a BCP-47 tag, null = the engine's default), applied before each
+ * utterance when it changed. A language the engine lacks (no voice data, not supported) reverts to the engine's
+ * default and is reported to [onUnsupported] once per tag per process, on the main thread.
  */
-class AndroidSpeechOutput(context: Context) : SpeechOutput {
+class AndroidSpeechOutput(
+    context: Context,
+    private val language: () -> String? = { null },
+    private val onUnsupported: (String) -> Unit = {},
+) : SpeechOutput {
     private val appContext = context.applicationContext
     private val focus = AudioFocus(appContext, onLoss = ::stop)
     private val initResult = CompletableDeferred<Boolean>()
@@ -35,6 +44,17 @@ class AndroidSpeechOutput(context: Context) : SpeechOutput {
 
     @Volatile
     private var initOk = false
+
+    /** The tag last handed to the engine (also when it fell back to the default); null = the engine's default. */
+    @Volatile
+    private var appliedTag: String? = null
+
+    /** Tags already reported to [onUnsupported]. */
+    private val reported = ConcurrentHashMap.newKeySet<String>()
+
+    /** The engine's languages, read once after a successful init. */
+    @Volatile
+    private var engineLanguages: Set<String>? = null
 
     /** Utterance id to the continuation waiting for it; the listener (binder thread) resumes and removes. */
     private val pending = ConcurrentHashMap<String, (Unit) -> Unit>()
@@ -82,6 +102,7 @@ class AndroidSpeechOutput(context: Context) : SpeechOutput {
         if (text.isBlank()) return
         val engine = tts
         if (!initResult.await()) return
+        applyLanguage(engine)
         inFlight.incrementAndGet()
         main.removeCallbacks(releaseFocus)
         focus.request()
@@ -110,6 +131,38 @@ class AndroidSpeechOutput(context: Context) : SpeechOutput {
 
     override fun stop() {
         if (initResult.isCompleted) tts.stop()
+    }
+
+    override fun languages(): Set<String> {
+        val engine = tts // start the engine if nobody has yet; never wait for it
+        if (!initOk) return emptySet()
+        engineLanguages?.let { return it }
+        val tags = try {
+            engine.availableLanguages.orEmpty().mapTo(LinkedHashSet()) { it.toLanguageTag() }
+        } catch (e: RuntimeException) { // some engines throw from availableLanguages
+            Log.w(TAG, "TextToSpeech languages unavailable", e)
+            return emptySet()
+        }
+        return tags.also { engineLanguages = it }
+    }
+
+    /** Hands the [language] setting to the engine when it changed since the last utterance. */
+    private fun applyLanguage(engine: TextToSpeech) {
+        val tag = language()
+        if (tag == appliedTag) return
+        appliedTag = tag
+        if (tag == null) return restoreDefault(engine)
+        val result = engine.setLanguage(Locale.forLanguageTag(tag))
+        if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+            Log.w(TAG, "TextToSpeech language unavailable: $tag ($result)")
+            restoreDefault(engine)
+            if (reported.add(tag)) main.post { onUnsupported(tag) }
+        }
+    }
+
+    private fun restoreDefault(engine: TextToSpeech) {
+        val voice = engine.defaultVoice
+        if (voice == null || engine.setVoice(voice) == TextToSpeech.ERROR) engine.setLanguage(Locale.getDefault())
     }
 
     private companion object {

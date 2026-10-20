@@ -87,4 +87,14 @@ class SettingsStoreTest {
         assertNull(cleared.assistSessionId)
         assertNull(cleared.assistSessionAt)
     }
+
+    @Test
+    fun voiceLanguageDefaultsToSystemAndRoundTrips() = runTest {
+        val store = store()
+        assertNull(store.settings.first().voiceLanguage)
+        store.update { it.copy(voiceLanguage = "pl-PL") }
+        assertEquals("pl-PL", store.settings.first().voiceLanguage)
+        store.update { it.copy(voiceLanguage = null) }
+        assertNull(store.settings.first().voiceLanguage)
+    }
 }

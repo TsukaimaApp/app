@@ -1,6 +1,7 @@
 package labs.suchattai.tsukaima.di
 
 import android.content.Context
+import android.os.LocaleList
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
@@ -50,10 +51,13 @@ import labs.suchattai.tsukaima.notifications.NotificationHub
 import labs.suchattai.tsukaima.notifications.OpenScreen
 import labs.suchattai.tsukaima.domain.voice.SpeechInput
 import labs.suchattai.tsukaima.domain.voice.SpeechOutput
+import labs.suchattai.tsukaima.domain.voice.VoiceLanguage
+import labs.suchattai.tsukaima.domain.voice.VoiceLanguages
 import labs.suchattai.tsukaima.ui.components.ToastState
 import labs.suchattai.tsukaima.voice.AndroidSpeechInput
 import labs.suchattai.tsukaima.voice.AndroidSpeechOutput
 import okhttp3.OkHttpClient
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
@@ -170,11 +174,33 @@ class AppContainer(context: Context) {
     /** Delivered (`MEDIA:`) files land in the public Downloads collection. */
     val fileSaver: FileSaver = MediaStoreFileSaver(appContext.contentResolver)
 
-    /** A fresh recogniser adapter; each listening run owns its own platform recogniser. */
-    fun speechInput(): SpeechInput = AndroidSpeechInput(appContext)
+    /** A fresh recogniser adapter; each listening run owns its own platform recogniser and reads the voice language. */
+    fun speechInput(): SpeechInput = AndroidSpeechInput(appContext) { settings.value?.voiceLanguage }
 
-    /** One TTS engine per process, created on first use. */
-    val speechOutput: SpeechOutput by lazy { AndroidSpeechOutput(appContext) }
+    /** One TTS engine per process, created on first use; speaks in the voice language when the engine has it. */
+    val speechOutput: SpeechOutput by lazy {
+        AndroidSpeechOutput(
+            context = appContext,
+            language = { settings.value?.voiceLanguage },
+            onUnsupported = { tag ->
+                toastState.show("Speech for ${VoiceLanguages.label(tag, voiceLanguages())} isn’t installed on this device")
+            },
+        )
+    }
+
+    /**
+     * The voice language picker's options: the device locales, the TTS engine's languages (once it is ready) and
+     * [VoiceLanguages.FALLBACK], each named in the current locale.
+     */
+    fun voiceLanguages(): List<VoiceLanguage> {
+        val device = LocaleList.getDefault().let { list -> (0 until list.size()).map { list[it].toLanguageTag() } }
+        return VoiceLanguages.options(device, speechOutput.languages().toList(), ::languageName)
+    }
+
+    private fun languageName(tag: String): String {
+        val here = Locale.getDefault()
+        return Locale.forLanguageTag(tag).getDisplayName(here).ifBlank { tag }.replaceFirstChar { it.titlecase(here) }
+    }
 
     fun openFile(uri: String, mime: String): Boolean = viewFile(appContext, uri, mime)
 

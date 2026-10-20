@@ -17,7 +17,8 @@ class IconsTest {
 
     /**
      * Added after the handoff (v0.2.0: clarify card, attachment chips; v0.3.0: `MEDIA:` file cards; v0.4.0: Stop,
-     * masked-prompt card, sign-out; v0.5.0: compact context, subagent rows, output-risk note; v0.6.0: voice mode).
+     * masked-prompt card, sign-out; v0.5.0: compact context, subagent rows, output-risk note; v0.6.0: voice mode;
+     * v0.6.1: voice language picker).
      */
     private val additions = listOf(
         "help", "attach_file", "image",
@@ -25,6 +26,7 @@ class IconsTest {
         "stop", "key", "visibility", "visibility_off", "logout",
         "compress", "account_tree", "warning",
         "mic", "mic_off", "keyboard",
+        "translate",
     )
 
     @Test

@@ -33,8 +33,14 @@ import labs.suchattai.tsukaima.domain.voice.SpeechInput
  * `ERROR_LANGUAGE_NOT_SUPPORTED`. The first such failure turns the on-device recogniser off for the rest of the
  * process ([preferOnDevice]) and is reported once as retryable, so the next run uses the default recogniser; only
  * when that one reports the language too is the error fatal.
+ *
+ * [language] is the voice language setting (a BCP-47 tag, null = the recogniser's default); it is read at each
+ * [listen], so a change applies to the next run.
  */
-class AndroidSpeechInput(private val context: Context) : SpeechInput {
+class AndroidSpeechInput(
+    private val context: Context,
+    private val language: () -> String? = { null },
+) : SpeechInput {
     override val available: Boolean
         get() = onDeviceAvailable() || if (stubIsDefault()) systemRecognizer() != null else recognizers().isNotEmpty()
 
@@ -73,11 +79,11 @@ class AndroidSpeechInput(private val context: Context) : SpeechInput {
         } else {
             null
         }
-        return recognize(onDevice, explicit)
+        return recognize(onDevice, explicit, language())
     }
 
-    /** [explicit] null = the system default recogniser. */
-    private fun recognize(onDevice: Boolean, explicit: ComponentName?): Flow<SpeechEvent> = callbackFlow {
+    /** [explicit] null = the system default recogniser; [tag] null = its default language. */
+    private fun recognize(onDevice: Boolean, explicit: ComponentName?, tag: String?): Flow<SpeechEvent> = callbackFlow {
         val recognizer = when {
             onDevice && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> SpeechRecognizer.createOnDeviceSpeechRecognizer(context) // S: spelled out for lint
             explicit != null -> SpeechRecognizer.createSpeechRecognizer(context, explicit)
@@ -126,6 +132,10 @@ class AndroidSpeechInput(private val context: Context) : SpeechInput {
             .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+        if (tag != null) {
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, tag)
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, tag)
+        }
         recognizer.startListening(intent)
         awaitClose {
             recognizer.cancel()

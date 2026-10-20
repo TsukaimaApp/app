@@ -34,4 +34,10 @@ interface SpeechOutput {
 
     /** Stops whatever is being spoken. */
     fun stop()
+
+    /**
+     * BCP-47 tags of the languages the engine can speak; empty while it is not ready (never blocks). Feeds the
+     * language picker's options.
+     */
+    fun languages(): Set<String>
 }

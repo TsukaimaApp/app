@@ -5,9 +5,10 @@ import labs.suchattai.tsukaima.data.api.WorkspacesDto
 import labs.suchattai.tsukaima.data.gateway.ApprovalChoice
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ChatState
+import labs.suchattai.tsukaima.domain.voice.VoiceLanguage
 import labs.suchattai.tsukaima.domain.voice.VoiceState
 
-enum class ChatMenu { Model, Workspace, Overflow, Reasoning }
+enum class ChatMenu { Model, Workspace, Overflow, Reasoning, VoiceLanguage }
 enum class ChatDialog { Rename, DeleteConfirm, ModelConfirm }
 
 /** A model pick the server wants confirmed (`confirm_required`) before it switches; [message] says why. */
@@ -59,6 +60,10 @@ data class ChatUiState(
     val messageMenu: String? = null,
     /** Voice mode's state; non-null while the voice screen is open. */
     val voice: VoiceState? = null,
+    /** The voice language setting (BCP-47 tag), mirrored from settings; null = system default. */
+    val voiceLanguage: String? = null,
+    /** The voice language picker's options, loaded when its sheet opens. */
+    val voiceLanguages: List<VoiceLanguage> = emptyList(),
 ) {
     /** What the status line shows. */
     val status: AgentStatus get() = gatewayStatus ?: if (compacting && chat.status != AgentStatus.Offline) AgentStatus.Compacting else chat.status

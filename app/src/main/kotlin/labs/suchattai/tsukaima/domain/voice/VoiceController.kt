@@ -116,6 +116,19 @@ class VoiceController(
         refresh()
     }
 
+    /**
+     * Ends the recogniser run in progress and listens again with a fresh one (the voice language changed: the next
+     * run picks it up). No-op when the mic is not open.
+     */
+    fun restartListening() {
+        if (!started) return
+        val job = listenJob ?: return
+        job.cancel()
+        listenJob = null
+        _state.update { it.copy(heard = "") }
+        refresh()
+    }
+
     /** Speaking: stop speech and listen (barge-in). Idle: listen again. Otherwise nothing. */
     fun tapIndicator() {
         if (!started) return

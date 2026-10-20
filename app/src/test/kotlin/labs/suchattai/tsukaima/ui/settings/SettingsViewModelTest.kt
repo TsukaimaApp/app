@@ -27,6 +27,7 @@ import labs.suchattai.tsukaima.data.prefs.InMemoryCredentialStore
 import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.data.prefs.SettingsStore
 import labs.suchattai.tsukaima.data.prefs.ThemeMode
+import labs.suchattai.tsukaima.domain.voice.VoiceLanguage
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -134,6 +135,22 @@ class SettingsViewModelTest {
             kotlinx.coroutines.delay(25)
         }
         throw AssertionError("store never matched; last=$last")
+    }
+
+    @Test
+    fun setVoiceLanguagePersists() = runBlocking<Unit> {
+        val options = listOf(VoiceLanguage(null, "System default"), VoiceLanguage("pl-PL", "Polish (Poland)"))
+        val vm = SettingsViewModel(repo, store, creds, connection, voiceLanguages = { options }).also { vms += it }
+        assertEquals(options, vm.state.value.voiceLanguages)
+        assertNull(vm.state.value.voiceLanguage)
+
+        vm.setVoiceLanguage("pl-PL")
+        assertEquals("pl-PL", awaitStore { it.voiceLanguage == "pl-PL" }.voiceLanguage)
+        vm.await { it.voiceLanguage == "pl-PL" }
+
+        vm.setVoiceLanguage(null)
+        assertNull(awaitStore { it.voiceLanguage == null }.voiceLanguage)
+        vm.await { it.voiceLanguage == null }
     }
 
     @Test

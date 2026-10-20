@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +42,7 @@ import labs.suchattai.tsukaima.domain.voice.VoiceMode
 import labs.suchattai.tsukaima.domain.voice.VoicePhase
 import labs.suchattai.tsukaima.domain.voice.VoiceState
 import labs.suchattai.tsukaima.ui.chat.ChatActions
+import labs.suchattai.tsukaima.ui.chat.ChatMenu
 import labs.suchattai.tsukaima.ui.chat.ChatUiState
 import labs.suchattai.tsukaima.ui.chat.TranscriptItem
 import labs.suchattai.tsukaima.ui.chat.components.MediaHost
@@ -65,10 +65,10 @@ internal fun voiceText(item: ChatItem.AssistantMessage, revealed: Map<String, In
     item.text.take(revealed[item.id] ?: if (item.streaming) 0 else item.text.length)
 
 /**
- * In-app voice mode (handoff Screen A): back chevron and model chip on top; the [VoiceIndicator] (tap = barge-in or
- * listen again), the voice status line and the conversation since voice mode opened ([VoiceState.startIndex]) in a
- * scrolling column that keeps the newest words in view; Mute, End and Keyboard below. Replies appear as they are
- * spoken. Request cards are the chat's own and are answered only by tapping them. [onModel] opens the model picker;
+ * In-app voice mode (handoff Screen A): back chevron, model chip and voice language button ([ChatMenu.VoiceLanguage])
+ * on top; the [VoiceIndicator] (tap = barge-in or listen again), the voice status line and the conversation since
+ * voice mode opened ([VoiceState.startIndex]) in a scrolling column that keeps the newest words in view; Mute, End
+ * and Keyboard below. Replies appear as they are spoken. Request cards are the chat's own and are answered only by tapping them. [onModel] opens the model picker;
  * [onKeyboard] leaves for the composer.
  */
 @Composable
@@ -105,7 +105,7 @@ fun VoiceScreen(
             Spacer(Modifier.weight(1f))
             Chip(state.model ?: "Model", onClick = onModel, trailing = IconName.ExpandMore, borderless = true)
             Spacer(Modifier.weight(1f))
-            Spacer(Modifier.width(44.dp))
+            IconButton44(IconName.Translate, "Voice language", onClick = { actions.onMenu(ChatMenu.VoiceLanguage) })
         }
         Column(
             modifier = Modifier

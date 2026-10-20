@@ -46,6 +46,11 @@ data class Settings(
     val assistSessionId: String? = null,
     /** When [assistSessionId] was last used, epoch millis. */
     val assistSessionAt: Long? = null,
+    /**
+     * BCP-47 tag (`pl-PL`, `en-US`) for both speech recognition and text-to-speech in voice mode; null follows the
+     * system default.
+     */
+    val voiceLanguage: String? = null,
 )
 
 class SettingsStore(private val dataStore: DataStore<Preferences>) {
@@ -71,6 +76,7 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             prefs[NOTIFY_ALERTS] = next.notifications.alerts
             prefs.putOrRemove(ASSIST_SESSION_ID, next.assistSessionId)
             if (next.assistSessionAt == null) prefs.remove(ASSIST_SESSION_AT) else prefs[ASSIST_SESSION_AT] = next.assistSessionAt
+            prefs.putOrRemove(VOICE_LANGUAGE, next.voiceLanguage)
         }
     }
 
@@ -104,6 +110,7 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             ),
             assistSessionId = this[ASSIST_SESSION_ID],
             assistSessionAt = this[ASSIST_SESSION_AT],
+            voiceLanguage = this[VOICE_LANGUAGE],
         )
     }
 
@@ -125,5 +132,6 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
         val NOTIFY_ALERTS = booleanPreferencesKey("notify_alerts")
         val ASSIST_SESSION_ID = stringPreferencesKey("assist_session_id")
         val ASSIST_SESSION_AT = longPreferencesKey("assist_session_at")
+        val VOICE_LANGUAGE = stringPreferencesKey("voice_language")
     }
 }

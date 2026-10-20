@@ -28,6 +28,7 @@ import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.ChatReducer
 import labs.suchattai.tsukaima.domain.voice.SpeechInput
 import labs.suchattai.tsukaima.domain.voice.SpeechOutput
+import labs.suchattai.tsukaima.domain.voice.VoiceLanguage
 import java.io.IOException
 
 /**
@@ -83,6 +84,9 @@ interface ChatBackend {
 
     /** The app's text-to-speech (shared, created on first use). */
     val speechOutput: SpeechOutput
+
+    /** The voice language picker's options, "System default" first (device locales, TTS languages, fallback). */
+    fun voiceLanguages(): List<VoiceLanguage>
 }
 
 class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
@@ -121,6 +125,7 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override fun toast(text: String) = c.toastState.show(text)
     override fun speechInput() = c.speechInput()
     override val speechOutput get() = c.speechOutput
+    override fun voiceLanguages() = c.voiceLanguages()
 }
 
 /** Result of `session.events.since`. */

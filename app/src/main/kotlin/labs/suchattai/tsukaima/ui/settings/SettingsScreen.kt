@@ -23,6 +23,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +45,7 @@ import labs.suchattai.tsukaima.data.api.SkillDto
 import labs.suchattai.tsukaima.data.api.ToolsetDto
 import labs.suchattai.tsukaima.data.prefs.NotificationPrefs
 import labs.suchattai.tsukaima.data.prefs.ThemeMode
+import labs.suchattai.tsukaima.domain.voice.VoiceLanguages
 import labs.suchattai.tsukaima.ui.chat.components.PairingCard
 import labs.suchattai.tsukaima.ui.components.ButtonSize
 import labs.suchattai.tsukaima.ui.components.Chip
@@ -49,6 +53,8 @@ import labs.suchattai.tsukaima.ui.components.ConfirmDialog
 import labs.suchattai.tsukaima.ui.components.GhostButton
 import labs.suchattai.tsukaima.ui.components.IconButton44
 import labs.suchattai.tsukaima.ui.components.IconName
+import labs.suchattai.tsukaima.ui.components.MenuItem
+import labs.suchattai.tsukaima.ui.components.MenuSheet
 import labs.suchattai.tsukaima.ui.components.PrimaryButton
 import labs.suchattai.tsukaima.ui.components.SecondaryButton
 import labs.suchattai.tsukaima.ui.components.Tone
@@ -77,6 +83,8 @@ class SettingsActions(
     val onAskRevoke: (PairingEntry?) -> Unit = {},
     val onToolset: (name: String, enabled: Boolean) -> Unit = { _, _ -> },
     val onNotifications: ((NotificationPrefs) -> NotificationPrefs) -> Unit = {},
+    /** Voice language picked (null = system default). */
+    val onVoiceLanguage: (String?) -> Unit = {},
     /** "Use as device assistant": opens the system's assistant settings. */
     val onAssistant: () -> Unit = {},
     val onTheme: (ThemeMode) -> Unit = {},
@@ -123,6 +131,7 @@ fun SettingsScreen(
             onAskRevoke = vm::askRevoke,
             onToolset = vm::toggleToolset,
             onNotifications = vm::setNotifications,
+            onVoiceLanguage = vm::setVoiceLanguage,
             onAssistant = onAssistant,
             onTheme = vm::setTheme,
             onMaterialYou = vm::setMaterialYou,
@@ -140,6 +149,14 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
     val colors = MaterialTheme.tsukaima
     SignOutDialog(state, actions)
     RevokeDialog(state, actions)
+    var showVoiceLanguages by rememberSaveable { mutableStateOf(false) }
+    MenuSheet(
+        visible = showVoiceLanguages,
+        onDismiss = { showVoiceLanguages = false },
+        items = state.voiceLanguages.map { option ->
+            MenuItem(option.label, null, checked = option.tag == state.voiceLanguage) { actions.onVoiceLanguage(option.tag) }
+        },
+    )
     Column(
         modifier
             .fillMaxSize()
@@ -303,6 +320,14 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
             }
 
             Section("Voice") {
+                TsukaimaRow(
+                    title = "Language",
+                    subtitle = VoiceLanguages.label(state.voiceLanguage, state.voiceLanguages),
+                    leading = IconName.Translate,
+                    trailing = { Chevron() },
+                    onClick = { showVoiceLanguages = true },
+                    modifier = Modifier.bleed(12.dp),
+                )
                 TsukaimaRow(
                     title = "Use as device assistant",
                     subtitle = if (state.assistantRoleHeld) "Tsukaima is your assistant" else "Long-press home or swipe from a corner to ask Hermes",

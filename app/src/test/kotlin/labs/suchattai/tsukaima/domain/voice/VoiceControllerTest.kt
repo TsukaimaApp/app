@@ -506,4 +506,28 @@ class VoiceControllerTest {
         assertEquals(VoicePhase.Listening, r.state.phase)
         assertTrue(r.input.active)
     }
+
+    @Test fun restartListeningStartsAFreshRunAndIsANoOpWhileTheMicIsClosed() = runTest {
+        val r = rig()
+        r.input.emit(SpeechEvent.Partial("cze"))
+        advanceUntilIdle()
+        assertEquals("cze", r.state.heard)
+        r.controller.restartListening()
+        advanceUntilIdle()
+        assertTrue(r.input.active)
+        assertEquals(2, r.input.listenCount)
+        assertEquals("", r.state.heard)
+        assertEquals(VoicePhase.Listening, r.state.phase)
+
+        say(r, "hello")
+        r.controller.restartListening() // the turn runs: the mic is closed
+        advanceUntilIdle()
+        assertFalse(r.input.active)
+        assertEquals(2, r.input.listenCount)
+
+        r.controller.stop()
+        r.controller.restartListening()
+        advanceUntilIdle()
+        assertEquals(2, r.input.listenCount)
+    }
 }

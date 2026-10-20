@@ -34,6 +34,7 @@ import labs.suchattai.tsukaima.domain.chat.ChatReducer
 import labs.suchattai.tsukaima.domain.chat.ChatState
 import labs.suchattai.tsukaima.domain.chat.SecretKind
 import labs.suchattai.tsukaima.domain.chat.ThinkingFlair
+import labs.suchattai.tsukaima.domain.voice.VoiceLanguages
 import labs.suchattai.tsukaima.domain.voice.VoiceMode
 
 /**
@@ -100,6 +101,11 @@ class ChatViewModel(
         launch { backend.events.collect(sync::onEvent) }
         launch { backend.serverRequests.collect(sync::onRequest) }
         launch { backend.connection.collect(::onConnection) }
+        launch {
+            backend.settings.filterNotNull().map { it.voiceLanguage }.distinctUntilChanged().collect { tag ->
+                _state.update { it.copy(voiceLanguage = tag) }
+            }
+        }
         launch {
             // Lets notifications open the stored session that asked, knowing only its live id.
             _state.map { it.chat.liveSessionId to it.chat.storedSessionId }.distinctUntilChanged().collect { (live, stored) ->
@@ -441,6 +447,22 @@ class ChatViewModel(
     /** A tap on the voice indicator: barge-in while speaking, listen again when idle. */
     fun tapVoiceIndicator() = voice.tapIndicator()
 
+    /**
+     * Saves the voice language ([tag] null = system default) and closes its sheet. The recogniser and TTS read the
+     * setting lazily, so the next run and the next sentence use it; a listening run in progress starts over once the
+     * setting is visible ([SETTINGS_SETTLE_MS] at most, in case the write failed).
+     */
+    fun setVoiceLanguage(tag: String?) {
+        _state.update { it.copy(menu = null, voiceLanguage = tag) }
+        launch {
+            backend.updateSettings { it.copy(voiceLanguage = tag) }
+            withTimeoutOrNull(SETTINGS_SETTLE_MS) { backend.settings.first { it?.voiceLanguage == tag } }
+            voice.restartListening()
+            val options = _state.value.voiceLanguages.ifEmpty { backend.voiceLanguages() }
+            backend.toast("Voice language: ${VoiceLanguages.label(tag, options)}")
+        }
+    }
+
     /** The microphone permission was refused. */
     fun voiceDenied() = backend.toast("Microphone access is needed for voice mode")
 
@@ -455,6 +477,9 @@ class ChatViewModel(
         _state.update { it.copy(menu = menu) }
         if (menu == ChatMenu.Model && _state.value.models == null) {
             launch { backend.modelOptions().onSuccess { m -> _state.update { it.copy(models = m) } } }
+        }
+        if (menu == ChatMenu.VoiceLanguage) {
+            _state.update { it.copy(voiceLanguages = backend.voiceLanguages()) } // the TTS engine's list may have come in
         }
         if (menu == ChatMenu.Workspace && _state.value.workspaces == null) {
             launch { backend.workspaces().onSuccess { w -> _state.update { it.copy(workspaces = w) } } }
@@ -663,5 +688,8 @@ class ChatViewModel(
 
         /** `session.interrupt` status when no turn was running. */
         const val NOT_INTERRUPTED = "not_interrupted"
+
+        /** How long a voice language pick waits for the saved setting to show before restarting the recogniser. */
+        const val SETTINGS_SETTLE_MS = 2_000L
     }
 }

@@ -55,6 +55,7 @@ import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.StopCircle
 import androidx.compose.material.icons.rounded.Tag
 import androidx.compose.material.icons.rounded.Terminal
+import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material.icons.rounded.Unarchive
 import androidx.compose.material.icons.rounded.VideoFile
 import androidx.compose.material.icons.rounded.Visibility
@@ -160,6 +161,9 @@ enum class IconName(val symbol: String) {
     Mic("mic"),
     MicOff("mic_off"),
     Keyboard("keyboard"),
+
+    /** Not in the handoff (v0.6.1): voice language picker. */
+    Translate("translate"),
 }
 
 /** Pure lookup, safe from JVM unit tests (no Android context involved). */
@@ -218,6 +222,7 @@ fun iconFor(name: IconName): ImageVector = when (name) {
     IconName.Mic -> Icons.Rounded.Mic
     IconName.MicOff -> Icons.Rounded.MicOff
     IconName.Keyboard -> Icons.Rounded.Keyboard
+    IconName.Translate -> Icons.Rounded.Translate
     IconName.Key -> Icons.Rounded.Key
     IconName.Visibility -> Icons.Rounded.Visibility
     IconName.VisibilityOff -> Icons.Rounded.VisibilityOff

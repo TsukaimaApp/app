@@ -35,6 +35,7 @@ import labs.suchattai.tsukaima.data.prefs.NotificationPrefs
 import labs.suchattai.tsukaima.data.prefs.ServerUrl
 import labs.suchattai.tsukaima.data.prefs.SettingsStore
 import labs.suchattai.tsukaima.data.prefs.ThemeMode
+import labs.suchattai.tsukaima.domain.voice.VoiceLanguage
 import java.util.Locale
 
 /** One pending or approved pairing entry, flattened from the API's loosely typed objects. */
@@ -85,6 +86,10 @@ data class SettingsUiState(
     val confirmRevoke: PairingEntry? = null,
     /** Tsukaima holds the device's assistant role (read by the screen on resume; the role needs a Context). */
     val assistantRoleHeld: Boolean = false,
+    /** The voice language setting (BCP-47 tag); null = system default. */
+    val voiceLanguage: String? = null,
+    /** The voice language picker's options, "System default" first. */
+    val voiceLanguages: List<VoiceLanguage> = emptyList(),
 ) {
     /** The URL field was edited to a different server than the one signed in to, and not yet signed in again. */
     val urlChangedWithoutSignIn: Boolean
@@ -102,6 +107,8 @@ class SettingsViewModel(
     private val onSignedOut: () -> Unit = {},
     /** Shows a transient message (the app's toast). */
     private val toast: (String) -> Unit = {},
+    /** The voice language picker's options (`AppContainer.voiceLanguages`); read once, when the screen opens. */
+    private val voiceLanguages: () -> List<VoiceLanguage> = { emptyList() },
 ) : ViewModel() {
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
@@ -119,6 +126,7 @@ class SettingsViewModel(
     val signedOut: Flow<Unit> = _signedOut.receiveAsFlow()
 
     init {
+        _state.update { it.copy(voiceLanguages = voiceLanguages()) }
         viewModelScope.launch {
             settings.settings.collect { s ->
                 val firstLoad = !seeded
@@ -131,6 +139,7 @@ class SettingsViewModel(
                         theme = s.theme,
                         materialYou = s.materialYou,
                         notifications = s.notifications,
+                        voiceLanguage = s.voiceLanguage,
                         // Seed the form once; later emissions (our own writes) must not clobber typing.
                         serverUrl = if (firstLoad && it.serverUrl.isEmpty()) s.serverUrl else it.serverUrl,
                         username = if (firstLoad && it.username.isEmpty()) s.username else it.username,
@@ -239,7 +248,7 @@ class SettingsViewModel(
                 SettingsUiState(
                     serverUrl = it.serverUrl, username = it.username, storedUrl = it.storedUrl, profile = it.profile,
                     theme = it.theme, materialYou = it.materialYou, simulateOffline = it.simulateOffline,
-                    notifications = it.notifications,
+                    notifications = it.notifications, voiceLanguage = it.voiceLanguage, voiceLanguages = it.voiceLanguages,
                 )
             }
             _signedOut.trySend(Unit)
@@ -407,6 +416,12 @@ class SettingsViewModel(
 
     fun setMaterialYou(on: Boolean) {
         viewModelScope.launch { settings.update { it.copy(materialYou = on) } }
+    }
+
+    /** Saves the voice language (null = system default); the next recogniser run and utterance use it. */
+    fun setVoiceLanguage(tag: String?) {
+        _state.update { it.copy(voiceLanguage = tag) }
+        viewModelScope.launch { settings.update { it.copy(voiceLanguage = tag) } }
     }
 
     fun setAssistantRoleHeld(held: Boolean) = _state.update { it.copy(assistantRoleHeld = held) }
