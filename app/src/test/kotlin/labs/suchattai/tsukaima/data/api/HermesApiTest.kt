@@ -311,6 +311,72 @@ class HermesApiTest {
         assertEquals(2, server.requestCount)
     }
 
+    private fun authedApi(): HermesApi {
+        val origin = server.url("/").toString().trimEnd('/')
+        val creds = labs.suchattai.tsukaima.data.prefs.InMemoryCredentialStore().apply { save("pw", "tok", origin) }
+        settings = Settings(serverUrl = origin, username = "u")
+        val client = OkHttpClient.Builder()
+            .addInterceptor(AuthInterceptor(creds, { settings }) { _, _, _ -> error("no re-login expected") })
+            .build()
+        return HermesApi(client, { origin }, { settings })
+    }
+
+    private fun file(body: String, vararg headers: Pair<String, String>) = server.enqueue(
+        MockResponse.Builder().code(200).apply { headers.forEach { (k, v) -> addHeader(k, v) } }.body(body).build(),
+    )
+
+    @Test
+    fun downloadSendsBearerAndEncodedPathAndStreamsTheBody() = runBlocking {
+        file(
+            "line 1\nline 2\n",
+            "Content-Type" to "text/plain; charset=utf-8",
+            "Content-Disposition" to "attachment; filename=\"probe.txt\"",
+        )
+        val d = authedApi().download("/home/hermes/out dir/#1 probe.txt")
+        d.use {
+            assertEquals("probe.txt", it.name)
+            assertEquals("text/plain", it.mime)
+            assertEquals(14L, it.size)
+            assertEquals("line 1", it.body.readUtf8Line())
+            assertEquals("line 2", it.body.readUtf8Line())
+        }
+        val recorded = server.takeRequest(1, TimeUnit.SECONDS)!!
+        assertEquals("GET", recorded.method)
+        assertEquals("Bearer tok", recorded.headers["Authorization"])
+        assertEquals("/api/files/download", recorded.url.encodedPath)
+        assertEquals("/home/hermes/out dir/#1 probe.txt", recorded.url.queryParameter("path"))
+        assertEquals("path=%2Fhome%2Fhermes%2Fout%20dir%2F%231%20probe.txt", recorded.url.encodedQuery)
+    }
+
+    @Test
+    fun downloadReadsExtendedFilenameAndFallsBack() = runBlocking {
+        file("x", "Content-Disposition" to "attachment; filename*=utf-8''za%C5%BC%C3%B3%C5%82%C4%87%20plik.pdf", "Content-Type" to "application/pdf")
+        authedApi().download("/tmp/whatever.pdf").use {
+            assertEquals("zażółć plik.pdf", it.name)
+            assertEquals("application/pdf", it.mime)
+        }
+        file("x")
+        authedApi().download("~/out/report.csv").use {
+            assertEquals("report.csv", it.name)
+            assertEquals("application/octet-stream", it.mime)
+        }
+    }
+
+    @Test
+    fun downloadErrorsCarryUserMessages() {
+        val api = authedApi()
+        fun failure(code: Int, detail: String): ApiException {
+            json("""{"detail":"$detail"}""", code)
+            return assertThrows(ApiException::class.java) { runBlocking { api.download("/tmp/x.txt").close() } }
+        }
+        assertEquals("File no longer exists on the server", failure(404, "File not found").userMessage())
+        assertEquals("File too large for the server to send", failure(413, "File is too large").userMessage())
+        assertEquals("Not a file", failure(400, "Path is not a file").userMessage())
+        assertEquals("Server refuses this file", failure(403, "Access to sensitive files is not allowed").userMessage())
+        assertEquals("Path must be absolute", failure(400, "Path must be absolute").userMessage())
+        assertEquals(409, failure(409, "busy").code)
+    }
+
     private fun MockWebServer.takeRequests(): List<String> =
         generateSequence { takeRequest(100, TimeUnit.MILLISECONDS) }.map { it.target }.toList()
 }

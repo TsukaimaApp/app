@@ -27,6 +27,8 @@ data class ChatUiState(
     val isNew: Boolean = true,
     /** Composer attachments; kept across rotation (VM), lost with the process. */
     val attachments: List<PendingAttachment> = emptyList(),
+    /** Download state per `MEDIA:` path; a path with no entry is idle. */
+    val mediaState: Map<String, MediaState> = emptyMap(),
 ) {
     /** What the status line shows. */
     val status: AgentStatus get() = gatewayStatus ?: chat.status

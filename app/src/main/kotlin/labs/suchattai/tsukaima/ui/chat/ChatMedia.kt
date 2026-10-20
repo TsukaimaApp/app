@@ -1,0 +1,143 @@
+package labs.suchattai.tsukaima.ui.chat
+
+import androidx.compose.ui.graphics.ImageBitmap
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import labs.suchattai.tsukaima.data.api.ApiException
+import labs.suchattai.tsukaima.data.api.userMessage
+import java.io.IOException
+
+enum class MediaKind { Image, Video, Audio, Document, Archive, Other }
+enum class MediaStatus { Downloading, Saved, Failed }
+
+/** A `MEDIA:` card's download state; no entry means idle. [error] is the one-line reason of a failure. */
+data class MediaState(val status: MediaStatus, val error: String? = null)
+
+/** Pure rules for the files the agent delivers with `MEDIA:` lines. */
+object Media {
+    /** Previews fetch at most this much; a bigger image shows the card only. */
+    const val PREVIEW_MAX_BYTES = 10_000_000L
+
+    /** Image types the inline preview decodes. */
+    private val PREVIEWABLE = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")
+    private val KINDS = mapOf(
+        MediaKind.Image to setOf("png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "svg", "heic"),
+        MediaKind.Video to setOf("mp4", "mov", "avi", "mkv", "webm", "3gp"),
+        MediaKind.Audio to setOf("mp3", "m2a", "wav", "ogg", "opus", "m4a", "flac"),
+        MediaKind.Document to setOf(
+            "pdf", "docx", "doc", "odt", "rtf", "txt", "md", "epub", "xlsx", "xls", "ods", "csv", "tsv", "json", "xml",
+            "yaml", "yml", "kmz", "kml", "geojson", "gpx", "pptx", "ppt", "odp", "key", "html", "htm", "log",
+        ),
+        MediaKind.Archive to setOf("zip", "tar", "gz", "tgz", "bz2", "xz", "7z", "rar", "apk", "ipa"),
+    )
+
+    fun extension(path: String): String = basename(path).substringAfterLast('.', "").lowercase()
+
+    fun kind(path: String): MediaKind = extension(path).let { ext -> KINDS.entries.firstOrNull { ext in it.value }?.key } ?: MediaKind.Other
+
+    fun previewable(path: String): Boolean = extension(path) in PREVIEWABLE
+
+    fun basename(path: String): String = path.trimEnd('/').substringAfterLast('/')
+
+    /** The parent directory, shortened to its last two segments: `…/output/session-x`, `~/out`, `/tmp`. */
+    fun parentLabel(path: String): String {
+        val parent = path.trimEnd('/').substringBeforeLast('/', "")
+        if (parent.isEmpty()) return if (path.startsWith("/")) "/" else ""
+        val segments = parent.split('/').filter { it.isNotEmpty() }
+        return if (segments.size <= 2) parent else "…/" + segments.takeLast(2).joinToString("/")
+    }
+}
+
+/**
+ * Downloads and previews of the chat's `MEDIA:` files for one [ChatViewModel]. A tap downloads the file into
+ * Downloads ([ChatBackend.fileSaver]) and offers it to a viewer; one download per path at a time. Image previews
+ * are decoded once and kept in a small LRU, so scrolling a card back into view does not refetch it. Driven from
+ * the VM's single-threaded [scope]; the body is read, saved and decoded on [io].
+ */
+internal class ChatMedia(
+    private val backend: ChatBackend,
+    private val scope: CoroutineScope,
+    private val io: CoroutineDispatcher,
+    private val state: MutableStateFlow<ChatUiState>,
+) {
+    private val previews = object : LinkedHashMap<String, ImageBitmap?>(PREVIEW_CACHE, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageBitmap?>) = size > PREVIEW_CACHE
+    }
+    private val loading = mutableMapOf<String, Deferred<ImageBitmap?>>()
+
+    /** Downloads [path] into Downloads and opens it; a re-tap while it downloads is ignored, a failed one retries. */
+    fun open(path: String) {
+        if (state.value.mediaState[path]?.status == MediaStatus.Downloading) return
+        set(path, MediaState(MediaStatus.Downloading))
+        scope.launch {
+            try {
+                val download = backend.download(path).getOrThrow()
+                val mime = download.mime
+                val uri = withContext(io) { download.use { backend.fileSaver.save(it.name, it.mime, it.body) } }
+                set(path, MediaState(MediaStatus.Saved))
+                backend.toast("Saved to Downloads")
+                backend.openFile(uri, mime)
+                delay(SAVED_MS)
+                if (state.value.mediaState[path]?.status == MediaStatus.Saved) set(path, null)
+            } catch (c: CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                val reason = e.userMessage() ?: "download failed"
+                set(path, MediaState(MediaStatus.Failed, reason))
+                backend.toast("Couldn’t download ${Media.basename(path)}: $reason")
+            }
+        }
+    }
+
+    /**
+     * The decoded preview of image [path], or null when there is none (not an image, over [Media.PREVIEW_MAX_BYTES],
+     * undecodable, or the fetch failed). Concurrent callers share one fetch; outcomes are cached, except a network
+     * failure, which a later call retries.
+     */
+    suspend fun preview(path: String): ImageBitmap? {
+        if (!Media.previewable(path)) return null
+        if (previews.containsKey(path)) return previews[path]
+        return loading.getOrPut(path) { scope.async { fetchPreview(path) } }.await()
+    }
+
+    private suspend fun fetchPreview(path: String): ImageBitmap? {
+        try {
+            val download = backend.download(path).getOrThrow()
+            val bitmap = withContext(io) {
+                download.use { d ->
+                    val tooBig = (d.size ?: 0) > Media.PREVIEW_MAX_BYTES || d.body.request(Media.PREVIEW_MAX_BYTES + 1)
+                    if (tooBig) null else backend.decodePreview(d.body.readByteArray())
+                }
+            }
+            previews[path] = bitmap
+            return bitmap
+        } catch (c: CancellationException) {
+            throw c
+        } catch (e: Exception) {
+            // The server's answer is final (gone, refused, too large); a dropped connection is worth another try.
+            if (e is ApiException || e !is IOException) previews[path] = null
+            return null
+        } finally {
+            loading.remove(path)
+        }
+    }
+
+    private fun set(path: String, value: MediaState?) = state.update {
+        it.copy(mediaState = if (value == null) it.mediaState - path else it.mediaState + (path to value))
+    }
+
+    private companion object {
+        const val PREVIEW_CACHE = 8
+
+        /** How long a card shows "Saved" before it is back to idle. */
+        const val SAVED_MS = 3_000L
+    }
+}

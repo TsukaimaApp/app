@@ -1,9 +1,12 @@
 package labs.suchattai.tsukaima.ui.chat
 
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.ImageBitmapConfig
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,9 +23,12 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import labs.suchattai.tsukaima.data.HermesState
 import labs.suchattai.tsukaima.data.RecentIds
+import labs.suchattai.tsukaima.data.api.ApiException
+import labs.suchattai.tsukaima.data.api.FileDownload
 import labs.suchattai.tsukaima.data.api.HermesJson
 import labs.suchattai.tsukaima.data.api.ModelOptionsDto
 import labs.suchattai.tsukaima.data.api.WorkspacesDto
+import labs.suchattai.tsukaima.data.files.FileSaver
 import labs.suchattai.tsukaima.data.gateway.ConnectionState
 import labs.suchattai.tsukaima.data.gateway.Frame
 import labs.suchattai.tsukaima.data.gateway.GatewayClosedException
@@ -38,6 +44,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import okio.Buffer
+import okio.BufferedSource
 import java.util.concurrent.ConcurrentHashMap
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -117,9 +125,42 @@ class ChatViewModelTest {
         override suspend fun renameSession(id: String, title: String) = Result.success(Unit).also { rest += "rename $id $title" }
         override suspend fun archiveSession(id: String) = Result.success(Unit).also { rest += "archive $id" }
         override suspend fun deleteSession(id: String) = Result.success(Unit).also { rest += "delete $id" }
+
+        val downloads = mutableListOf<String>()
+        var downloadGate: CompletableDeferred<Unit>? = null
+        var downloadResult: (String) -> Result<FileDownload> = { Result.success(FileDownload("probe.txt", "text/plain", 3, Buffer().writeUtf8("abc"))) }
+        override suspend fun download(path: String): Result<FileDownload> {
+            downloads += path
+            downloadGate?.await()
+            return downloadResult(path)
+        }
+
+        /** name, mime, content of every save. */
+        val saved = mutableListOf<Triple<String, String, String>>()
+        override val fileSaver = object : FileSaver {
+            override fun save(name: String, mime: String, source: BufferedSource): String {
+                saved += Triple(name, mime, source.readUtf8())
+                return "content://media/external/downloads/${saved.size}"
+            }
+        }
+        val opened = mutableListOf<Pair<String, String>>()
+        override fun openFile(uri: String, mime: String) = true.also { opened += uri to mime }
+        var decoded = 0
+        override fun decodePreview(bytes: ByteArray): ImageBitmap = FakeBitmap.also { decoded++ }
+
         override fun toast(text: String) {
             toasts += text
         }
+    }
+
+    private object FakeBitmap : ImageBitmap {
+        override val width = 1
+        override val height = 1
+        override val colorSpace get() = error("unused")
+        override val hasAlpha = false
+        override val config = ImageBitmapConfig.Argb8888
+        override fun readPixels(buffer: IntArray, startX: Int, startY: Int, width: Int, height: Int, bufferOffset: Int, stride: Int) = Unit
+        override fun prepareToDraw() = Unit
     }
 
     private val dispatcher = StandardTestDispatcher()
@@ -1162,5 +1203,99 @@ class ChatViewModelTest {
         advanceUntilIdle()
         assertEquals(3, b.transport.methods().count { it == "session.create" })
         assertEquals(live, vm.state.value.chat.liveSessionId)
+    }
+
+    // ---- MEDIA: file cards ------------------------------------------------------------------------
+
+    private val probe = "/home/hermes/workspace/output/probe.txt"
+
+    @Test
+    fun tappingAMediaCardDownloadsSavesAndOpens() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+
+        vm.openMedia(probe)
+        assertEquals(MediaStatus.Downloading, vm.state.value.mediaState[probe]?.status)
+        runCurrent()
+        assertEquals(listOf(probe), b.downloads)
+        assertEquals(listOf(Triple("probe.txt", "text/plain", "abc")), b.saved)
+        assertEquals(listOf("Saved to Downloads"), b.toasts)
+        assertEquals(listOf("content://media/external/downloads/1" to "text/plain"), b.opened)
+        assertEquals(MediaStatus.Saved, vm.state.value.mediaState[probe]?.status)
+
+        advanceUntilIdle() // "Saved" goes back to idle
+        assertNull(vm.state.value.mediaState[probe])
+    }
+
+    @Test
+    fun failedDownloadShowsReasonAndRetries() = runTest(dispatcher) {
+        val b = backend().apply { downloadResult = { Result.failure(ApiException(404, "File no longer exists on the server")) } }
+        val vm = vm(b)
+        advanceUntilIdle()
+
+        vm.openMedia(probe)
+        advanceUntilIdle()
+        assertEquals(MediaState(MediaStatus.Failed, "File no longer exists on the server"), vm.state.value.mediaState[probe])
+        assertEquals(listOf("Couldn’t download probe.txt: File no longer exists on the server"), b.toasts)
+        assertTrue(b.saved.isEmpty() && b.opened.isEmpty())
+
+        b.downloadResult = { Result.success(FileDownload("probe.txt", "text/plain", 3, Buffer().writeUtf8("abc"))) }
+        vm.openMedia(probe) // tap on a failed card retries
+        runCurrent()
+        assertEquals(2, b.downloads.size)
+        assertEquals(MediaStatus.Saved, vm.state.value.mediaState[probe]?.status)
+    }
+
+    @Test
+    fun tapWhileDownloadingIsIgnored() = runTest(dispatcher) {
+        val b = backend().apply { downloadGate = CompletableDeferred() }
+        val vm = vm(b)
+        advanceUntilIdle()
+
+        vm.openMedia(probe)
+        runCurrent()
+        vm.openMedia(probe)
+        runCurrent()
+        assertEquals(1, b.downloads.size)
+        b.downloadGate!!.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(1, b.saved.size)
+    }
+
+    @Test
+    fun imagePreviewIsFetchedOnceAndCached() = runTest(dispatcher) {
+        val png = "/srv/out/chart.png"
+        val b = backend().apply {
+            downloadResult = { Result.success(FileDownload("chart.png", "image/png", 4, Buffer().write(byteArrayOf(1, 2, 3, 4)))) }
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+
+        val first = async { vm.preview(png) }
+        val second = async { vm.preview(png) } // concurrent: shares the fetch
+        advanceUntilIdle()
+        assertEquals(FakeBitmap, first.await())
+        assertEquals(FakeBitmap, second.await())
+        assertEquals(FakeBitmap, vm.preview(png))
+        assertEquals(listOf(png), b.downloads)
+        assertEquals(1, b.decoded)
+
+        assertNull(vm.preview(probe)) // not an image: no fetch
+        assertEquals(1, b.downloads.size)
+    }
+
+    @Test
+    fun oversizedImageGetsNoPreview() = runTest(dispatcher) {
+        val png = "/srv/out/huge.png"
+        val b = backend().apply {
+            downloadResult = { Result.success(FileDownload("huge.png", "image/png", Media.PREVIEW_MAX_BYTES + 1, Buffer())) }
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        assertNull(vm.preview(png))
+        assertNull(vm.preview(png))
+        assertEquals(1, b.downloads.size) // the verdict is cached
+        assertEquals(0, b.decoded)
     }
 }

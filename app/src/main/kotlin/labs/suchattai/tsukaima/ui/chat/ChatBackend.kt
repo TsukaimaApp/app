@@ -1,6 +1,8 @@
 package labs.suchattai.tsukaima.ui.chat
 
 import android.util.Log
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.JsonArray
@@ -11,8 +13,11 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.longOrNull
 import labs.suchattai.tsukaima.data.HermesState
 import labs.suchattai.tsukaima.data.RecentIds
+import labs.suchattai.tsukaima.data.api.FileDownload
 import labs.suchattai.tsukaima.data.api.ModelOptionsDto
 import labs.suchattai.tsukaima.data.api.WorkspacesDto
+import labs.suchattai.tsukaima.data.files.FileSaver
+import labs.suchattai.tsukaima.data.files.ImagePreview
 import labs.suchattai.tsukaima.data.gateway.ConnectionState
 import labs.suchattai.tsukaima.data.gateway.Frame
 import labs.suchattai.tsukaima.data.gateway.RpcTransport
@@ -51,6 +56,18 @@ interface ChatBackend {
     suspend fun renameSession(id: String, title: String): Result<Unit>
     suspend fun archiveSession(id: String): Result<Unit>
     suspend fun deleteSession(id: String): Result<Unit>
+
+    /** A `MEDIA:` file, streaming (`/api/files/download`); the caller closes it. */
+    suspend fun download(path: String): Result<FileDownload>
+
+    /** Where downloads are saved (blocking; run on IO). */
+    val fileSaver: FileSaver
+
+    /** Offers the saved [uri] to a viewer app; false when none handles [mime]. */
+    fun openFile(uri: String, mime: String): Boolean
+
+    /** An image preview decoded from [bytes] (downsampled), or null if they are not a decodable image. */
+    fun decodePreview(bytes: ByteArray): ImageBitmap?
     fun toast(text: String)
 }
 
@@ -81,6 +98,10 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override suspend fun renameSession(id: String, title: String) = c.repository.renameSession(id, title)
     override suspend fun archiveSession(id: String) = c.repository.archiveSession(id, archived = true)
     override suspend fun deleteSession(id: String) = c.repository.deleteSession(id)
+    override suspend fun download(path: String) = c.repository.download(path)
+    override val fileSaver get() = c.fileSaver
+    override fun openFile(uri: String, mime: String) = c.openFile(uri, mime)
+    override fun decodePreview(bytes: ByteArray) = ImagePreview.decode(bytes)?.asImageBitmap()
     override fun toast(text: String) = c.toastState.show(text)
 }
 

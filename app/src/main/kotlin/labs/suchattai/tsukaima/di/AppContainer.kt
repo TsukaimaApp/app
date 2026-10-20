@@ -22,6 +22,9 @@ import labs.suchattai.tsukaima.data.api.AuthException
 import labs.suchattai.tsukaima.data.api.AuthInterceptor
 import labs.suchattai.tsukaima.data.api.HermesApi
 import labs.suchattai.tsukaima.data.api.HermesJson
+import labs.suchattai.tsukaima.data.files.FileSaver
+import labs.suchattai.tsukaima.data.files.MediaStoreFileSaver
+import labs.suchattai.tsukaima.data.files.viewFile
 import labs.suchattai.tsukaima.data.gateway.GatewayClient
 import labs.suchattai.tsukaima.data.gateway.GatewaySession
 import labs.suchattai.tsukaima.data.prefs.CredentialStore
@@ -146,6 +149,11 @@ class AppContainer(context: Context) {
     )
 
     val toastState = ToastState()
+
+    /** Delivered (`MEDIA:`) files land in the public Downloads collection. */
+    val fileSaver: FileSaver = MediaStoreFileSaver(appContext.contentResolver)
+
+    fun openFile(uri: String, mime: String): Boolean = viewFile(appContext, uri, mime)
 
     /**
      * Ids of server requests (approvals) already answered from any surface: chat screens and notifications.

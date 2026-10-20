@@ -11,11 +11,21 @@ sealed interface MdBlock {
     data class Paragraph(val spans: List<MdSpan>) : MdBlock
     data class Code(val lang: String?, val code: String) : MdBlock
     data class Bullets(val items: List<List<MdSpan>>) : MdBlock
+
+    /** A file the agent delivered with a whole-line `MEDIA:<path>` directive (`/…` or `~/…`). */
+    data class Media(val path: String) : MdBlock
 }
 
-/** Minimal markdown: fenced code, bullets, paragraphs, bold, italic, inline code. Never throws. */
+/**
+ * Minimal markdown: fenced code, bullets, paragraphs, bold, italic, inline code, and Hermes `MEDIA:` file
+ * deliveries. Never throws.
+ */
 object Markdown {
-    fun parse(text: String): List<MdBlock> {
+    /**
+     * With [streaming], the last line is never read as a `MEDIA:` directive: a half-streamed path would flash
+     * a card for a file that does not exist.
+     */
+    fun parse(text: String, streaming: Boolean = false): List<MdBlock> {
         val lines = text.replace("\r\n", "\n").replace('\r', '\n').split('\n')
         val blocks = mutableListOf<MdBlock>()
         val para = mutableListOf<String>()
@@ -37,6 +47,7 @@ object Markdown {
         while (i < lines.size) {
             val line = lines[i]
             val trimmed = line.trim()
+            val media = if (streaming && i == lines.lastIndex) null else mediaPath(trimmed)
             when {
                 trimmed.startsWith("```") -> {
                     flushPara(); flushBullets()
@@ -51,6 +62,7 @@ object Markdown {
                     // i is on the closing fence (or past the end); the increment below skips it.
                 }
                 trimmed.isEmpty() -> { flushPara(); flushBullets() }
+                media != null -> { flushPara(); flushBullets(); blocks += MdBlock.Media(media) }
                 line.startsWith("- ") || line.startsWith("* ") -> {
                     flushPara()
                     val list = bullets ?: mutableListOf<List<MdSpan>>().also { bullets = it }
@@ -63,6 +75,41 @@ object Markdown {
         flushPara(); flushBullets()
         return blocks
     }
+
+    /**
+     * The path of a whole-line `MEDIA:` directive (Hermes TUI and desktop `MEDIA_LINE_RE`): the directive may
+     * be wrapped in a backtick or quote, the path may be backticked or quoted (then it may hold spaces), and an
+     * unquoted path holds spaces only when it ends in a deliverable extension (desktop `_MEDIA_PATH_ANCHORED`).
+     * Only absolute and `~/` paths count; anything else stays prose.
+     */
+    fun mediaPath(line: String): String? {
+        val rest = MEDIA_LINE.matchEntire(line.trim())?.groupValues?.get(1) ?: return null
+        val q = rest.first()
+        val close = if (q in QUOTES) rest.indexOf(q, 1) else -1
+        val path = if (close > 1) {
+            val tail = rest.substring(close + 1)
+            if (tail.length > 1 || (tail.length == 1 && tail[0] !in QUOTES)) return null
+            rest.substring(1, close)
+        } else {
+            // A trailing backtick or double quote is the wrapper's residue (`MEDIA:/a.txt`), not the path.
+            val bare = if (rest.last() == '`' || rest.last() == '"') rest.dropLast(1) else rest
+            if (bare.any(Char::isWhitespace) && bare.substringAfterLast('.').lowercase() !in DELIVERY_EXTS) return null
+            bare
+        }
+        val anchored = path.startsWith("/") || path.startsWith("~/")
+        return path.takeIf { anchored && it.substringAfterLast('/').isNotBlank() }
+    }
+
+    private val MEDIA_LINE = Regex("[`\"']?MEDIA:\\s*(\\S.*)")
+    private const val QUOTES = "`\"'"
+
+    /** Hermes `MEDIA_DELIVERY_EXTS` (gateway/platforms/base.py). */
+    private val DELIVERY_EXTS = setOf(
+        "png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "svg", "mp4", "mov", "avi", "mkv", "webm", "3gp",
+        "mp3", "m2a", "wav", "ogg", "opus", "m4a", "flac", "pdf", "docx", "doc", "odt", "rtf", "txt", "md", "epub",
+        "xlsx", "xls", "ods", "csv", "tsv", "json", "xml", "yaml", "yml", "kmz", "kml", "geojson", "gpx",
+        "pptx", "ppt", "odp", "key", "zip", "tar", "gz", "tgz", "bz2", "xz", "7z", "rar", "apk", "ipa", "html", "htm",
+    )
 
     private fun parseInline(s: String): List<MdSpan> {
         val spans = mutableListOf<MdSpan>()

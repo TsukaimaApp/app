@@ -19,6 +19,10 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSource
+import java.io.Closeable
+import java.net.URLDecoder
+import java.util.concurrent.TimeUnit
 
 /**
  * Hermes dashboard REST client. [baseUrl] has no trailing slash. [settings] supplies the active
@@ -217,6 +221,50 @@ class HermesApi(
         sendUnit("POST", "api/gateway/restart")
     }
 
+    // ---- files ---------------------------------------------------------------------------
+
+    /**
+     * `GET /api/files/download?path=` ([path] absolute or `~/…`), streamed: the caller reads
+     * [FileDownload.body] and must close the download. The refusals the server gives (404 gone, 400 not a
+     * file, 403 sensitive path, 413 over its 100 MB cap) become an [ApiException] with a user-facing message.
+     */
+    suspend fun download(path: String): FileDownload = withContext(Dispatchers.IO) {
+        val request = Request.Builder().url(url("api/files/download", managed = false, arrayOf("path" to path))).build()
+        val response = downloadClient.newCall(request).execute()
+        if (!response.isSuccessful) {
+            val text = response.use { it.body.string() }
+            if (response.code == 401) throw AuthException()
+            throw downloadError(response.code, text)
+        }
+        FileDownload(
+            name = response.header("Content-Disposition")?.let(::dispositionFilename)
+                ?: path.trimEnd('/').substringAfterLast('/').ifEmpty { "download" },
+            mime = response.body.contentType()?.let { "${it.type}/${it.subtype}" } ?: OCTET_STREAM,
+            size = response.body.contentLength().takeIf { it >= 0 },
+            body = response.body.source(),
+        )
+    }
+
+    /**
+     * The shared client's 20 s call timeout spans reading the body, which would cut a large file short: downloads
+     * get no call timeout, only a read timeout between bytes. Same interceptors (bearer, re-login) and pool.
+     */
+    private val downloadClient: OkHttpClient by lazy {
+        client.newBuilder().callTimeout(0, TimeUnit.MILLISECONDS).readTimeout(30, TimeUnit.SECONDS).build()
+    }
+
+    private fun downloadError(code: Int, body: String): ApiException {
+        val server = ApiException.fromResponse(code, body)
+        val message = when (code) {
+            404 -> "File no longer exists on the server"
+            400 -> if (server.detail?.contains("not a file", ignoreCase = true) != false) "Not a file" else return server
+            403 -> "Server refuses this file"
+            413 -> "File too large for the server to send"
+            else -> return server
+        }
+        return ApiException(code, message)
+    }
+
     // ---- plumbing ------------------------------------------------------------------------
 
     private suspend fun <T> get(
@@ -325,5 +373,31 @@ class HermesApi(
         const val MAX_SESSIONS = 100
         val JSON = "application/json; charset=utf-8".toMediaType()
         val EMPTY_BODY = JsonObject(emptyMap())
+        const val OCTET_STREAM = "application/octet-stream"
+
+        /**
+         * The filename of a `Content-Disposition` header: RFC 5987 `filename*=UTF-8''…` wins over `filename="…"`
+         * (Starlette sends the former for non-ASCII names). Any directory part is dropped; null when absent.
+         */
+        fun dispositionFilename(header: String): String? {
+            val params = header.split(';').drop(1).associate { p ->
+                p.substringBefore('=').trim().lowercase() to p.substringAfter('=', "").trim()
+            }
+            val extended = params["filename*"]?.let { v ->
+                val charset = v.substringBefore('\'', "").ifEmpty { "UTF-8" }
+                runCatching { URLDecoder.decode(v.substringAfterLast('\'').replace("+", "%2B"), charset) }.getOrNull()
+            }
+            val plain = params["filename"]?.removeSurrounding("\"")
+            return (extended ?: plain)?.substringAfterLast('/')?.substringAfterLast('\\')?.takeIf { it.isNotBlank() }
+        }
     }
+}
+
+/**
+ * A file streaming in from `/api/files/download`: [name] from `Content-Disposition`, [mime] without parameters,
+ * [size] from `Content-Length` when given. [body] is the open response body; closing the download releases the
+ * connection.
+ */
+class FileDownload(val name: String, val mime: String, val size: Long?, val body: BufferedSource) : Closeable {
+    override fun close() = body.close()
 }

@@ -5,12 +5,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.automirrored.rounded.HelpOutline
+import androidx.compose.material.icons.automirrored.rounded.InsertDriveFile
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Archive
 import androidx.compose.material.icons.rounded.AttachFile
+import androidx.compose.material.icons.rounded.AudioFile
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Check
@@ -19,11 +21,14 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.FolderZip
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.GppMaybe
 import androidx.compose.material.icons.rounded.History
@@ -46,6 +51,7 @@ import androidx.compose.material.icons.rounded.StopCircle
 import androidx.compose.material.icons.rounded.Tag
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.Unarchive
+import androidx.compose.material.icons.rounded.VideoFile
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -116,6 +122,14 @@ enum class IconName(val symbol: String) {
     /** Not in the handoff: attachment chips (v0.2.0). */
     AttachFile("attach_file"),
     Image("image"),
+
+    /** Not in the handoff: `MEDIA:` file cards (v0.3.0). */
+    Download("download"),
+    Description("description"),
+    VideoFile("video_file"),
+    AudioFile("audio_file"),
+    FolderZip("folder_zip"),
+    InsertDriveFile("insert_drive_file"),
 }
 
 /** Pure lookup, safe from JVM unit tests (no Android context involved). */
@@ -164,6 +178,12 @@ fun iconFor(name: IconName): ImageVector = when (name) {
     IconName.Help -> Icons.AutoMirrored.Rounded.HelpOutline
     IconName.AttachFile -> Icons.Rounded.AttachFile
     IconName.Image -> Icons.Rounded.Image
+    IconName.Download -> Icons.Rounded.Download
+    IconName.Description -> Icons.Rounded.Description
+    IconName.VideoFile -> Icons.Rounded.VideoFile
+    IconName.AudioFile -> Icons.Rounded.AudioFile
+    IconName.FolderZip -> Icons.Rounded.FolderZip
+    IconName.InsertDriveFile -> Icons.AutoMirrored.Rounded.InsertDriveFile
 }
 
 /**

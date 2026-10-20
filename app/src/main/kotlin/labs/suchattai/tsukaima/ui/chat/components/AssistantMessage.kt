@@ -31,16 +31,20 @@ import labs.suchattai.tsukaima.ui.theme.Motion
 import labs.suchattai.tsukaima.ui.theme.TsukaimaType
 import labs.suchattai.tsukaima.ui.theme.tsukaima
 
-/** Assistant prose directly on the page: no bubble, 20dp gutters, 640dp max, optional reasoning. */
+/**
+ * Assistant prose directly on the page: no bubble, 20dp gutters, 640dp max, optional reasoning, and file cards
+ * for its `MEDIA:` deliveries ([media]).
+ */
 @Composable
 fun AssistantMessage(
     text: String,
     streaming: Boolean,
     reasoning: String?,
     modifier: Modifier = Modifier,
+    media: MediaHost = MediaHost(),
 ) {
     val colors = MaterialTheme.tsukaima
-    val blocks = remember(text) { Markdown.parse(text) }
+    val blocks = remember(text, streaming) { Markdown.parse(text, streaming) }
     var open by rememberSaveable { mutableStateOf(false) }
     Column(
         modifier = modifier
@@ -63,7 +67,7 @@ fun AssistantMessage(
             }
             if (open) Text(reasoning, style = TsukaimaType.caption, color = colors.ink2)
         }
-        MarkdownText(blocks, streaming = streaming)
+        MarkdownText(blocks, streaming = streaming, media = media)
     }
 }
 

@@ -22,11 +22,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
@@ -47,6 +49,7 @@ import labs.suchattai.tsukaima.ui.chat.components.ChatSkeleton
 import labs.suchattai.tsukaima.ui.chat.components.ChatTopBar
 import labs.suchattai.tsukaima.ui.chat.components.ClarifyCard
 import labs.suchattai.tsukaima.ui.chat.components.Composer
+import labs.suchattai.tsukaima.ui.chat.components.MediaHost
 import labs.suchattai.tsukaima.ui.chat.components.StatusLine
 import labs.suchattai.tsukaima.ui.chat.components.ToolRow
 import labs.suchattai.tsukaima.ui.chat.components.UserBubble
@@ -65,6 +68,8 @@ class ChatActions(
     val onAttach: () -> Unit = {},
     val onRemoveAttachment: (String) -> Unit = {},
     val onRetryAttachment: (String) -> Unit = {},
+    val onOpenMedia: (String) -> Unit = {},
+    val previewMedia: suspend (String) -> ImageBitmap? = { null },
     val onApprove: (String) -> Unit = {},
     val onDeny: (String) -> Unit = {},
     val onClarify: (id: String, answers: Map<String, String?>) -> Unit = { _, _ -> },
@@ -120,6 +125,8 @@ fun ChatScreen(
             onAttach = { picker.launch(arrayOf("*/*")) },
             onRemoveAttachment = vm::removeAttachment,
             onRetryAttachment = vm::retryAttachment,
+            onOpenMedia = vm::openMedia,
+            previewMedia = vm::preview,
             onApprove = vm::approve,
             onDeny = vm::deny,
             onClarify = vm::answerClarify,
@@ -195,6 +202,7 @@ fun ChatContent(
 @Composable
 private fun Transcript(state: ChatUiState, actions: ChatActions, listState: LazyListState) {
     val items = state.chat.items
+    val media = remember(state.mediaState, actions) { MediaHost(state.mediaState, actions.onOpenMedia, actions.previewMedia) }
     // Follow the bottom while the user is there; a manual scroll up stops following until they come back.
     var follow by rememberSaveable { mutableStateOf(true) }
     LaunchedEffect(listState) {
@@ -213,7 +221,7 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
         items(items, key = { it.id }, contentType = { it::class }) { item ->
             when (item) {
                 is ChatItem.UserMessage -> UserBubble(item.text, attachments = item.attachments)
-                is ChatItem.AssistantMessage -> AssistantMessage(item.text, item.streaming, item.reasoning)
+                is ChatItem.AssistantMessage -> AssistantMessage(item.text, item.streaming, item.reasoning, media = media)
                 is ChatItem.ToolCall -> ToolRow(item)
                 is ChatItem.Approval -> ApprovalCard(
                     item = item,

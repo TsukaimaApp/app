@@ -15,8 +15,11 @@ class IconsTest {
         "receipt_long", "bar_chart", "open_in_new", "cloud_off", "send", "tag",
     )
 
-    /** Added after the handoff (v0.2.0: clarify card, attachment chips). */
-    private val additions = listOf("help", "attach_file", "image")
+    /** Added after the handoff (v0.2.0: clarify card, attachment chips; v0.3.0: `MEDIA:` file cards). */
+    private val additions = listOf(
+        "help", "attach_file", "image",
+        "download", "description", "video_file", "audio_file", "folder_zip", "insert_drive_file",
+    )
 
     @Test
     fun everyHandoffIconResolves() {

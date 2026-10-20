@@ -1,5 +1,6 @@
 package labs.suchattai.tsukaima.ui.chat
 
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -70,6 +72,8 @@ class ChatViewModel(
     private val attachments = ChatAttachments(
         session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), io, _state, ::liveSession,
     )
+
+    private val media = ChatMedia(backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), io, _state)
 
     private val chat get() = _state.value.chat
     private fun setChat(block: (ChatState) -> ChatState) = _state.update { it.copy(chat = block(it.chat)) }
@@ -202,6 +206,12 @@ class ChatViewModel(
     fun removeAttachment(localId: String) = attachments.remove(localId)
 
     fun retryAttachment(localId: String) = attachments.retry(localId)
+
+    /** A tap on a `MEDIA:` card: download into Downloads and open it; see [ChatMedia]. */
+    fun openMedia(path: String) = media.open(path)
+
+    /** The inline preview of image [path] (cached), or null. */
+    suspend fun preview(path: String): ImageBitmap? = withContext(dispatcher) { media.preview(path) }
 
     /** The live session id; opens (creates or resumes) the session first and waits for it when there is none. */
     private suspend fun liveSession(): String? {

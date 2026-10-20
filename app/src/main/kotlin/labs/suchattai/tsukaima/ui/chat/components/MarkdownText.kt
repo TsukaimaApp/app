@@ -64,15 +64,20 @@ private fun inline(spans: List<MdSpan>, colors: TsukaimaColors, caret: Boolean):
     }
 
 /**
- * Renders parsed markdown blocks. With [streaming], a blinking accent caret is appended inline
- * to the last text run (so it follows wrapping); after a trailing code block or when empty it
- * sits on its own line.
+ * Renders parsed markdown blocks; `MEDIA:` blocks become [MediaCard]s served by [media]. With [streaming], a
+ * blinking accent caret is appended inline to the last text run (so it follows wrapping); after a trailing
+ * code block or file card, or when empty, it sits on its own line.
  */
 @Composable
-fun MarkdownText(blocks: List<MdBlock>, streaming: Boolean = false, modifier: Modifier = Modifier) {
+fun MarkdownText(
+    blocks: List<MdBlock>,
+    streaming: Boolean = false,
+    modifier: Modifier = Modifier,
+    media: MediaHost = MediaHost(),
+) {
     val colors = MaterialTheme.tsukaima
-    val lastTextIndex = blocks.indexOfLast { it !is MdBlock.Code }
-    val caretInline = streaming && blocks.isNotEmpty() && lastTextIndex == blocks.lastIndex
+    val last = blocks.lastOrNull()
+    val caretInline = streaming && (last is MdBlock.Paragraph || last is MdBlock.Bullets)
     val caretContent = caretInlineContent()
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         blocks.forEachIndexed { index, block ->
@@ -85,6 +90,7 @@ fun MarkdownText(blocks: List<MdBlock>, streaming: Boolean = false, modifier: Mo
                     inlineContent = caretContent,
                 )
                 is MdBlock.Code -> CodeBlock(code = block.code, lang = block.lang)
+                is MdBlock.Media -> MediaCard(block.path, media)
                 is MdBlock.Bullets -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     block.items.forEachIndexed { i, item ->
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -158,6 +164,7 @@ private const val SampleMd = "The cron job was failing because of a **missing pa
 @Composable
 private fun MarkdownPreview(dark: Boolean) = PreviewPage(dark) {
     MarkdownText(Markdown.parse(SampleMd), modifier = Modifier.padding(16.dp))
+    MarkdownText(Markdown.parse("Here is the log:\nMEDIA:/home/hermes/workspace/output/agent.debug.txt"), modifier = Modifier.padding(16.dp))
     MarkdownText(Markdown.parse("Streaming reply that keeps going and going until it wraps onto a second line"), streaming = true, modifier = Modifier.padding(16.dp))
 }
 

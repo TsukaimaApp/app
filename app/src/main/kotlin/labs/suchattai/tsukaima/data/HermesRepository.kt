@@ -14,6 +14,7 @@ import labs.suchattai.tsukaima.data.api.AuthException
 import labs.suchattai.tsukaima.data.api.AuthMeDto
 import labs.suchattai.tsukaima.data.api.CronJobDto
 import labs.suchattai.tsukaima.data.api.DeliveryTargetDto
+import labs.suchattai.tsukaima.data.api.FileDownload
 import labs.suchattai.tsukaima.data.api.HealthDto
 import labs.suchattai.tsukaima.data.api.HermesApi
 import labs.suchattai.tsukaima.data.api.LogsDto
@@ -137,6 +138,9 @@ class HermesRepository(
     suspend fun gatewayStart(): Result<Unit> = call { api.gatewayStart() }
     suspend fun gatewayStop(): Result<Unit> = call { api.gatewayStop() }
     suspend fun gatewayRestart(): Result<Unit> = call { api.gatewayRestart() }
+
+    /** A file the agent delivered (`MEDIA:`), streaming; the caller closes it. */
+    suspend fun download(path: String): Result<FileDownload> = call { api.download(path) }
 
     // ---- plumbing ------------------------------------------------------------------------
 

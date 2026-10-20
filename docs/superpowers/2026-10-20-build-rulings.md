@@ -91,3 +91,22 @@ Every decision the build controller made on the user's behalf, in order, with wh
 - Ruling: an image removed while still uploading is detached as soon as its upload lands.
 - v0.2.0 review fixes: uploads run one at a time (`ChatAttachments.uploads` mutex) so two frames can never exceed OkHttp's 16 MiB send queue; a resume that yields a new live session id marks queued (Ready) image chips Failed, since the old session's image queue is gone — retry re-queues them. Deferred (low confidence): a retry after a lost `image.attach_bytes` response can leave two copies queued server-side.
 - HTTPS fronts: the dashboard names its cookies `__Host-hermes_session_at` behind TLS; `HermesApi.parseSessionCookie` accepts the `__Host-`/`__Secure-` prefixes (v0.1.x refused HTTPS logins).
+
+## v0.3.0 rulings (`MEDIA:` file cards)
+
+- Ruling: a `MEDIA:` line becomes a card only as a whole line outside code fences and bullets (TUI rule); the directive may be wrapped in a backtick/quote, the path may be backticked/quoted (spaces allowed), and an unquoted path may hold spaces only when it ends in a `MEDIA_DELIVERY_EXTS` extension (desktop's anchored branch). Only `/…` and `~/…` paths count: a relative or Windows path stays prose — the server answers 400 for relative paths anyway — cost if wrong: such a line shows as text.
+- Ruling: while a reply streams, its last line is never a directive (a half-streamed path would flash a card for a non-existent file); a line ended by `\n` converts at once.
+- Ruling: downloads use a client derived from the REST client with no call timeout (30 s read timeout between bytes) — the shared 20 s call timeout spans the body and would cut large files short. Same interceptors (bearer + re-login), same pool.
+- Ruling: 400 maps to "Not a file" only when the server's detail says so (or is absent); other 400s (`Path must be absolute`, `..`) and 409 (live SQLite file) show the server's detail. 404/403/413 use the brief's fixed messages.
+- Ruling: `FileSaver.save` returns the content uri as a `String` and `ChatBackend.openFile(uri: String, mime)` takes one — `android.net.Uri` cannot be built in JVM unit tests (stubbed android.jar), and the VM only passes it through.
+- Ruling: previews cache definitive outcomes (bitmap, or none: too big, undecodable, server refusal) in an 8-entry LRU; a dropped connection or auth failure is not cached, so the card's next composition retries. Concurrent callers share one fetch. A preview is a full extra `GET` of the file (≤ 10 MB) — there is no thumbnail endpoint.
+- Ruling: after "Saved to Downloads" the app always tries `ACTION_VIEW`; if no app handles the type, the toast is all the user gets (the file is in Downloads).
+
+### Deferred minors (v0.3.0)
+
+- MediaStore may append an extension when the name's suffix disagrees with the MIME type (e.g. a `.log` sent as `text/plain` could land as `x.log.txt`); not seen with the server's `mimetypes` guesses, unverified on device.
+- No on-device check of the card, the preview or the save/open flow (JVM tests + live server only); `ACTION_VIEW` from the application context relies on the app being in the foreground.
+- `application/octet-stream` downloads open nothing (no MIME guess from the extension before `ACTION_VIEW`).
+- If the coroutine is cancelled between the response arriving and `ChatMedia` taking it (VM cleared mid-request), the response body is not closed until GC.
+- The smoke's `file.attach` upload stays in the test instance's upload directory (one ~22 B file per run); the smoke only deletes its session.
+- A path delivered twice in one chat shares one card state (keyed by path) — both cards show the same progress.
