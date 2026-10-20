@@ -75,19 +75,11 @@ class ServerRequestRouterTest {
     }
 
     @Test
-    fun saveLoginDeclinedAsNotShownSoADesktopWindowCanStillAnswer() {
-        assertFalse(router.route(req("srq-l", "vault.save_login", buildJsonObject { put("origin", "https://x"); put("site", "x") })))
-        assertEquals(listOf(Triple("srq-l", 4404, ServerRequestRouter.VAULT_NOT_SHOWN_MESSAGE)), transport.errors)
+    fun vaultSaveLoginAndCodeForwardedToTheChat() {
+        // Answered from the masked card since 0.8 (0.5.1–0.7 declined save_login with 4404 and the code with "").
+        assertTrue(router.route(req("srq-l", "vault.save_login", buildJsonObject { put("origin", "https://x"); put("site", "x") })))
+        assertTrue(router.route(req("srq-c", "vault.code", buildJsonObject { put("site", "x") })))
         assertTrue(transport.results.isEmpty())
-    }
-
-    @Test
-    fun oneTimeCodeAnsweredAsNoCodeEntered() {
-        // Not 4404: as the only client, Hermes would pass its refusal JSON to the browser tool as the code.
-        assertFalse(router.route(req("srq-c", "vault.code", buildJsonObject { put("site", "x") })))
-        assertEquals(1, transport.results.size)
-        assertEquals("srq-c", transport.results.single().first)
-        assertEquals(buildJsonObject { put("value", "") }, transport.results.single().second)
         assertTrue(transport.errors.isEmpty())
     }
 

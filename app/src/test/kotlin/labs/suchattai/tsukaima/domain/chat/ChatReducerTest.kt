@@ -611,7 +611,7 @@ class ChatReducerTest {
         val card = sudo.items.single() as ChatItem.SecretPrompt
         assertEquals(SecretKind.Sudo, card.kind)
         assertEquals("sudo apt update", card.subject)
-        assertEquals(AgentStatus.Secret(password = true), sudo.status)
+        assertEquals(AgentStatus.Secret(SecretKind.Sudo), sudo.status)
         assertEquals("Waiting for a password", sudo.status.label)
         assertEquals(StatusTone.Amber, sudo.status.tone)
 
@@ -624,10 +624,52 @@ class ChatReducerTest {
 
         val vault = live.feed(prompt("srq-v", "vault.unlock_prompt", """"backend":"bw","display_name":"Bitwarden""""))
         assertEquals("Bitwarden", (vault.items.single() as ChatItem.SecretPrompt).subject)
-        assertEquals(AgentStatus.Secret(password = true), vault.status)
+        assertEquals(AgentStatus.Secret(SecretKind.VaultUnlock), vault.status)
+        assertEquals("Waiting for a password", vault.status.label)
         // Other sessions' prompts and duplicates are ignored.
         assertEquals(live, live.feed(Frame.ServerRequest("srq-x", "sudo", obj("""{"session_id":"other"}"""))))
         assertEquals(sudo, sudo.feed(prompt("srq-u", "sudo", """"command":"sudo apt update"""")))
+    }
+
+    @Test
+    fun vaultCodeAndSaveLoginBecomeCards() {
+        val code = live.feed(prompt("srq-c", "vault.code", """"site":"github.com","hint":"6-digit code from your authenticator""""))
+        val c = code.items.single() as ChatItem.SecretPrompt
+        assertEquals(SecretKind.VaultCode, c.kind)
+        assertEquals("github.com", c.subject)
+        assertEquals("6-digit code from your authenticator", c.prompt)
+        assertEquals(AgentStatus.Secret(SecretKind.VaultCode), code.status)
+        assertEquals("Waiting for a code", code.status.label)
+        assertEquals(StatusTone.Amber, code.status.tone)
+        // Both params are optional for a code.
+        val bare = live.feed(prompt("srq-c2", "vault.code", """"site":null"""))
+        assertEquals("", (bare.items.single() as ChatItem.SecretPrompt).subject)
+        assertEquals(null, (bare.items.single() as ChatItem.SecretPrompt).prompt)
+
+        val login = live.feed(prompt("srq-l", "vault.save_login", """"origin":"https://github.com","site":"github.com""""))
+        val l = login.items.single() as ChatItem.SecretPrompt
+        assertEquals(SecretKind.VaultSaveLogin, l.kind)
+        assertEquals("github.com", l.subject)
+        assertEquals(null, l.prompt)
+        assertEquals("Waiting for a login", login.status.label)
+        // No site: the origin names it.
+        val originOnly = live.feed(prompt("srq-l2", "vault.save_login", """"origin":"https://x.test","site":"""""))
+        assertEquals("https://x.test", (originOnly.items.single() as ChatItem.SecretPrompt).subject)
+    }
+
+    @Test
+    fun vaultPromptsAnsweredResumeThinking() {
+        val waiting = live.copy(status = AgentStatus.Thinking("x"))
+            .feed(prompt("srq-c", "vault.code", """"site":"x""""), prompt("srq-l", "vault.save_login", """"origin":"https://x","site":"x""""))
+        // The latest open masked prompt names the status.
+        assertEquals(AgentStatus.Secret(SecretKind.VaultSaveLogin), waiting.status)
+        val loginSaved = ChatReducer.onSecretAnswered(waiting, "srq-l", declined = false, flair)
+        assertEquals(AgentStatus.Secret(SecretKind.VaultCode), loginSaved.status)
+        val codeDeclined = ChatReducer.onSecretAnswered(loginSaved, "srq-c", declined = true, flair)
+        assertTrue(codeDeclined.status is AgentStatus.Thinking)
+        val cards = codeDeclined.items.filterIsInstance<ChatItem.SecretPrompt>()
+        assertTrue(cards.all { it.answered })
+        assertEquals(listOf(true, false), cards.map { it.declined }) // code declined, login saved
     }
 
     @Test
@@ -658,7 +700,7 @@ class ChatReducerTest {
         val both = live.feed(approvalRequest, prompt("srq-u", "sudo", """"command":"sudo -v""""))
         assertEquals(AgentStatus.Approval, both.status)
         val afterApproval = ChatReducer.onApprovalAnswered(both, "srq-1", flair)
-        assertEquals(AgentStatus.Secret(password = true), afterApproval.status)
+        assertEquals(AgentStatus.Secret(SecretKind.Sudo), afterApproval.status)
     }
 
     @Test

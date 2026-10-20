@@ -45,6 +45,7 @@ import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.ChatState
 import labs.suchattai.tsukaima.domain.chat.SecretKind
+import labs.suchattai.tsukaima.domain.chat.VaultAnswers
 import labs.suchattai.tsukaima.domain.chat.SideKind
 import labs.suchattai.tsukaima.domain.chat.StatusTone
 import labs.suchattai.tsukaima.domain.chat.running
@@ -1798,7 +1799,7 @@ class ChatViewModelTest {
         advanceUntilIdle()
         b.serverRequests.emit(masked("srq-u", "sudo", """"command":"sudo -v""""))
         advanceUntilIdle()
-        assertEquals(AgentStatus.Secret(password = true), vm.state.value.status)
+        assertEquals(AgentStatus.Secret(SecretKind.Sudo), vm.state.value.status)
 
         vm.answerSecret("srq-u", "hunter2")
         vm.answerSecret("srq-u", "hunter2") // double tap
@@ -1832,6 +1833,31 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun vaultSaveLoginAndCodeAnsweredFromTheChat() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.serverRequests.emit(masked("srq-l", "vault.save_login", """"origin":"https://x.test","site":"x.test""""))
+        advanceUntilIdle()
+        assertEquals("Waiting for a login", vm.state.value.status.label)
+        vm.answerSecret("srq-l", VaultAnswers.saveLogin("me@x.test", "p\"w"))
+        advanceUntilIdle()
+        val (id, result) = b.transport.responses.single()
+        assertEquals("srq-l", id)
+        // The value is a JSON string that itself holds the JSON object.
+        assertEquals("""{"identifier":"me@x.test","password":"p\"w"}""", result["value"]!!.jsonPrimitive.content)
+        assertFalse(vm.state.value.toString().contains("me@x.test"))
+
+        b.serverRequests.emit(masked("srq-c", "vault.code", """"site":"x.test","hint":"6 digits""""))
+        advanceUntilIdle()
+        assertEquals("Waiting for a code", vm.state.value.status.label)
+        vm.declineSecret("srq-c")
+        advanceUntilIdle()
+        assertEquals("srq-c" to obj("""{"value":""}"""), b.transport.responses.last())
+        assertTrue((vm.state.value.chat.items.last() as ChatItem.SecretPrompt).declined)
+    }
+
+    @Test
     fun maskedPromptNotSentReopensTheCard() = runTest(dispatcher) {
         val b = backend()
         val vm = vm(b)
@@ -1844,7 +1870,7 @@ class ChatViewModelTest {
         val card = vm.state.value.chat.items.single() as ChatItem.SecretPrompt
         assertFalse(card.answered)
         assertFalse("srq-v" in b.answeredRequestIds)
-        assertEquals(AgentStatus.Secret(password = true), vm.state.value.status)
+        assertEquals(AgentStatus.Secret(SecretKind.VaultUnlock), vm.state.value.status)
         assertEquals(listOf("Couldn’t send the answer: not connected to Hermes"), b.toasts)
         assertFalse(vm.state.value.toString().contains("s3cret"))
     }
@@ -1884,7 +1910,7 @@ class ChatViewModelTest {
         val card = vm.state.value.chat.items.single() as ChatItem.SecretPrompt
         assertEquals("srq-u", card.id)
         assertEquals("sudo -v", card.subject)
-        assertEquals(AgentStatus.Secret(password = true), vm.state.value.status)
+        assertEquals(AgentStatus.Secret(SecretKind.Sudo), vm.state.value.status)
     }
 
     @Test

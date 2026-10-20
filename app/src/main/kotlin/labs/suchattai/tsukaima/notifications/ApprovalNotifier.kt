@@ -88,13 +88,14 @@ object ApprovalNotifier {
 
     fun isClarify(req: Frame.ServerRequest): Boolean = req.method == CLARIFY_METHOD
 
-    /** A masked one-string prompt (`sudo`, `secret`, `vault.unlock_prompt`). */
+    /** A masked one-string prompt (`sudo`, `secret`, `vault.unlock_prompt`, `vault.code`, `vault.save_login`). */
     fun isSecret(req: Frame.ServerRequest): Boolean = SecretKind.of(req.method) != null
 
     /**
-     * "Hermes needs a password" (`sudo`, `vault.unlock_prompt`) or "Hermes needs a secret" (`secret`), with what it is
-     * for (command, env var or password manager; agent-controlled, revealed and capped). No inline text entry: tapping
-     * opens the chat that asked, where the masked card answers it.
+     * "Hermes needs a password" (`sudo`, `vault.unlock_prompt`), "Hermes needs a secret" (`secret`) or "Hermes needs
+     * your attention" (`vault.code`, `vault.save_login`), with what it is for (command, env var, password manager or
+     * site; agent-controlled, revealed and capped). No inline text entry: tapping opens the chat that asked, where the
+     * masked card answers it.
      */
     fun forSecret(req: Frame.ServerRequest, storedSessionId: String? = null): NotificationSpec {
         val kind = SecretKind.of(req.method) ?: SecretKind.Secret
@@ -102,10 +103,16 @@ object ApprovalNotifier {
             SecretKind.Sudo -> req.params.str("command")
             SecretKind.Secret -> req.params.str("env_var")
             SecretKind.VaultUnlock -> req.params.str("display_name") ?: req.params.str("backend")
+            SecretKind.VaultCode, SecretKind.VaultSaveLogin -> req.params.str("site") ?: req.params.str("origin")
         }.orEmpty()
+        val title = when (kind) {
+            SecretKind.Sudo, SecretKind.VaultUnlock -> "Hermes needs a password"
+            SecretKind.Secret -> "Hermes needs a secret"
+            SecretKind.VaultCode, SecretKind.VaultSaveLogin -> PUBLIC_TITLE
+        }
         return NotificationSpec(
             Channels.APPROVALS, approvalId(req.id),
-            if (kind == SecretKind.Secret) "Hermes needs a secret" else "Hermes needs a password",
+            title,
             cap(CommandText.reveal(subject).text, MAX_QUESTION),
             openScreen = SCREEN_CHAT, sessionId = storedSessionId,
         )

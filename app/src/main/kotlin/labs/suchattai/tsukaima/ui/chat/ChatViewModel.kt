@@ -32,7 +32,6 @@ import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.ChatReducer
 import labs.suchattai.tsukaima.domain.chat.ChatState
-import labs.suchattai.tsukaima.domain.chat.SecretKind
 import labs.suchattai.tsukaima.domain.chat.SideKind
 import labs.suchattai.tsukaima.domain.chat.ThinkingFlair
 import labs.suchattai.tsukaima.domain.voice.VoiceLanguages
@@ -455,7 +454,8 @@ class ChatViewModel(
     }
 
     /**
-     * Sends [value] for masked prompt [id] (`sudo`, `secret`, `vault.unlock_prompt`); `""` declines. The value
+     * Sends [value] for masked prompt [id] (`sudo`, `secret`, `vault.*`; a save-login's value is
+     * [labs.suchattai.tsukaima.domain.chat.VaultAnswers.saveLogin]); `""` declines. The value
      * goes to the socket only: the card records just whether it was declined, and nothing logs or toasts it.
      */
     fun answerSecret(id: String, value: String) {
@@ -486,7 +486,7 @@ class ChatViewModel(
                     it is ChatItem.Approval -> it.copy(answered = false)
                     it is ChatItem.Clarify -> it.copy(answered = false, answers = emptyMap()).also { waiting = AgentStatus.Question }
                     it is ChatItem.SecretPrompt -> it.copy(answered = false, declined = false)
-                        .also { waiting = AgentStatus.Secret(password = it.kind != SecretKind.Secret) }
+                        .also { waiting = AgentStatus.Secret(it.kind) }
                     else -> it
                 }
             }

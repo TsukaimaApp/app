@@ -24,6 +24,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.SecretKind
+import labs.suchattai.tsukaima.domain.chat.VaultAnswers
 import labs.suchattai.tsukaima.ui.components.GhostButton
 import labs.suchattai.tsukaima.ui.components.IconButton44
 import labs.suchattai.tsukaima.ui.components.IconName
@@ -38,16 +39,24 @@ internal fun SecretKind.title(): String = when (this) {
     SecretKind.Sudo -> "Hermes needs your sudo password"
     SecretKind.Secret -> "Hermes needs a secret"
     SecretKind.VaultUnlock -> "Unlock your password manager"
+    SecretKind.VaultCode -> "Hermes needs a code"
+    SecretKind.VaultSaveLogin -> "Save this login?"
 }
 
 /**
- * Inline masked-value request (`sudo`, `secret`, `vault.unlock_prompt`; same tier as [ApprovalCard]). Shows what the
- * value is for (the sudo command or env var in a code well, the password manager's name as text; all
- * agent-controlled, so revealed through [CommandText.reveal]) and a masked field with a show/hide toggle. Send
- * hands the value to [onSend] and clears the field; Cancel declines ([onCancel], answered with `""`).
+ * Inline masked-value request (`sudo`, `secret`, `vault.*`; same tier as [ApprovalCard]). Shows what the value is
+ * for (the sudo command or env var in a code well, the password manager's name or the site as text; all
+ * agent-controlled, so revealed through [CommandText.reveal]) and the field(s) for it:
  *
- * The value lives only in this composition (`remember`, not saveable: it never reaches the saved-state bundle) and
- * is gone once sent. An answered card shows only "Sent" or "Declined".
+ * - `sudo` / `secret` / `vault.unlock_prompt`: a masked field with a show/hide toggle; Send / Cancel.
+ * - `vault.code`: a plain "Enter the code" field (number keyboard when the hint asks for digits) with the hint as
+ *   helper text; Send / Decline.
+ * - `vault.save_login`: "Username or email" and a masked "Password"; "Save login" (both filled) sends
+ *   [VaultAnswers.saveLogin], "Don’t save" declines.
+ *
+ * Send hands the value to [onSend] and clears the fields; the secondary button declines ([onCancel], answered with
+ * `""`). The values live only in this composition (`remember`, not saveable: they never reach the saved-state
+ * bundle) and are gone once sent. An answered card shows only "Sent" or "Declined".
  */
 @Composable
 fun SecretCard(
@@ -61,13 +70,14 @@ fun SecretCard(
         CardHeader(IconName.Key, item.kind.title())
         val subject = remember(item.subject) { CommandText.reveal(item.subject) }
         val prompt = remember(item.prompt) { item.prompt?.let { CommandText.reveal(it).text } }
-        if (prompt != null) {
+        if (prompt != null && item.kind != SecretKind.VaultCode) {
             Text(prompt, style = TsukaimaType.ui, color = colors.ink1, modifier = Modifier.padding(bottom = 8.dp))
         }
         if (item.subject.isNotEmpty()) {
             when (item.kind) {
-                SecretKind.VaultUnlock -> Text(subject.text, style = TsukaimaType.ui, color = colors.ink2)
-                else -> {
+                SecretKind.VaultUnlock, SecretKind.VaultCode, SecretKind.VaultSaveLogin ->
+                    Text(subject.text, style = TsukaimaType.ui, color = colors.ink2)
+                SecretKind.Sudo, SecretKind.Secret -> {
                     Text(
                         text = if (item.kind == SecretKind.Sudo) "COMMAND" else "ENVIRONMENT VARIABLE",
                         style = TsukaimaType.label,
@@ -96,41 +106,79 @@ fun SecretCard(
             }
         }
         var value by remember(item.id) { mutableStateOf("") }
+        var identifier by remember(item.id) { mutableStateOf("") }
         var visible by remember(item.id) { mutableStateOf(false) }
-        val send = {
-            val v = value
+        val clear = {
             value = ""
+            identifier = ""
             visible = false
+        }
+        val ready = when (item.kind) {
+            SecretKind.VaultSaveLogin -> identifier.isNotEmpty() && value.isNotEmpty()
+            else -> value.isNotEmpty()
+        }
+        val send = {
+            val v = if (item.kind == SecretKind.VaultSaveLogin) VaultAnswers.saveLogin(identifier, value) else value
+            clear()
             onSend(v)
         }
         if (!item.answered) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                TsukaimaTextField(
+            when (item.kind) {
+                SecretKind.VaultCode -> TsukaimaTextField(
                     value = value,
                     onValueChange = { value = it },
-                    placeholder = if (item.kind == SecretKind.Secret) "Value" else "Password",
+                    label = "Enter the code",
+                    helper = prompt,
                     mono = true,
                     keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Password,
+                        keyboardType = if (VaultAnswers.numericCode(item.prompt)) KeyboardType.Number else KeyboardType.Text,
                         autoCorrectEnabled = false,
                         imeAction = ImeAction.Send,
                     ),
-                    keyboardActions = KeyboardActions(onSend = { if (value.isNotEmpty()) send() }),
-                    visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
-                    modifier = Modifier.weight(1f),
+                    keyboardActions = KeyboardActions(onSend = { if (ready) send() }),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
                 )
-                IconButton44(
-                    if (visible) IconName.VisibilityOff else IconName.Visibility,
-                    if (visible) "Hide" else "Show",
-                    onClick = { visible = !visible },
+                SecretKind.VaultSaveLogin -> {
+                    TsukaimaTextField(
+                        value = identifier,
+                        onValueChange = { identifier = it },
+                        label = "Username or email",
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Email,
+                            autoCorrectEnabled = false,
+                            imeAction = ImeAction.Next,
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                    )
+                    MaskedField(
+                        value = value,
+                        onValueChange = { value = it },
+                        visible = visible,
+                        onToggle = { visible = !visible },
+                        label = "Password",
+                        placeholder = null,
+                        onSend = { if (ready) send() },
+                    )
+                }
+                SecretKind.Sudo, SecretKind.Secret, SecretKind.VaultUnlock -> MaskedField(
+                    value = value,
+                    onValueChange = { value = it },
+                    visible = visible,
+                    onToggle = { visible = !visible },
+                    label = null,
+                    placeholder = if (item.kind == SecretKind.Secret) "Value" else "Password",
+                    onSend = { if (ready) send() },
                 )
             }
+        }
+        val (declineLabel, sendLabel) = when (item.kind) {
+            SecretKind.VaultCode -> "Decline" to "Send"
+            SecretKind.VaultSaveLogin -> "Don’t save" to "Save login"
+            SecretKind.Sudo, SecretKind.Secret, SecretKind.VaultUnlock -> "Cancel" to "Send"
         }
         Row(
             modifier = Modifier
@@ -147,9 +195,50 @@ fun SecretCard(
                     modifier = Modifier.weight(1f),
                 )
             }
-            GhostButton("Cancel", { value = ""; visible = false; onCancel() }, enabled = !item.answered)
-            PrimaryButton("Send", send, icon = IconName.Check, enabled = !item.answered && value.isNotEmpty())
+            GhostButton(declineLabel, { clear(); onCancel() }, enabled = !item.answered)
+            PrimaryButton(sendLabel, send, icon = IconName.Check, enabled = !item.answered && ready)
         }
+    }
+}
+
+/** A masked mono field with a show/hide toggle (44dp); IME Send calls [onSend]. */
+@Composable
+private fun MaskedField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    visible: Boolean,
+    onToggle: () -> Unit,
+    label: String?,
+    placeholder: String?,
+    onSend: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp),
+        verticalAlignment = if (label != null) Alignment.Bottom else Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        TsukaimaTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = label,
+            placeholder = placeholder,
+            mono = true,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Password,
+                autoCorrectEnabled = false,
+                imeAction = ImeAction.Send,
+            ),
+            keyboardActions = KeyboardActions(onSend = { onSend() }),
+            visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+            modifier = Modifier.weight(1f),
+        )
+        IconButton44(
+            if (visible) IconName.VisibilityOff else IconName.Visibility,
+            if (visible) "Hide" else "Show",
+            onClick = onToggle,
+        )
     }
 }
 
@@ -162,12 +251,17 @@ private fun SecretPreview(dark: Boolean) = PreviewPage(dark) {
     )
     SecretCard(ChatItem.SecretPrompt("srq-3", SecretKind.VaultUnlock, "1Password", null, answered = true), {}, {})
     SecretCard(ChatItem.SecretPrompt("srq-4", SecretKind.Sudo, "sudo -v", null, answered = true, declined = true), {}, {})
+    SecretCard(
+        ChatItem.SecretPrompt("srq-5", SecretKind.VaultCode, "github.com", "6-digit code from your authenticator app", answered = false),
+        {}, {},
+    )
+    SecretCard(ChatItem.SecretPrompt("srq-6", SecretKind.VaultSaveLogin, "github.com", null, answered = false), {}, {})
 }
 
-@Preview(name = "SecretCard light", heightDp = 1100)
+@Preview(name = "SecretCard light", heightDp = 1700)
 @Composable
 private fun SecretLightPreview() = SecretPreview(dark = false)
 
-@Preview(name = "SecretCard dark", heightDp = 1100)
+@Preview(name = "SecretCard dark", heightDp = 1700)
 @Composable
 private fun SecretDarkPreview() = SecretPreview(dark = true)

@@ -15,6 +15,7 @@ import kotlinx.coroutines.test.runTest
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.ChatState
+import labs.suchattai.tsukaima.domain.chat.SecretKind
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -508,8 +509,8 @@ class VoiceControllerTest {
     @Test fun voicePhaseForRequestsAndCompaction() {
         for (mode in VoiceMode.entries) for (listening in listOf(true, false)) for (speaking in listOf(true, false)) {
             assertEquals(VoicePhase.Approval, voicePhase(mode, false, listening, speaking, AgentStatus.Question))
-            assertEquals(VoicePhase.Approval, voicePhase(mode, false, listening, speaking, AgentStatus.Secret(password = true)))
-            assertEquals(VoicePhase.Approval, voicePhase(mode, true, listening, speaking, AgentStatus.Secret(password = false)))
+            assertEquals(VoicePhase.Approval, voicePhase(mode, false, listening, speaking, AgentStatus.Secret(SecretKind.Sudo)))
+            assertEquals(VoicePhase.Approval, voicePhase(mode, true, listening, speaking, AgentStatus.Secret(SecretKind.VaultCode)))
             assertEquals(
                 if (speaking) VoicePhase.Speaking else VoicePhase.Thinking,
                 voicePhase(mode, false, listening, speaking, AgentStatus.Compacting),

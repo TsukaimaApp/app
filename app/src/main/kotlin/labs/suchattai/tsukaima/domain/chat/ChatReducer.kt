@@ -472,15 +472,22 @@ object ChatReducer {
                 SecretKind.Sudo -> req.params.string("command")
                 SecretKind.Secret -> req.params.string("env_var")
                 SecretKind.VaultUnlock -> req.params.string("display_name") ?: req.params.string("backend")
+                SecretKind.VaultCode -> req.params.string("site")
+                SecretKind.VaultSaveLogin -> req.params.string("site")?.takeIf { it.isNotBlank() } ?: req.params.string("origin")
+            }
+            val prompt = when (secret) {
+                SecretKind.VaultCode -> req.params.string("hint")
+                SecretKind.VaultSaveLogin -> null
+                else -> req.params.string("prompt")
             }
             val card = ChatItem.SecretPrompt(
                 id = req.id,
                 kind = secret,
                 subject = subject.orEmpty(),
-                prompt = req.params.string("prompt")?.takeIf { it.isNotBlank() },
+                prompt = prompt?.takeIf { it.isNotBlank() },
                 answered = false,
             )
-            return state.copy(items = state.items + card, status = statusFor(state.items + card) ?: AgentStatus.Secret(secret != SecretKind.Secret))
+            return state.copy(items = state.items + card, status = statusFor(state.items + card) ?: AgentStatus.Secret(secret))
         }
         if (req.method == CLARIFY) {
             val questions = ClarifyAnswers.questions(req.params).takeIf { it.isNotEmpty() } ?: return state
@@ -514,7 +521,7 @@ object ChatReducer {
     private fun statusFor(items: List<ChatItem>): AgentStatus? {
         if (items.any { it is ChatItem.Approval && !it.answered }) return AgentStatus.Approval
         items.lastOrNull { it is ChatItem.SecretPrompt && !it.answered }?.let {
-            return AgentStatus.Secret(password = (it as ChatItem.SecretPrompt).kind != SecretKind.Secret)
+            return AgentStatus.Secret((it as ChatItem.SecretPrompt).kind)
         }
         if (items.any { it is ChatItem.Clarify && !it.answered }) return AgentStatus.Question
         return null

@@ -229,5 +229,13 @@ class ApprovalNotifierTest {
         val vault = ApprovalNotifier.forSecret(req("srq-v", "vault.unlock_prompt", "backend" to "bw", "display_name" to "Bitwarden"))
         assertEquals("Hermes needs a password", vault.title)
         assertEquals("Bitwarden", vault.text)
+
+        val code = ApprovalNotifier.forSecret(req("srq-c", "vault.code", "site" to "github.com", "hint" to "6 digits"))
+        assertEquals("Hermes needs your attention", code.title)
+        assertEquals("github.com", code.text)
+        assertTrue(code.actions.isEmpty())
+        val login = ApprovalNotifier.forSecret(req("srq-l", "vault.save_login", "origin" to "https://x.test", "site" to ""))
+        assertEquals("Hermes needs your attention", login.title)
+        assertEquals("https://x.test", login.text)
     }
 }

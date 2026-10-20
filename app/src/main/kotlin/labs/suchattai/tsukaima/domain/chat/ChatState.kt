@@ -91,10 +91,11 @@ sealed interface ChatItem {
     ) : ChatItem
 
     /**
-     * A `sudo`, `secret` or `vault.unlock_prompt` server request: the agent wants a masked value. [id] is the
-     * server-request id (`srq-…`) to answer; [subject] is what the value is for (the command, the env var or the
-     * password manager's name; agent-controlled), [prompt] the `secret` request's own wording. The value itself is
-     * never stored here: once [answered], [declined] says whether an empty value (skip) was sent.
+     * A `sudo`, `secret`, `vault.unlock_prompt`, `vault.code` or `vault.save_login` server request: the agent wants
+     * a value typed by the user. [id] is the server-request id (`srq-…`) to answer; [subject] is what the value is
+     * for (the command, the env var, the password manager's name, or the site; agent-controlled), [prompt] the
+     * `secret` request's own wording or the `vault.code` hint. The value itself is never stored here: once
+     * [answered], [declined] says whether an empty value (skip) was sent.
      */
     data class SecretPrompt(
         override val id: String,
@@ -176,6 +177,12 @@ enum class SecretKind(val method: String) {
     Sudo("sudo"),
     Secret("secret"),
     VaultUnlock("vault.unlock_prompt"),
+
+    /** A one-time / 2FA code for a site (`{site?, hint?}`); answered in clear text. */
+    VaultCode("vault.code"),
+
+    /** A login to save for a site (`{origin, site}`); answered with [VaultAnswers.saveLogin]. */
+    VaultSaveLogin("vault.save_login"),
     ;
 
     companion object {

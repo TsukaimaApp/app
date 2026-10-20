@@ -43,9 +43,14 @@ sealed interface AgentStatus {
         override val tone = StatusTone.Amber
     }
 
-    /** A `sudo` / `vault.unlock_prompt` (password) or `secret` request waits for the user. */
-    data class Secret(val password: Boolean) : AgentStatus {
-        override val label get() = if (password) "Waiting for a password" else "Waiting for a secret"
+    /** A masked prompt of [kind] (`sudo`, `secret`, `vault.*`) waits for the user. */
+    data class Secret(val kind: SecretKind) : AgentStatus {
+        override val label get() = when (kind) {
+            SecretKind.Sudo, SecretKind.VaultUnlock -> "Waiting for a password"
+            SecretKind.Secret -> "Waiting for a secret"
+            SecretKind.VaultCode -> "Waiting for a code"
+            SecretKind.VaultSaveLogin -> "Waiting for a login"
+        }
         override val tone get() = StatusTone.Amber
     }
 

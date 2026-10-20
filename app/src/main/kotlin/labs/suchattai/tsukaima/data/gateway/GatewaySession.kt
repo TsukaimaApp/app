@@ -237,7 +237,7 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
         )
 
     /**
-     * Answers a masked one-string prompt (`sudo`, `secret`, `vault.unlock_prompt`) by its server-request id:
+     * Answers a masked one-string prompt (`sudo`, `secret`, `vault.*`) by its server-request id:
      * `{"value": value}`, where `""` means skipped / declined (gateway-contract `ValueResult`). Returns whether the
      * answer was enqueued on a live connection.
      */

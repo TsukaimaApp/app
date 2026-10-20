@@ -311,13 +311,13 @@ class ConnectionManagerTest {
         creds.save("pw", "tok", serverUrl())
         val cm = manager()
         cm.start()
-        await { while (answers.size < 2 || cm.serverRequests.replayCache.size < 3) delay(10) }
+        await { while (answers.isEmpty() || cm.serverRequests.replayCache.size < 4) delay(10) }
 
-        assertEquals(listOf("srq-c", "srq-s", "srq-a"), cm.serverRequests.replayCache.map { it.id })
+        assertEquals(listOf("srq-c", "srq-s", "srq-v", "srq-a"), cm.serverRequests.replayCache.map { it.id })
         assertNull("clarify waits for the user", answers["srq-c"])
         assertNull("a secret waits for the masked card", answers["srq-s"])
         assertEquals("4404", answers["srq-p"]!!["error"]!!.jsonObject["code"]!!.jsonPrimitive.content)
-        assertEquals("", answers["srq-v"]!!["result"]!!.jsonObject["value"]!!.jsonPrimitive.content) // no code entered
+        assertNull("a vault code waits for the card", answers["srq-v"])
         assertNull("approvals wait for the user", answers["srq-a"])
     }
 

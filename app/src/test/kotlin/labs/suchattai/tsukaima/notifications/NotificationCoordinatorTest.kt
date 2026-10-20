@@ -53,7 +53,9 @@ class NotificationCoordinatorTest {
         assertNotNull(c.onServerRequest(approval("srq-2"), foreground = false))
         assertNull(c.onServerRequest(approval("srq-2"), foreground = false))
         // Other server requests are never notified.
-        assertNull(c.onServerRequest(Frame.ServerRequest("srq-3", "vault.code", JsonObject(emptyMap())), foreground = false))
+        assertNull(c.onServerRequest(Frame.ServerRequest("srq-3", "preview.read", JsonObject(emptyMap())), foreground = false))
+        // Vault code / save-login prompts are notified like the other masked prompts.
+        assertNotNull(c.onServerRequest(Frame.ServerRequest("srq-4", "vault.code", JsonObject(emptyMap())), foreground = false))
     }
 
     @Test

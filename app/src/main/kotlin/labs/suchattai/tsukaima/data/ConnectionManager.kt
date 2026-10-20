@@ -121,8 +121,8 @@ class ConnectionManager(
     private val _serverRequests = MutableSharedFlow<Frame.ServerRequest>(replay = 16, extraBufferCapacity = 64)
 
     /**
-     * Server→client approval, clarify and masked-prompt (sudo, secret, vault unlock) requests (the rest are
-     * answered by [router]), hot and multicast. The last 16 are replayed so a screen or notification that
+     * Server→client approval, clarify and masked-prompt (sudo, secret, vault unlock, code and save-login) requests
+     * (the rest are answered by [router]), hot and multicast. The last 16 are replayed so a screen or notification that
      * subscribes late still sees them; subscribers must ignore
      * requests already answered ([labs.suchattai.tsukaima.di.AppContainer.answeredRequestIds]) or withdrawn
      * ([closedRequestIds]).
