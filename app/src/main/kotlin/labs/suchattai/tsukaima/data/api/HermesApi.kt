@@ -341,7 +341,7 @@ class HermesApi(
      * `POST /api/audio/transcribe`: one recorded utterance, sent as a base64 `data:` URL; Hermes relays it to its
      * configured STT provider (the request carries no language: the server's setting or auto-detection applies).
      * 400 (bad payload, provider error, STT not configured) and 413 (over 25 MB) keep the server's `detail` on the
-     * [ApiException]. Uses [transcribeClient]: a long utterance on a slow uplink outlasts the shared call timeout.
+     * [ApiException]. Uses [transcribeClient]: a long utterance on a slow uplink outlasts the shared timeouts.
      */
     suspend fun transcribe(wav: ByteArray, mime: String = "audio/wav"): TranscriptionDto {
         val body = buildJsonObject {
@@ -349,14 +349,22 @@ class HermesApi(
             put("mime_type", mime)
         }
         val request = newRequest("POST", "api/audio/transcribe", body, true, false, emptyArray())
-        return call(request, transcribeClient) { HermesJson.decodeFromString(TranscriptionDto.serializer(), it) }
+        // Cancellable (await): closing the mic or leaving voice mode aborts the upload.
+        val response = transcribeClient.newCall(request).await()
+        return withContext(Dispatchers.IO) {
+            response.use { decode(request, it) { text -> HermesJson.decodeFromString(TranscriptionDto.serializer(), text) } }
+        }
     }
 
     /** `GET /api/audio/voice-config`, the speech-to-text part only (see [SttConfigDto]). */
     suspend fun voiceConfig(): VoiceConfigDto = get("api/audio/voice-config", VoiceConfigDto.serializer(), managed = false)
 
     private val transcribeClient: OkHttpClient by lazy {
-        client.newBuilder().callTimeout(TRANSCRIBE_TIMEOUT_S, TimeUnit.SECONDS).build()
+        client.newBuilder()
+            .callTimeout(TRANSCRIBE_TIMEOUT_S, TimeUnit.SECONDS)
+            .readTimeout(TRANSCRIBE_TIMEOUT_S, TimeUnit.SECONDS)
+            .writeTimeout(TRANSCRIBE_TIMEOUT_S, TimeUnit.SECONDS)
+            .build()
     }
 
     // ---- plumbing ------------------------------------------------------------------------
@@ -394,19 +402,20 @@ class HermesApi(
         call(newRequest(method, path, effectiveBody, true, true, emptyArray(), segments)) { }
     }
 
-    private suspend fun <T> call(request: Request, via: OkHttpClient = client, decode: (String) -> T): T =
-        withContext(Dispatchers.IO) {
-            via.newCall(request).execute().use { response ->
-                val text = response.body.string()
-                if (response.code == 401) throw AuthException()
-                if (!response.isSuccessful) throw ApiException.fromResponse(response.code, text)
-                try {
-                    decode(text)
-                } catch (e: SerializationException) {
-                    throw ApiException(response.code, "Unexpected response from ${request.url.encodedPath}: ${e.message}")
-                }
-            }
+    private suspend fun <T> call(request: Request, decode: (String) -> T): T =
+        withContext(Dispatchers.IO) { client.newCall(request).execute().use { decode(request, it, decode) } }
+
+    /** [response]'s body decoded with [decode]: 401 → [AuthException], other non-2xx → [ApiException]. */
+    private fun <T> decode(request: Request, response: Response, decode: (String) -> T): T {
+        val text = response.body.string()
+        if (response.code == 401) throw AuthException()
+        if (!response.isSuccessful) throw ApiException.fromResponse(response.code, text)
+        return try {
+            decode(text)
+        } catch (e: SerializationException) {
+            throw ApiException(response.code, "Unexpected response from ${request.url.encodedPath}: ${e.message}")
         }
+    }
 
     private fun newRequest(
         method: String,

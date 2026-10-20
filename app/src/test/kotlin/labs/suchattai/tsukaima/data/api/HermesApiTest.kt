@@ -520,6 +520,18 @@ class HermesApiTest {
     }
 
     @Test
+    fun transcribeIsCancellable() = runBlocking {
+        server.enqueue(MockResponse.Builder().code(200).body("""{"ok":true,"transcript":"x"}""").headersDelay(5, TimeUnit.SECONDS).build())
+        val started = System.nanoTime()
+        val job = launch { api().transcribe(ByteArray(4)) }
+        kotlinx.coroutines.delay(100)
+        job.cancel()
+        job.join()
+        assertTrue(job.isCancelled)
+        assertTrue("cancel took too long", System.nanoTime() - started < 3_000_000_000L)
+    }
+
+    @Test
     fun transcribePassesAnEmptyTranscriptThrough() = runBlocking {
         json("""{"ok":true,"transcript":"","provider":"openai"}""")
         val result = api().transcribe(ByteArray(4))

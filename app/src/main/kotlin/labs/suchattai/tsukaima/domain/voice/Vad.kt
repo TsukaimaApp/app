@@ -1,12 +1,14 @@
 package labs.suchattai.tsukaima.domain.voice
 
 import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Tuning of [UtteranceDetector]; all times in milliseconds, levels in 16-bit PCM RMS. A frame is speech when its RMS
- * exceeds `max(speechFactor × noise floor, minSpeechRms)`; the floor is the mean of the first [noiseFloorFrames]
- * frames. [minSpeechMs] of speech frames (pauses under [minSpeechMs] allowed) start an utterance; [endSilenceMs] of
- * silence after it, or [maxUtteranceMs] from its first speech frame, end it. [noSpeechTimeoutMs] without an
+ * exceeds `max(speechFactor × noise floor, minSpeechRms)`. The floor is the 25th percentile of the first
+ * [noiseFloorFrames] frames, never above [maxNoiseFloorRms] (speech during calibration must not deafen the
+ * detector). [minSpeechMs] of speech frames (pauses under [minSpeechMs] allowed) start an utterance; [endSilenceMs]
+ * of silence after it, or [maxUtteranceMs] from its first speech frame, end it. [noSpeechTimeoutMs] without an
  * utterance gives up.
  */
 data class VadConfig(
@@ -14,6 +16,7 @@ data class VadConfig(
     val noiseFloorFrames: Int = 15,
     val speechFactor: Double = 2.5,
     val minSpeechRms: Double = 400.0,
+    val maxNoiseFloorRms: Double = 300.0,
     val minSpeechMs: Int = 300,
     val endSilenceMs: Int = 1200,
     val noSpeechTimeoutMs: Int = 8000,
@@ -39,9 +42,10 @@ sealed interface VadEvent {
  * Energy-based end-of-utterance detection for one listening run, fed one RMS value per [VadConfig.frameMs] frame.
  * Pure and single-threaded: one detector per run.
  *
- * The first frames calibrate the noise floor and are never speech, so a noisy room raises the threshold. Later
- * non-speech frames quieter than the floor pull it down (never up), so speech that overlapped the calibration only
- * deafens the detector until the first pause.
+ * Speech is recognised from the first frame (the user often starts talking as soon as the reply ends): during
+ * calibration the floor is the low percentile of the frames seen so far, capped at [VadConfig.maxNoiseFloorRms].
+ * Afterwards non-speech frames quieter than the floor pull it down quickly; louder ones, while no utterance is
+ * building, raise it slowly (still capped), so a fan that starts mid-run is absorbed instead of heard as speech.
  */
 class UtteranceDetector(val config: VadConfig = VadConfig()) {
     /** Frames fed so far. */
@@ -52,8 +56,11 @@ class UtteranceDetector(val config: VadConfig = VadConfig()) {
     var speechStartFrame: Int? = null
         private set
 
-    private var floorSum = 0.0
-    private var floor = 0.0
+    /** The current noise floor (RMS). */
+    var noiseFloor: Double = 0.0
+        private set
+
+    private val calibration = ArrayList<Double>(config.noiseFloorFrames)
     private var candidateStart: Int? = null
     private var candidateSpeechFrames = 0
     private var silenceRun = 0
@@ -69,13 +76,13 @@ class UtteranceDetector(val config: VadConfig = VadConfig()) {
     fun feed(frameRms: Double): VadEvent {
         done?.let { return it }
         val index = frames++
-        if (index < config.noiseFloorFrames) {
-            floorSum += frameRms
-            floor = floorSum / (index + 1)
-            return timeout()
+        val calibrating = index < config.noiseFloorFrames
+        if (calibrating) {
+            calibration += frameRms
+            noiseFloor = min(calibration.sorted()[(calibration.size - 1) / 4], config.maxNoiseFloorRms)
         }
-        val speech = frameRms > max(config.speechFactor * floor, config.minSpeechRms)
-        if (!speech && frameRms < floor) floor = floor * (1 - FLOOR_DECAY) + frameRms * FLOOR_DECAY
+        val speech = frameRms > max(config.speechFactor * noiseFloor, config.minSpeechRms)
+        if (!speech && !calibrating) adaptFloor(frameRms)
         val start = speechStartFrame
         if (start == null) {
             if (speech) {
@@ -98,14 +105,27 @@ class UtteranceDetector(val config: VadConfig = VadConfig()) {
         return utterance(index, start)
     }
 
+    private fun adaptFloor(rms: Double) {
+        noiseFloor = when {
+            rms < noiseFloor -> noiseFloor * (1 - FLOOR_DECAY) + rms * FLOOR_DECAY
+            candidateStart == null && speechStartFrame == null ->
+                min(max(noiseFloor, noiseFloor * (1 - FLOOR_RISE) + rms * FLOOR_RISE), config.maxNoiseFloorRms)
+            else -> noiseFloor
+        }
+    }
+
     private fun utterance(index: Int, start: Int): VadEvent =
         if (index + 1 - start >= maxUtteranceFrames) VadEvent.EndOfUtterance.also { done = it } else VadEvent.Speech
 
+    /** NoSpeech once the timeout passed, but never while an utterance may be starting. */
     private fun timeout(): VadEvent =
-        if (frames >= noSpeechFrames) VadEvent.NoSpeech.also { done = it } else VadEvent.Listening
+        if (frames >= noSpeechFrames && candidateStart == null) VadEvent.NoSpeech.also { done = it } else VadEvent.Listening
 
     private companion object {
         /** How fast a quieter room lowers the floor, per frame. */
         const val FLOOR_DECAY = 0.05
+
+        /** How fast a louder steady noise raises it, per frame. */
+        const val FLOOR_RISE = 0.02
     }
 }
