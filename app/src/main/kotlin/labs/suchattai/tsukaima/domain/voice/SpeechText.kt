@@ -55,8 +55,8 @@ object SpeechText {
 data class SpokenChunk(val text: String, val end: Int)
 
 /**
- * Splits a streaming reply into sentences, never inside a ``` or ~~~ fence. Feed it the reply's full text so far; it remembers
- * how much it already emitted, so repeated calls on a growing prefix are idempotent.
+ * Splits a streaming reply into sentences, never inside a ``` or ~~~ fence. Feed it the reply's full text so far; it
+ * remembers how much it already emitted, so repeated calls on a growing prefix are idempotent.
  */
 class SentenceChunker {
     private var cursor = 0

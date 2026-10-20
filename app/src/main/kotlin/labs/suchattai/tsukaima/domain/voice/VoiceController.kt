@@ -60,7 +60,10 @@ class VoiceController(
     private var awaitingTurn = false
     private var turnSeen = false
 
-    /** Assist: the exchange is over (or the chat went offline); in-app: listened too long in silence. Idle until [tapIndicator]. */
+    /**
+     * Assist: the exchange is over (or the chat went offline); in-app: listened too long in silence. Idle until
+     * [tapIndicator].
+     */
     private var resting = false
 
     /** Non-silence recogniser errors in a row (reset by a Partial, a Final or a tap). */

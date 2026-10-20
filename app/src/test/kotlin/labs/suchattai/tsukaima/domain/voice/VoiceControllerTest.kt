@@ -418,4 +418,58 @@ class VoiceControllerTest {
         assertTrue(failAndWait(r, SpeechEvent.Error("No speech heard", retry = true, silence = true), 300))
         assertEquals(VoicePhase.Listening, r.state.phase)
     }
+
+    @Test fun bargeInMidStreamRevealsTheRestWithoutSpeakingIt() = runTest {
+        val r = rig()
+        say(r, "tell me")
+        r.add(reply("a1", "One. Two", streaming = true), AgentStatus.Replying)
+        advanceUntilIdle()
+        assertEquals(listOf("One."), r.output.spoken)
+        r.controller.tapIndicator()
+        advanceUntilIdle()
+        assertEquals(1, r.output.stopped)
+        assertEquals("One. Two".length, r.state.revealed["a1"])
+        assertEquals(VoicePhase.Thinking, r.state.phase) // the turn still runs: no listening yet
+        assertFalse(r.input.active)
+
+        r.replace(reply("a1", "One. Two. Three.", streaming = true))
+        advanceUntilIdle()
+        assertEquals("One. Two. Three.".length, r.state.revealed["a1"])
+        r.replace(reply("a1", "One. Two. Three. Four.", streaming = false), AgentStatus.Idle)
+        advanceUntilIdle()
+        assertEquals(listOf("One."), r.output.spoken)
+        assertEquals("One. Two. Three. Four.".length, r.state.revealed["a1"])
+        assertEquals(VoicePhase.Listening, r.state.phase)
+        assertTrue(r.input.active)
+    }
+
+    @Test fun twoQueuedRepliesAreSpokenInOrder() = runTest {
+        val r = rig()
+        say(r, "two things")
+        r.add(reply("a1", "First reply.", streaming = false), AgentStatus.Replying)
+        r.add(reply("a2", "Second reply.", streaming = false), AgentStatus.Idle)
+        advanceUntilIdle()
+        assertEquals(listOf("First reply."), r.output.spoken)
+        assertEquals(null, r.state.revealed["a2"])
+        r.output.finishSpeaking()
+        advanceUntilIdle()
+        assertEquals(listOf("First reply.", "Second reply."), r.output.spoken)
+        assertEquals("Second reply.".length, r.state.revealed["a2"])
+        assertEquals(VoicePhase.Speaking, r.state.phase)
+        r.output.finishSpeaking()
+        advanceUntilIdle()
+        assertEquals(VoicePhase.Listening, r.state.phase)
+    }
+
+    @Test fun voicePhaseForRequestsAndCompaction() {
+        for (mode in VoiceMode.entries) for (listening in listOf(true, false)) for (speaking in listOf(true, false)) {
+            assertEquals(VoicePhase.Approval, voicePhase(mode, false, listening, speaking, AgentStatus.Question))
+            assertEquals(VoicePhase.Approval, voicePhase(mode, false, listening, speaking, AgentStatus.Secret(password = true)))
+            assertEquals(VoicePhase.Approval, voicePhase(mode, true, listening, speaking, AgentStatus.Secret(password = false)))
+            assertEquals(
+                if (speaking) VoicePhase.Speaking else VoicePhase.Thinking,
+                voicePhase(mode, false, listening, speaking, AgentStatus.Compacting),
+            )
+        }
+    }
 }

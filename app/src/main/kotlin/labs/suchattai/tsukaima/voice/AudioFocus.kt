@@ -7,9 +7,11 @@ import android.media.AudioManager
 
 /**
  * Transient, ducking audio focus held while the app speaks, so music lowers instead of talking over the voice.
- * Not reference counted: [request] while held is a no-op, [release] when not held is a no-op.
+ * Not reference counted: [request] while held is a no-op, [release] when not held is a no-op. [onLoss] runs (on the
+ * main thread) when another app takes the focus outright (`AUDIOFOCUS_LOSS` / `AUDIOFOCUS_LOSS_TRANSIENT`, a call
+ * for instance); a request to duck is left to the system.
  */
-class AudioFocus(context: Context) {
+class AudioFocus(context: Context, private val onLoss: () -> Unit = {}) {
     private val audioManager = context.getSystemService(AudioManager::class.java)
     private var held: AudioFocusRequest? = null
 
@@ -24,7 +26,9 @@ class AudioFocus(context: Context) {
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build(),
             )
-            .setOnAudioFocusChangeListener { }
+            .setOnAudioFocusChangeListener { change ->
+                if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) onLoss()
+            }
             .build()
         if (audioManager.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) held = request
     }

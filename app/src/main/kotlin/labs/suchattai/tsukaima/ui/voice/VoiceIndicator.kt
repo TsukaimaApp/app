@@ -54,12 +54,13 @@ fun VoiceIndicator(phase: VoicePhase, size: Dp, modifier: Modifier = Modifier, o
     val shown = if (phase == VoicePhase.Approval) VoicePhase.Idle else phase
     val s = size.value
     val disc = (s * 0.62f).roundToInt().dp
-    val description = when (shown) {
+    val description = when (phase) {
         VoicePhase.Listening -> "Listening"
         VoicePhase.Thinking -> "Thinking"
         VoicePhase.Speaking -> "Speaking"
         VoicePhase.Muted -> "Muted"
-        else -> "Tap to speak"
+        VoicePhase.Approval -> "Waiting"
+        VoicePhase.Idle -> if (onTap != null) "Tap to speak" else "Idle"
     }
     Box(
         modifier = modifier

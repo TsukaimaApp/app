@@ -2,7 +2,11 @@ package labs.suchattai.tsukaima.ui.chat
 
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.ImageBitmapConfig
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -2147,5 +2151,51 @@ class ChatViewModelTest {
         advanceUntilIdle()
         assertEquals(VoicePhase.Listening, vm.state.value.voice?.phase)
         assertTrue(b.speech.active)
+    }
+
+    @Test
+    fun voiceStartsWhenALaterOpenSucceedsAfterAFailedOne() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("session.resume", obj(resumeJson))
+            transport.crashing += "session.resume"
+        }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        vm.openVoice()
+        advanceUntilIdle()
+        assertEquals("Couldn’t open the chat: boom", vm.state.value.voice?.error)
+        assertFalse(b.speech.active)
+
+        // The next Connected retries the open, which now succeeds.
+        b.transport.crashing -= "session.resume"
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+        val s = vm.state.value
+        assertEquals(2, s.chat.items.size)
+        assertNull(s.voice?.error)
+        assertEquals(2, s.voice?.startIndex)
+        assertEquals(VoicePhase.Listening, s.voice?.phase)
+        assertTrue(b.speech.active)
+        assertTrue(b.speechOutput.spoken.isEmpty())
+    }
+
+    @Test
+    fun clearingTheViewModelClosesVoice() = runTest(dispatcher) {
+        val b = backend()
+        val store = ViewModelStore()
+        val factory = viewModelFactory { initializer { ChatViewModel(b, null, dispatcher = dispatcher, io = dispatcher, flair = { "flair" }) } }
+        val vm = ViewModelProvider.create(store, factory)[ChatViewModel::class].also { created += it }
+        advanceUntilIdle()
+        vm.openVoice()
+        advanceUntilIdle()
+        assertTrue(b.speech.active)
+
+        store.clear()
+        advanceUntilIdle()
+        assertNull(vm.state.value.voice)
+        assertTrue(b.speechOutput.stopped > 0)
+        assertFalse(b.speech.active)
     }
 }
