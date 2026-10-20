@@ -1,9 +1,17 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
+
+// Release key, local only (never committed): .local/keystore.properties with storeFile (relative to the repo root),
+// storePassword, keyAlias, keyPassword. Without it (CI, fresh clones) the release APK is signed with the debug key.
+val releaseKeystoreProperties: Properties? = rootProject.file(".local/keystore.properties")
+    .takeIf { it.isFile }
+    ?.let { file -> Properties().apply { file.inputStream().use { load(it) } } }
 
 android {
     namespace = "labs.suchattai.tsukaima"
@@ -17,12 +25,27 @@ android {
         versionName = "0.5.0"
     }
 
+    signingConfigs {
+        releaseKeystoreProperties?.let { props ->
+            create("release") {
+                storeFile = rootProject.file(props.getProperty("storeFile"))
+                storePassword = props.getProperty("storePassword")
+                keyAlias = props.getProperty("keyAlias")
+                keyPassword = props.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            // Debug keystore for now so the APK is installable; replace with a real keystore before distribution.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (releaseKeystoreProperties != null) {
+                signingConfigs.getByName("release")
+            } else {
+                logger.warn("Release signed with the debug keystore (.local/keystore.properties not found)")
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -34,6 +57,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     testOptions {

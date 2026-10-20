@@ -6,3 +6,6 @@ build/
 *.apk
 .kotlin/
 .idea/
+*.jks
+*.keystore
+keystore.properties
