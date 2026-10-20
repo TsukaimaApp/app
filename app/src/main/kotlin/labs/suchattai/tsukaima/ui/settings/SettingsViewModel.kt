@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -39,9 +40,9 @@ data class PairingEntry(
     val platform: String,
     /** Display name of the person (falls back to the user id). */
     val who: String,
-    /** Pending: the request code to approve. Approved: unused. */
-    val code: String,
-    /** Approved: the id to revoke. */
+    /** Pending: the request id to approve. Approved: empty. */
+    val requestId: String,
+    /** The platform user id: shown in a pending card's code slot, and what revoke needs. */
     val userId: String,
 )
 
@@ -118,7 +119,7 @@ class SettingsViewModel(
                 if (firstLoad) {
                     val saved = withContext(io) { creds.password() != null }
                     _state.update { it.copy(passwordSaved = saved) }
-                    if (saved && s.serverUrl.isNotEmpty()) loadRemote()
+                    if (saved && s.serverUrl.isNotEmpty()) reload()
                 }
             }
         }
@@ -180,7 +181,7 @@ class SettingsViewModel(
                 )
             }
             _signedIn.trySend(Unit)
-            loadRemote()
+            reload()
         }.onFailure { e ->
             _state.update { it.copy(signingIn = false, signInError = signInErrorText(e, s.serverUrl)) }
         }
@@ -194,6 +195,14 @@ class SettingsViewModel(
     }
 
     // ---- remote data ---------------------------------------------------------------------
+
+    private var loadJob: Job? = null
+
+    /** Starts a fresh [loadRemote], cancelling any load still in flight. Never blocks the caller. */
+    private fun reload() {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch { loadRemote() }
+    }
 
     /** Loads profiles, models, skills, toolsets, pairing and usage. A failed piece keeps its previous value. */
     suspend fun loadRemote() {
@@ -211,7 +220,9 @@ class SettingsViewModel(
 
     private fun applyModels(o: ModelOptionsDto) {
         val provider = o.provider ?: o.providers.firstOrNull { it.isCurrent == true }?.slug
-        val models = o.providers.firstOrNull { it.slug == provider }?.models.orEmpty().map { provider!! to it }
+        val models = provider?.let { slug ->
+            o.providers.firstOrNull { it.slug == slug }?.models.orEmpty().map { slug to it }
+        }.orEmpty()
         _state.update { it.copy(models = models, model = it.model ?: o.model) }
     }
 
@@ -228,8 +239,18 @@ class SettingsViewModel(
     // ---- actions -------------------------------------------------------------------------
 
     fun setProfile(name: String) {
-        _state.update { it.copy(profile = name) }
-        viewModelScope.launch { settings.update { it.copy(profile = name) } }
+        _state.update {
+            it.copy(
+                profile = name,
+                skills = emptyList(), toolsets = emptyList(), models = emptyList(), model = null,
+                pairing = null, pendingPairing = emptyList(), approvedPairing = emptyList(), usage = null,
+            )
+        }
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
+            settings.update { it.copy(profile = name, model = null) } // the API reads the profile from settings
+            loadRemote()
+        }
     }
 
     fun setModel(@Suppress("UNUSED_PARAMETER") provider: String, model: String) {
@@ -250,7 +271,7 @@ class SettingsViewModel(
     }
 
     fun approvePairing(entry: PairingEntry) {
-        viewModelScope.launch { repo.approvePairing(entry.platform, entry.code); reloadPairing() }
+        viewModelScope.launch { repo.approvePairing(entry.platform, entry.requestId); reloadPairing() }
     }
 
     fun revokePairing(entry: PairingEntry) {
@@ -281,7 +302,7 @@ private fun pairingEntry(o: JsonObject): PairingEntry? {
     return PairingEntry(
         platform = platform,
         who = str("user_name", "username", "name") ?: userId,
-        code = str("code", "request_id").orEmpty(),
+        requestId = str("request_id").orEmpty(),
         userId = userId,
     )
 }
@@ -292,7 +313,7 @@ fun usageSummary(totals: JsonObject?): String? {
     fun num(vararg keys: String) = keys.firstNotNullOfOrNull { (totals[it] as? JsonPrimitive)?.doubleOrNull }
     val tokens = listOfNotNull(num("total_input"), num("total_output")).takeIf { it.isNotEmpty() }?.sum()
     val sessions = num("total_sessions")
-    val cost = num("total_actual_cost", "total_estimated_cost")?.takeIf { it > 0 }
+    val cost = listOf("total_actual_cost", "total_estimated_cost").firstNotNullOfOrNull { k -> num(k)?.takeIf { it > 0 } }
     val parts = listOfNotNull(
         tokens?.let { "${compact(it)} tokens" },
         sessions?.let { "${it.toLong()} sessions" },

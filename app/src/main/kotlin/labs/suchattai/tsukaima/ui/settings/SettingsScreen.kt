@@ -219,7 +219,7 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
 
             Section("Pairing", hint = "Who may talk to the bot.") {
                 state.pendingPairing.forEach { p ->
-                    PairingCard(p.platform, p.who, p.code, onApprove = { actions.onApprove(p) }, onRevoke = { actions.onRevoke(p) })
+                    PairingCard(p.platform, p.who, p.userId, onApprove = { actions.onApprove(p) })
                 }
                 if (state.approvedPairing.isEmpty() && state.pendingPairing.isEmpty()) Caption("No paired accounts.")
                 Column {
@@ -335,7 +335,7 @@ private fun previewState() = SettingsUiState(
     skills = listOf(SkillDto("Web search", enabled = true), SkillDto("Shell", enabled = true), SkillDto("Browser", enabled = false)),
     toolsets = listOf(ToolsetDto("filesystem", enabled = true), ToolsetDto("git", enabled = true), ToolsetDto("docker", enabled = false)),
     pairing = PairingDto(emptyList<JsonObject>(), emptyList()),
-    pendingPairing = listOf(PairingEntry("Telegram", "@mario", "4F2-91K", "1")),
+    pendingPairing = listOf(PairingEntry("Telegram", "@mario", "req-1", "4F2-91K")),
     approvedPairing = listOf(PairingEntry("Telegram", "@mario", "", "1"), PairingEntry("Discord", "mario#0420", "", "2")),
     usage = "1.2M tokens · 318 sessions · \$4.50",
 )

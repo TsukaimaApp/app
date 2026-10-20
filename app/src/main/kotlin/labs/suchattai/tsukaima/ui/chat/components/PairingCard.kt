@@ -28,7 +28,7 @@ fun PairingCard(
     who: String,
     code: String,
     onApprove: () -> Unit,
-    onRevoke: () -> Unit,
+    onRevoke: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.tsukaima
@@ -59,7 +59,7 @@ fun PairingCard(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
         ) {
-            GhostButton("Revoke", onRevoke, tone = Tone.Danger)
+            if (onRevoke != null) GhostButton("Revoke", onRevoke, tone = Tone.Danger)
             PrimaryButton("Approve", onApprove, icon = IconName.Check)
         }
     }

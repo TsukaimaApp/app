@@ -205,6 +205,58 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun usageFallsBackToEstimatedWhenActualZero() {
+        val totals = JsonObject(
+            mapOf(
+                "total_actual_cost" to JsonPrimitive(0),
+                "total_estimated_cost" to JsonPrimitive(0.42),
+                "total_input" to JsonPrimitive(500),
+                "total_output" to JsonPrimitive(100),
+                "total_sessions" to JsonPrimitive(3),
+                "total_api_calls" to JsonPrimitive(9),
+            ),
+        )
+        assertEquals("600 tokens · 3 sessions · \$0.42", usageSummary(totals))
+    }
+
+    private suspend fun signedInStore() {
+        val url = "http://${hostPort()}"
+        store.update { it.copy(serverUrl = url, onboarded = true) }
+        snapshot.value = Settings(serverUrl = url)
+        creds.save("pw", "tok", url)
+    }
+
+    @Test
+    fun setProfileReloadsRemoteSections() = runBlocking<Unit> {
+        var skills = """[{"name":"old","enabled":true}]"""
+        routes["/api/skills"] = { json(skills) }
+        signedInStore()
+        val vm = vm()
+        vm.await { it.skills.map { s -> s.name } == listOf("old") }
+
+        skills = """[{"name":"research-skill","enabled":true}]"""
+        vm.setProfile("research")
+
+        val got = vm.await { it.skills.map { s -> s.name } == listOf("research-skill") }
+        assertEquals("research", got.profile)
+    }
+
+    @Test
+    fun themeChangeVisibleWhileRemoteLoadHangs() = runBlocking<Unit> {
+        val gate = java.util.concurrent.CountDownLatch(1)
+        routes["/api/profiles"] = { gate.await(10, java.util.concurrent.TimeUnit.SECONDS); json("{}") }
+        signedInStore()
+        val vm = vm()
+        vm.await { it.passwordSaved }
+        vm.setTheme(labs.suchattai.tsukaima.data.prefs.ThemeMode.Dark)
+        try {
+            vm.await { it.theme == labs.suchattai.tsukaima.data.prefs.ThemeMode.Dark }
+        } finally {
+            gate.countDown()
+        }
+    }
+
+    @Test
     fun usageSummaryFormatsTotals() {
         val totals = JsonObject(
             mapOf(
