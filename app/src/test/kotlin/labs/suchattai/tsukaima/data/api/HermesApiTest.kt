@@ -559,4 +559,46 @@ class HermesApiTest {
         assertFalse(config.toString().contains("sk-secret"))
         assertEquals("/api/audio/voice-config", server.takeRequest(1, TimeUnit.SECONDS)!!.url.encodedPath)
     }
+
+    @Test
+    fun voiceConfigReadsTheTtsProviderAndDropsKeys() = runBlocking {
+        json("""{"ok":true,"tts":{"mode":"direct","provider":"openai","voice":"alloy","api_key":"sk-secret"}}""")
+        val config = api().voiceConfig()
+        assertEquals(TtsConfigDto(mode = "direct", provider = "openai"), config.tts)
+        assertNull(config.stt)
+        assertFalse(config.toString().contains("sk-secret"))
+    }
+
+    @Test
+    fun speakParsesTheDataUrl() = runBlocking {
+        json("""{"ok":true,"data_url":"data:audio/mpeg;base64,SUQz","mime_type":"audio/mpeg","provider":"piper"}""")
+        val speech = authedApi().speak("Dzień dobry")
+        assertEquals(SpeechDto(ok = true, dataUrl = "data:audio/mpeg;base64,SUQz", mimeType = "audio/mpeg", provider = "piper"), speech)
+        val r = server.takeRequest(1, TimeUnit.SECONDS)!!
+        assertEquals("POST", r.method)
+        assertEquals("/api/audio/speak", r.url.encodedPath)
+        assertNull(r.url.queryParameter("profile"))
+        assertEquals("Bearer tok", r.headers["Authorization"])
+        assertEquals("""{"text":"Dzień dobry"}""", r.body!!.utf8())
+    }
+
+    @Test
+    fun speakRefusalKeepsTheServerDetail() {
+        json("""{"detail":"No TTS provider configured"}""", code = 400)
+        val e = assertThrows(ApiException::class.java) { runBlocking { api().speak("hi") } }
+        assertEquals(400, e.code)
+        assertEquals("No TTS provider configured", e.detail)
+    }
+
+    @Test
+    fun speakIsCancellable() = runBlocking {
+        server.enqueue(MockResponse.Builder().code(200).body("""{"ok":true,"data_url":"data:audio/mpeg;base64,"}""").headersDelay(5, TimeUnit.SECONDS).build())
+        val started = System.nanoTime()
+        val job = launch { api().speak("hi") }
+        kotlinx.coroutines.delay(100)
+        job.cancel()
+        job.join()
+        assertTrue(job.isCancelled)
+        assertTrue("cancel took too long", System.nanoTime() - started < 3_000_000_000L)
+    }
 }

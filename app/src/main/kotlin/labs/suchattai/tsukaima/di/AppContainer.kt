@@ -40,6 +40,7 @@ import labs.suchattai.tsukaima.data.prefs.LazyCredentialStore
 import labs.suchattai.tsukaima.data.prefs.NotificationPrefs
 import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.data.prefs.SettingsStore
+import labs.suchattai.tsukaima.data.prefs.VoiceOutput
 import labs.suchattai.tsukaima.data.prefs.VoiceRecognition
 import labs.suchattai.tsukaima.data.gateway.ConnectionState
 import labs.suchattai.tsukaima.notifications.AndroidNotificationPoster
@@ -58,6 +59,7 @@ import labs.suchattai.tsukaima.ui.components.ToastState
 import labs.suchattai.tsukaima.voice.AndroidSpeechInput
 import labs.suchattai.tsukaima.voice.AndroidSpeechOutput
 import labs.suchattai.tsukaima.voice.ServerSpeechInput
+import labs.suchattai.tsukaima.voice.ServerSpeechOutput
 import okhttp3.OkHttpClient
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -185,8 +187,17 @@ class AppContainer(context: Context) {
         else -> AndroidSpeechInput(appContext) { settings.value?.voiceLanguage }
     }
 
+    /**
+     * The speech output for one voice session, per the speech output setting now: the phone's TTS engine (shared, see
+     * [phoneSpeechOutput]) or a fresh player for Hermes' text-to-speech relay.
+     */
+    fun speechOutput(): SpeechOutput = when (settings.value?.voiceOutput) {
+        VoiceOutput.Server -> ServerSpeechOutput(appContext, synthesize = { repository.speak(it) })
+        else -> phoneSpeechOutput
+    }
+
     /** One TTS engine per process, created on first use; speaks in the voice language when the engine has it. */
-    val speechOutput: SpeechOutput by lazy {
+    private val phoneSpeechOutput: SpeechOutput by lazy {
         AndroidSpeechOutput(
             context = appContext,
             language = { settings.value?.voiceLanguage },
@@ -204,7 +215,7 @@ class AppContainer(context: Context) {
      */
     fun voiceLanguages(includeEngine: Boolean = true): List<VoiceLanguage> {
         val device = LocaleList.getDefault().let { list -> (0 until list.size()).map { list[it].stripExtensions().toLanguageTag() } }
-        val engine = if (includeEngine) speechOutput.languages().toList() else emptyList()
+        val engine = if (includeEngine) phoneSpeechOutput.languages().toList() else emptyList()
         return VoiceLanguages.options(device, engine, ::languageName)
     }
 

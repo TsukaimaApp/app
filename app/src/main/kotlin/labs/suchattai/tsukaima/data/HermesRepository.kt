@@ -23,6 +23,7 @@ import labs.suchattai.tsukaima.data.api.PairingDto
 import labs.suchattai.tsukaima.data.api.ProfilesDto
 import labs.suchattai.tsukaima.data.api.SessionDto
 import labs.suchattai.tsukaima.data.api.SkillDto
+import labs.suchattai.tsukaima.data.api.SpeechDto
 import labs.suchattai.tsukaima.data.api.StatusDto
 import labs.suchattai.tsukaima.data.api.SystemStatsDto
 import labs.suchattai.tsukaima.data.api.ToolsetDto
@@ -156,6 +157,9 @@ class HermesRepository(
     /** One utterance (WAV) through the server's speech-to-text relay. */
     suspend fun transcribe(wav: ByteArray): Result<TranscriptionDto> = call { api.transcribe(wav) }
     suspend fun voiceConfig(): Result<VoiceConfigDto> = call { api.voiceConfig() }
+
+    /** One sentence through the server's text-to-speech relay. */
+    suspend fun speak(text: String): Result<SpeechDto> = call { api.speak(text) }
 
     // ---- plumbing ------------------------------------------------------------------------
 

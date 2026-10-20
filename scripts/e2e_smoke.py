@@ -1,6 +1,6 @@
 """Tsukaima e2e smoke: login, REST contract (the app's exact GETs), WS session, one prompt,
 config.set model round trip (same model, session scope), session detail `archived` flag,
-file.attach + /api/files/download round trip, cron create/list/delete, session cleanup."""
+file.attach + /api/files/download round trip, cron create/list/delete, session cleanup, STT and TTS relays."""
 import asyncio, base64, http.cookiejar, json, os, sys, time, urllib.error, urllib.parse, urllib.request
 
 BASE = os.environ["HERMES_TEST_URL"].rstrip("/")
@@ -177,7 +177,7 @@ REST_CONTRACT = [
     "/api/analytics/usage?days=30",
     "/api/system/stats",
     "/api/auth/me",
-    "/api/audio/voice-config",  # Settings: the STT model label (only stt.provider/model/streaming are read)
+    "/api/audio/voice-config",  # Settings: STT model / TTS provider labels (stt.provider/model/streaming, tts.mode/provider)
 ]
 
 
@@ -214,6 +214,25 @@ def transcribe_part(token):
     step(f"POST /api/audio/transcribe (silence → empty transcript, provider={r.get('provider')})")
 
 
+def speak_part(token):
+    try:
+        r = http_json("POST", "/api/audio/speak", {"text": "Tsukaima smoke test."}, token)
+    except urllib.error.HTTPError as e:
+        detail = e.read()[:200]
+        if e.code == 400 and b"provider" in detail.lower():
+            print(f"skip POST /api/audio/speak (no usable TTS provider: {detail!r})", flush=True)
+            return
+        fail(f"POST /api/audio/speak -> HTTP {e.code}: {detail!r}")
+    if r.get("ok") is not True:
+        fail(f"speak not ok: {sorted(r)!r}")
+    data_url = r.get("data_url") or ""
+    head, _, payload = data_url.partition(";base64,")
+    if not head.startswith("data:audio/") or not payload:
+        fail(f"speak data_url not a non-empty base64 audio data URL ({head[:40]!r}, {len(payload)} chars)")
+    audio = base64.b64decode(payload, validate=True)
+    step(f"POST /api/audio/speak ({r.get('mime_type')}, {len(audio)} bytes, provider={r.get('provider')})")
+
+
 def cron_part(token):
     name = f"tsukaima-smoke-{int(time.time())}"
     job = http_json("POST", "/api/cron/jobs", {"name": name, "schedule": "0 4 * * *",
@@ -238,6 +257,7 @@ def main():
     asyncio.run(ws_part(token))
     cron_part(token)
     transcribe_part(token)
+    speak_part(token)
     print("PASS")
 
 

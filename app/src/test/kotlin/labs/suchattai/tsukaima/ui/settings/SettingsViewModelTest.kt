@@ -27,6 +27,7 @@ import labs.suchattai.tsukaima.data.prefs.InMemoryCredentialStore
 import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.data.prefs.SettingsStore
 import labs.suchattai.tsukaima.data.prefs.ThemeMode
+import labs.suchattai.tsukaima.data.prefs.VoiceOutput
 import labs.suchattai.tsukaima.data.prefs.VoiceRecognition
 import labs.suchattai.tsukaima.domain.voice.VoiceLanguage
 import labs.suchattai.tsukaima.diagnostics.CrashRecord
@@ -218,6 +219,34 @@ class SettingsViewModelTest {
         vm.setVoiceRecognition(VoiceRecognition.Phone)
         awaitStore { it.voiceRecognition == VoiceRecognition.Phone }
         assertEquals("pl-PL", store.settings.first().voiceLanguage) // the language is kept for phone recognition
+    }
+
+    @Test
+    fun setVoiceOutputPersists() = runBlocking<Unit> {
+        val vm = vm()
+        assertEquals(VoiceOutput.Phone, vm.state.value.voiceOutput)
+        vm.setVoiceOutput(VoiceOutput.Server)
+        assertEquals(VoiceOutput.Server, awaitStore { it.voiceOutput == VoiceOutput.Server }.voiceOutput)
+        vm.await { it.voiceOutput == VoiceOutput.Server }
+        assertEquals("recognition is a separate setting", VoiceRecognition.Phone, store.settings.first().voiceRecognition)
+        vm.setVoiceOutput(VoiceOutput.Phone)
+        awaitStore { it.voiceOutput == VoiceOutput.Phone }
+        vm.await { it.voiceOutput == VoiceOutput.Phone }
+    }
+
+    @Test
+    fun ttsProviderProbeNamesTheServerProviderOnlyWhenThereIsOne() = runBlocking<Unit> {
+        snapshot.value = Settings(serverUrl = "http://${hostPort()}")
+        var body = """{"ok":true,"tts":{"mode":"relay","provider":"piper"}}"""
+        routes["/api/audio/voice-config"] = { json(body) }
+        val vm = vm()
+        vm.loadTtsProvider()
+        assertEquals("piper", vm.await { it.ttsProvider != null }.ttsProvider)
+        assertEquals("On Hermes (piper)", serverSpeechLabel(vm.state.value.ttsProvider))
+        body = """{"ok":true,"tts":{"mode":"relay","reason":"provider 'piper' has no client wire"}}"""
+        vm.loadTtsProvider()
+        assertNull(vm.await { it.ttsProvider == null }.ttsProvider)
+        assertEquals("On Hermes", serverSpeechLabel(null))
     }
 
     @Test

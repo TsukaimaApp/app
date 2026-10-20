@@ -107,4 +107,15 @@ class SettingsStoreTest {
         store.update { it.copy(voiceRecognition = VoiceRecognition.Phone) }
         assertEquals(VoiceRecognition.Phone, store.settings.first().voiceRecognition)
     }
+
+    @Test
+    fun voiceOutputDefaultsToPhoneAndRoundTrips() = runTest {
+        val store = store()
+        assertEquals(VoiceOutput.Phone, store.settings.first().voiceOutput)
+        store.update { it.copy(voiceOutput = VoiceOutput.Server) }
+        assertEquals(VoiceOutput.Server, store.settings.first().voiceOutput)
+        assertEquals("the recognition setting is separate", VoiceRecognition.Phone, store.settings.first().voiceRecognition)
+        store.update { it.copy(voiceOutput = VoiceOutput.Phone) }
+        assertEquals(VoiceOutput.Phone, store.settings.first().voiceOutput)
+    }
 }

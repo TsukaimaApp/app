@@ -95,8 +95,11 @@ interface ChatBackend {
      */
     fun speechInput(): SpeechInput
 
-    /** The app's text-to-speech (shared, created on first use). */
-    val speechOutput: SpeechOutput
+    /**
+     * The speech output for one voice-mode session: the phone's text-to-speech (shared), or Hermes' relay, per the
+     * speech output setting at the time of the call.
+     */
+    fun speechOutput(): SpeechOutput
 
     /** The voice language picker's options, "System default" first (device locales, TTS languages, fallback). */
     fun voiceLanguages(): List<VoiceLanguage>
@@ -139,7 +142,7 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override fun toast(text: String) = c.toastState.show(text)
     override suspend fun transcribe(wav: ByteArray) = c.repository.transcribe(wav)
     override fun speechInput() = c.speechInput()
-    override val speechOutput get() = c.speechOutput
+    override fun speechOutput() = c.speechOutput()
     override fun voiceLanguages() = c.voiceLanguages(includeEngine = true)
 }
 

@@ -196,7 +196,8 @@ class ChatViewModelTest {
 
         val speech = FakeSpeechInput()
         override fun speechInput() = speech
-        override val speechOutput = FakeSpeechOutput(instant = true)
+        val speaker = FakeSpeechOutput(instant = true)
+        override fun speechOutput() = speaker
         override fun voiceLanguages() = listOf(VoiceLanguage(null, "System default"), VoiceLanguage("pl-PL", "Polish (Poland)"))
     }
 
@@ -2014,7 +2015,7 @@ class ChatViewModelTest {
     @Test
     fun voiceTurnsCarryTheFlags() = runTest(dispatcher) {
         val b = backend()
-        b.speechOutput.instant = false // replies stay "being spoken" until finished
+        b.speaker.instant = false // replies stay "being spoken" until finished
         val vm = vm(b)
         advanceUntilIdle()
         vm.openVoice()
@@ -2039,7 +2040,7 @@ class ChatViewModelTest {
 
         b.events.emit(ev("message.complete", 6, """{"text":"Sure."}"""))
         advanceUntilIdle()
-        b.speechOutput.finishSpeaking()
+        b.speaker.finishSpeaking()
         advanceUntilIdle()
         b.speech.emit(SpeechEvent.Final("thanks"))
         advanceUntilIdle()
@@ -2072,7 +2073,7 @@ class ChatViewModelTest {
         val s = vm.state.value
         assertEquals(2, s.chat.items.size)
         assertEquals(s.chat.items.size, s.voice?.startIndex)
-        assertTrue("nothing from history is spoken", b.speechOutput.spoken.isEmpty())
+        assertTrue("nothing from history is spoken", b.speaker.spoken.isEmpty())
         assertEquals(VoicePhase.Listening, s.voice?.phase)
         assertTrue(b.speech.active)
     }
@@ -2094,7 +2095,7 @@ class ChatViewModelTest {
         val s = vm.state.value
         assertEquals(2, s.chat.items.size)
         assertEquals(2, s.voice?.startIndex)
-        assertTrue(b.speechOutput.spoken.isEmpty())
+        assertTrue(b.speaker.spoken.isEmpty())
     }
 
     @Test
@@ -2116,7 +2117,7 @@ class ChatViewModelTest {
         vm.tapVoiceIndicator()
         advanceUntilIdle()
         assertEquals(0, b.speech.listenCount)
-        assertTrue(b.speechOutput.spoken.isEmpty())
+        assertTrue(b.speaker.spoken.isEmpty())
     }
 
     @Test
@@ -2160,7 +2161,7 @@ class ChatViewModelTest {
         vm.closeVoice()
         advanceUntilIdle()
 
-        assertTrue(b.speechOutput.stopped > 0)
+        assertTrue(b.speaker.stopped > 0)
         assertFalse(b.speech.active)
         assertNull(vm.state.value.voice)
         assertFalse("session.interrupt" in b.transport.methods())
@@ -2203,7 +2204,7 @@ class ChatViewModelTest {
         b.events.emit(ev("message.start", 1))
         b.events.emit(ev("message.complete", 2, """{"text":"6.17.2"}"""))
         advanceUntilIdle()
-        assertEquals(listOf("6.17.2"), b.speechOutput.spoken)
+        assertEquals(listOf("6.17.2"), b.speaker.spoken)
 
         // The server session expired: the resume answers with a new live id and the transcript is rebuilt (new ids).
         b.transport.on("session.resume", obj(resumeJson.replace(live, "beef0001")))
@@ -2215,7 +2216,7 @@ class ChatViewModelTest {
 
         val s = vm.state.value
         assertEquals(listOf("h-1", "h-2"), s.chat.items.map { it.id })
-        assertEquals("nothing is read aloud again", listOf("6.17.2"), b.speechOutput.spoken)
+        assertEquals("nothing is read aloud again", listOf("6.17.2"), b.speaker.spoken)
         assertEquals(0, s.voice?.startIndex)
         assertEquals("6.17.2".length, s.voice?.revealed?.get("h-2"))
         assertEquals(VoicePhase.Listening, s.voice?.phase)
@@ -2296,7 +2297,7 @@ class ChatViewModelTest {
         assertEquals(2, s.voice?.startIndex)
         assertEquals(VoicePhase.Listening, s.voice?.phase)
         assertTrue(b.speech.active)
-        assertTrue(b.speechOutput.spoken.isEmpty())
+        assertTrue(b.speaker.spoken.isEmpty())
     }
 
     @Test
@@ -2313,7 +2314,7 @@ class ChatViewModelTest {
         store.clear()
         advanceUntilIdle()
         assertNull(vm.state.value.voice)
-        assertTrue(b.speechOutput.stopped > 0)
+        assertTrue(b.speaker.stopped > 0)
         assertFalse(b.speech.active)
     }
 

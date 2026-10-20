@@ -18,6 +18,12 @@ enum class ThemeMode { Warm, Dark, System }
 enum class VoiceRecognition { Phone, Server }
 
 /**
+ * Where voice mode speaks replies: [Phone] = the platform text-to-speech engine (voice language setting); [Server] =
+ * each sentence synthesised by Hermes' `/api/audio/speak` (its configured TTS and its language settings), played here.
+ */
+enum class VoiceOutput { Phone, Server }
+
+/**
  * Which kinds of notification the app posts (Settings → Notifications); all on by default. Android's own channel
  * switches still apply on top. [alerts] covers the gateway going down and a cron job failing.
  */
@@ -59,6 +65,8 @@ data class Settings(
     val voiceLanguage: String? = null,
     /** Where voice mode recognises speech; read when a voice session opens. */
     val voiceRecognition: VoiceRecognition = VoiceRecognition.Phone,
+    /** Where voice mode speaks replies; read when a voice session opens. */
+    val voiceOutput: VoiceOutput = VoiceOutput.Phone,
 )
 
 class SettingsStore(private val dataStore: DataStore<Preferences>) {
@@ -86,6 +94,7 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             if (next.assistSessionAt == null) prefs.remove(ASSIST_SESSION_AT) else prefs[ASSIST_SESSION_AT] = next.assistSessionAt
             prefs.putOrRemove(VOICE_LANGUAGE, next.voiceLanguage)
             prefs[VOICE_RECOGNITION] = next.voiceRecognition.name
+            prefs[VOICE_OUTPUT] = next.voiceOutput.name
         }
     }
 
@@ -122,6 +131,8 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             voiceLanguage = this[VOICE_LANGUAGE],
             voiceRecognition = this[VOICE_RECOGNITION]?.let { name -> VoiceRecognition.entries.firstOrNull { it.name == name } }
                 ?: defaults.voiceRecognition,
+            voiceOutput = this[VOICE_OUTPUT]?.let { name -> VoiceOutput.entries.firstOrNull { it.name == name } }
+                ?: defaults.voiceOutput,
         )
     }
 
@@ -145,5 +156,6 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
         val ASSIST_SESSION_AT = longPreferencesKey("assist_session_at")
         val VOICE_LANGUAGE = stringPreferencesKey("voice_language")
         val VOICE_RECOGNITION = stringPreferencesKey("voice_recognition")
+        val VOICE_OUTPUT = stringPreferencesKey("voice_output")
     }
 }

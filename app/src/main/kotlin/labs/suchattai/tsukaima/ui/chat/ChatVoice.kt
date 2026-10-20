@@ -49,15 +49,15 @@ internal class ChatVoice(
     private val chat: StateFlow<ChatState> = ChatView(state)
 
     /**
-     * Opens voice mode (no-op while open): a fresh recogniser, listening at once unless [listen] is false (then idle
-     * until the indicator is tapped). Until the chat's [history] is in, voice shows idle with no transcript and the
-     * controller has not started, so its transcript begins after the resumed history (none of it is spoken, no old
-     * request card is handed off). If the chat failed to open, voice shows why and does not listen until a later
+     * Opens voice mode (no-op while open): a fresh recogniser and speech output (per the voice settings now), listening
+     * at once unless [listen] is false (then idle until the indicator is tapped). Until the chat's [history] is in,
+     * voice shows idle with no transcript and the controller has not started, so its transcript begins after the
+     * resumed history (none of it is spoken, no old request card is handed off). If the chat failed to open, voice shows why and does not listen until a later
      * open succeeds; it then starts as if opened at that moment.
      */
     fun open(mode: VoiceMode, onApprovalNeeded: () -> Unit, listen: Boolean = true) {
         if (controller != null) return
-        val c = VoiceController(backend.speechInput(), backend.speechOutput, scope, chat, send, mode, onApprovalNeeded)
+        val c = VoiceController(backend.speechInput(), backend.speechOutput(), scope, chat, send, mode, onApprovalNeeded)
         controller = c
         if (history.value == ChatHistory.Loaded) {
             c.start(listen)

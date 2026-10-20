@@ -10,6 +10,7 @@ import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
 import androidx.compose.material.icons.automirrored.rounded.Send
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Archive
@@ -176,6 +177,9 @@ enum class IconName(val symbol: String) {
 
     /** Not in the handoff (v0.8.0): an image in a reply that failed to load. */
     BrokenImage("broken_image"),
+
+    /** Not in the handoff (v0.8.0): speech output (phone or Hermes). */
+    VolumeUp("volume_up"),
 }
 
 /** Pure lookup, safe from JVM unit tests (no Android context involved). */
@@ -238,6 +242,7 @@ fun iconFor(name: IconName): ImageVector = when (name) {
     IconName.GraphicEq -> Icons.Rounded.GraphicEq
     IconName.PictureAsPdf -> Icons.Rounded.PictureAsPdf
     IconName.BrokenImage -> Icons.Rounded.BrokenImage
+    IconName.VolumeUp -> Icons.AutoMirrored.Rounded.VolumeUp
     IconName.Key -> Icons.Rounded.Key
     IconName.Visibility -> Icons.Rounded.Visibility
     IconName.VisibilityOff -> Icons.Rounded.VisibilityOff

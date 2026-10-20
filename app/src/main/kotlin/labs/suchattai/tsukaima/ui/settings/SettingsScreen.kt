@@ -46,6 +46,7 @@ import labs.suchattai.tsukaima.data.api.SkillDto
 import labs.suchattai.tsukaima.data.api.ToolsetDto
 import labs.suchattai.tsukaima.data.prefs.NotificationPrefs
 import labs.suchattai.tsukaima.data.prefs.ThemeMode
+import labs.suchattai.tsukaima.data.prefs.VoiceOutput
 import labs.suchattai.tsukaima.data.prefs.VoiceRecognition
 import labs.suchattai.tsukaima.diagnostics.CrashRecord
 import labs.suchattai.tsukaima.diagnostics.shareReport
@@ -96,6 +97,10 @@ class SettingsActions(
     val onVoiceRecognition: (VoiceRecognition) -> Unit = {},
     /** The speech recognition sheet opens: probe the server's STT model for its label. */
     val onVoiceRecognitionOpen: () -> Unit = {},
+    /** Speech output picked: on this phone or on Hermes. */
+    val onVoiceOutput: (VoiceOutput) -> Unit = {},
+    /** The speech output sheet opens: probe the server's TTS provider for its label. */
+    val onVoiceOutputOpen: () -> Unit = {},
     /** "Use as device assistant": opens the system's assistant settings. */
     val onAssistant: () -> Unit = {},
     val onTheme: (ThemeMode) -> Unit = {},
@@ -165,6 +170,8 @@ fun SettingsScreen(
             onVoiceLanguagesOpen = vm::loadVoiceLanguages,
             onVoiceRecognition = vm::setVoiceRecognition,
             onVoiceRecognitionOpen = vm::loadSttModel,
+            onVoiceOutput = vm::setVoiceOutput,
+            onVoiceOutputOpen = vm::loadTtsProvider,
             onAssistant = onAssistant,
             onTheme = vm::setTheme,
             onMaterialYou = vm::setMaterialYou,
@@ -201,6 +208,19 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
             },
             MenuItem(serverRecognitionLabel(state.sttModel), null, checked = state.voiceRecognition == VoiceRecognition.Server) {
                 actions.onVoiceRecognition(VoiceRecognition.Server)
+            },
+        ),
+    )
+    var showVoiceOutput by rememberSaveable { mutableStateOf(false) }
+    MenuSheet(
+        visible = showVoiceOutput,
+        onDismiss = { showVoiceOutput = false },
+        items = listOf(
+            MenuItem(PHONE_SPEECH, null, checked = state.voiceOutput == VoiceOutput.Phone) {
+                actions.onVoiceOutput(VoiceOutput.Phone)
+            },
+            MenuItem(serverSpeechLabel(state.ttsProvider), null, checked = state.voiceOutput == VoiceOutput.Server) {
+                actions.onVoiceOutput(VoiceOutput.Server)
             },
         ),
     )
@@ -378,11 +398,23 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                     },
                     modifier = Modifier.bleed(12.dp),
                 )
+                TsukaimaRow(
+                    title = "Speech output",
+                    subtitle = if (state.voiceOutput == VoiceOutput.Server) SERVER_SPEECH_NOTE else PHONE_SPEECH,
+                    leading = IconName.VolumeUp,
+                    trailing = { Chevron() },
+                    onClick = {
+                        actions.onVoiceOutputOpen()
+                        showVoiceOutput = true
+                    },
+                    modifier = Modifier.bleed(12.dp),
+                )
                 val language = VoiceLanguages.label(state.voiceLanguage, state.voiceLanguages)
+                val anyOnHermes = state.voiceRecognition == VoiceRecognition.Server || state.voiceOutput == VoiceOutput.Server
                 TsukaimaRow(
                     title = "Language",
-                    // Hermes' relay carries no language: its own STT setting (auto-detection) decides there.
-                    subtitle = if (state.voiceRecognition == VoiceRecognition.Server) "$language · phone recognition and speech only" else language,
+                    // Hermes' relays carry no language: its own STT and TTS settings decide there.
+                    subtitle = if (anyOnHermes) "$language · phone recognition and speech only" else language,
                     leading = IconName.Translate,
                     trailing = { Chevron() },
                     onClick = {
@@ -648,3 +680,9 @@ private fun SupportDarkPreview() = TsukaimaTheme(darkTheme = true) { SupportPrev
 
 /** The speech recognition option for the phone's own recogniser. */
 private const val PHONE_RECOGNITION = "On this phone"
+
+/** The speech output option for the phone's own text-to-speech engine. */
+private const val PHONE_SPEECH = "On this phone"
+
+/** The speech output row's subtitle while Hermes speaks: the voice language setting does not reach its TTS. */
+private const val SERVER_SPEECH_NOTE = "Server voices follow Hermes’s language settings"

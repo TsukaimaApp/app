@@ -192,9 +192,37 @@ data class SttConfigDto(
     val streaming: Boolean = false,
 )
 
-/** `GET /api/audio/voice-config`, reduced to its [stt] part (a missing part means no server STT). */
+/**
+ * The text-to-speech part of `GET /api/audio/voice-config`: [mode] (`relay`, `direct`) and the [provider] when the
+ * server names one. Like [SttConfigDto], the provider's `api_key` is deliberately not modelled.
+ */
 @Serializable
-data class VoiceConfigDto(val stt: SttConfigDto? = null)
+data class TtsConfigDto(
+    val mode: String? = null,
+    val provider: String? = null,
+)
+
+/**
+ * `GET /api/audio/voice-config`, reduced to its [stt] and [tts] parts (a missing part means no server STT or TTS
+ * information).
+ */
+@Serializable
+data class VoiceConfigDto(
+    val stt: SttConfigDto? = null,
+    val tts: TtsConfigDto? = null,
+)
+
+/**
+ * `POST /api/audio/speak`: the synthesised speech as a base64 `data:` URL ([dataUrl]) of [mimeType] (Piper and
+ * Edge answer `audio/mpeg`; other providers `audio/wav` or `audio/ogg`); [provider] is the TTS backend that answered.
+ */
+@Serializable
+data class SpeechDto(
+    val ok: Boolean,
+    @SerialName("data_url") val dataUrl: String = "",
+    @SerialName("mime_type") val mimeType: String? = null,
+    val provider: String? = null,
+)
 
 /** `SessionDto.source` of a cron job's run. */
 const val CRON_SOURCE = "cron"

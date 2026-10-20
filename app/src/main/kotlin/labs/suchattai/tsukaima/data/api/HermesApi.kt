@@ -391,9 +391,23 @@ class HermesApi(
         }
     }
 
-    /** `GET /api/audio/voice-config`, the speech-to-text part only (see [SttConfigDto]). */
+    /**
+     * `POST /api/audio/speak`: [text] synthesised by the server's configured TTS provider, in its voice and language
+     * settings. 400 (no provider configured, provider error) keeps the server's `detail` on the [ApiException].
+     * Cancellable, and on [transcribeClient]: a long sentence on a slow provider outlasts the shared timeouts.
+     */
+    suspend fun speak(text: String): SpeechDto {
+        val request = newRequest("POST", "api/audio/speak", buildJsonObject { put("text", text) }, true, false, emptyArray())
+        val response = transcribeClient.newCall(request).await()
+        return withContext(Dispatchers.IO) {
+            response.use { decode(request, it) { body -> HermesJson.decodeFromString(SpeechDto.serializer(), body) } }
+        }
+    }
+
+    /** `GET /api/audio/voice-config`, the speech-to-text and text-to-speech parts only (see [VoiceConfigDto]). */
     suspend fun voiceConfig(): VoiceConfigDto = get("api/audio/voice-config", VoiceConfigDto.serializer(), managed = false)
 
+    /** Audio relays ([transcribe], [speak]): 60 s, longer than the shared client's 20 s call timeout. */
     private val transcribeClient: OkHttpClient by lazy {
         client.newBuilder()
             .callTimeout(TRANSCRIBE_TIMEOUT_S, TimeUnit.SECONDS)
