@@ -6,6 +6,9 @@ import labs.suchattai.tsukaima.domain.markdown.MarkdownTables
 object SpeechText {
     private val fence = Regex("^\\s*(```|~~~)")
     private val media = Regex("^\\s*MEDIA:")
+
+    /** A whole-line `http(s)` image (the chat shows it as a card): nothing to say, not even the alt. */
+    private val imageLine = Regex("^\\s*!\\[[^\\]]*]\\(\\s*<?https?://[^)]*\\)\\s*$")
     private val heading = Regex("^\\s{0,3}#{1,6}\\s+")
     private val quote = Regex("^\\s*(?:>\\s?)+")
     private val listPrefix = Regex("^\\s*(?:[-*+]|\\d+[.)])\\s+")
@@ -19,7 +22,7 @@ object SpeechText {
 
     /**
      * Speakable text for [markdown]: fenced code blocks (an unterminated fence runs to the end)
-     * and `MEDIA:` lines are dropped, inline markup is reduced to its text, links keep their
+     * and `MEDIA:` and whole-line image lines are dropped, inline markup is reduced to its text, links keep their
      * label, bare URLs are dropped, and blank lines disappear. A table row reads as its cells joined with ", "
      * (separator rows are dropped), and so are horizontal rules and setext underlines. The result is trimmed.
      */
@@ -34,7 +37,7 @@ object SpeechText {
             if (inFence || media.containsMatchIn(raw)) continue
             // The quote marker goes first, so a quoted table row or rule reads like an unquoted one.
             val line = quote.replace(raw, "")
-            if (isRuleOrUnderline(line) || isTableSeparator(line)) continue
+            if (isRuleOrUnderline(line) || isTableSeparator(line) || imageLine.matches(line)) continue
             var s = tableRow(line)
             s = heading.replace(s, "")
             s = listPrefix.replace(s, "")

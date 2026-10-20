@@ -150,6 +150,9 @@ class HermesRepository(
     /** A file the agent delivered (`MEDIA:`), streaming; the caller closes it. */
     suspend fun download(path: String): Result<FileDownload> = call { api.download(path) }
 
+    /** An image a reply shows (`![alt](url)`): bearer only on the server's own origin, at most 8 MB. */
+    suspend fun fetchImage(url: String): Result<ByteArray> = call { api.fetchImage(url) }
+
     /** One utterance (WAV) through the server's speech-to-text relay. */
     suspend fun transcribe(wav: ByteArray): Result<TranscriptionDto> = call { api.transcribe(wav) }
     suspend fun voiceConfig(): Result<VoiceConfigDto> = call { api.voiceConfig() }

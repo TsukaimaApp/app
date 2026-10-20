@@ -70,6 +70,12 @@ interface ChatBackend {
     /** A `MEDIA:` file, streaming (`/api/files/download`); the caller closes it. */
     suspend fun download(path: String): Result<FileDownload>
 
+    /**
+     * The bytes of an `http(s)` image a reply shows (`![alt](url)`), at most 8 MB; the bearer goes only to the
+     * server's own origin.
+     */
+    suspend fun fetchImage(url: String): Result<ByteArray>
+
     /** Where downloads are saved (blocking; run on IO). */
     val fileSaver: FileSaver
 
@@ -126,6 +132,7 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override suspend fun sessionArchived(id: String) = c.repository.sessionArchived(id)
     override suspend fun deleteSession(id: String) = c.repository.deleteSession(id)
     override suspend fun download(path: String) = c.repository.download(path)
+    override suspend fun fetchImage(url: String) = c.repository.fetchImage(url)
     override val fileSaver get() = c.fileSaver
     override fun openFile(uri: String, mime: String) = c.openFile(uri, mime)
     override fun decodePreview(bytes: ByteArray) = ImagePreview.decode(bytes)?.asImageBitmap()

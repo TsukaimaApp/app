@@ -368,6 +368,9 @@ class ChatViewModel(
     /** The inline preview of image [path] (cached), or null. */
     suspend fun preview(path: String): ImageBitmap? = withContext(dispatcher) { media.preview(path) }
 
+    /** A reply's `![alt](url)` image, decoded (null when it failed; cached either way). */
+    suspend fun imagePreview(url: String): ImageBitmap? = withContext(dispatcher) { media.imagePreview(url) }
+
     /** The live session id; opens (creates or resumes) the session first and waits for it when there is none. */
     private suspend fun liveSession(): String? {
         chat.liveSessionId?.let { return it }

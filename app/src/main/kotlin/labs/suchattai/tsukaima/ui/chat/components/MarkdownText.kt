@@ -102,10 +102,10 @@ private fun rememberInline(spans: List<MdSpan>, colors: TsukaimaColors, caret: B
     remember(spans, colors, caret) { markdownInline(spans, colors, caret) }
 
 /**
- * Renders parsed markdown blocks; `MEDIA:` blocks become [MediaCard]s served by [media] and tables
- * [MarkdownTable]s. With [streaming], a blinking accent caret is appended inline to the last text run (so it
- * follows wrapping) of a trailing paragraph, list or heading; after any other trailing block (code, table, quote,
- * rule, file card), or when empty, it sits on its own line.
+ * Renders parsed markdown blocks; `MEDIA:` blocks become [MediaCard]s and whole-line images [ImageCard]s, both
+ * served by [media], and tables [MarkdownTable]s. With [streaming], a blinking accent caret is appended inline to
+ * the last text run (so it follows wrapping) of a trailing paragraph, list or heading; after any other trailing
+ * block (code, table, quote, rule, file card, image), or when empty, it sits on its own line.
  */
 @Composable
 fun MarkdownText(
@@ -138,6 +138,7 @@ fun MarkdownText(
                 )
                 is MdBlock.Code -> CodeBlock(code = block.code, lang = block.lang)
                 is MdBlock.Media -> MediaCard(block.path, media)
+                is MdBlock.Image -> ImageCard(block.alt, block.url, media)
                 is MdBlock.Bullets -> MarkdownList(block.items, caret, caretContent)
                 is MdBlock.Numbered -> MarkdownList(block.items, caret, caretContent)
                 is MdBlock.Table -> MarkdownTable(block)
@@ -275,6 +276,7 @@ private fun MarkdownPreview(dark: Boolean) = PreviewPage(dark) {
     MarkdownText(Markdown.parse(RichMd), modifier = Modifier.padding(16.dp))
     MarkdownText(Markdown.parse("| a | b |\n|---|---|\n| 1 | 2", streaming = true), streaming = true, modifier = Modifier.padding(16.dp))
     MarkdownText(Markdown.parse("Here is the log:\nMEDIA:/home/hermes/workspace/output/agent.debug.txt"), modifier = Modifier.padding(16.dp))
+    MarkdownText(Markdown.parse("The chart:\n![CPU load](https://example.com/cpu.png)"), modifier = Modifier.padding(16.dp))
     MarkdownText(Markdown.parse("Streaming reply that keeps going and going until it wraps onto a second line"), streaming = true, modifier = Modifier.padding(16.dp))
 }
 

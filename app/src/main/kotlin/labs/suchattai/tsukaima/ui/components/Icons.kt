@@ -17,6 +17,7 @@ import androidx.compose.material.icons.rounded.AttachFile
 import androidx.compose.material.icons.rounded.AudioFile
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.BarChart
+import androidx.compose.material.icons.rounded.BrokenImage
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
@@ -172,6 +173,9 @@ enum class IconName(val symbol: String) {
 
     /** Not in the handoff (v0.8.0): PDF attachment chips. */
     PictureAsPdf("picture_as_pdf"),
+
+    /** Not in the handoff (v0.8.0): an image in a reply that failed to load. */
+    BrokenImage("broken_image"),
 }
 
 /** Pure lookup, safe from JVM unit tests (no Android context involved). */
@@ -233,6 +237,7 @@ fun iconFor(name: IconName): ImageVector = when (name) {
     IconName.Translate -> Icons.Rounded.Translate
     IconName.GraphicEq -> Icons.Rounded.GraphicEq
     IconName.PictureAsPdf -> Icons.Rounded.PictureAsPdf
+    IconName.BrokenImage -> Icons.Rounded.BrokenImage
     IconName.Key -> Icons.Rounded.Key
     IconName.Visibility -> Icons.Rounded.Visibility
     IconName.VisibilityOff -> Icons.Rounded.VisibilityOff

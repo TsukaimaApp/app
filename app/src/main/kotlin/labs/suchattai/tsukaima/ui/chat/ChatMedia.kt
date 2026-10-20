@@ -59,8 +59,9 @@ object Media {
 /**
  * Downloads and previews of the chat's `MEDIA:` files for one [ChatViewModel]. A tap downloads the file into
  * Downloads ([ChatBackend.fileSaver]) and offers it to a viewer; one download per path at a time. Image previews
- * are decoded once and kept in a small LRU, so scrolling a card back into view does not refetch it. Driven from
- * the VM's single-threaded [scope]; the body is read, saved and decoded on [io].
+ * are decoded once and kept in a small LRU, so scrolling a card back into view does not refetch it. Images in
+ * replies (`![alt](url)`, [imagePreview]) have their own LRU keyed by URL. Driven from the VM's single-threaded
+ * [scope]; the body is read, saved and decoded on [io].
  */
 internal class ChatMedia(
     private val backend: ChatBackend,
@@ -72,6 +73,10 @@ internal class ChatMedia(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageBitmap?>) = size > PREVIEW_CACHE
     }
     private val loading = mutableMapOf<String, Deferred<ImageBitmap?>>()
+    private val images = object : LinkedHashMap<String, ImageBitmap?>(IMAGE_CACHE, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageBitmap?>) = size > IMAGE_CACHE
+    }
+    private val imageLoading = mutableMapOf<String, Deferred<ImageBitmap?>>()
 
     /** Downloads [path] into Downloads and opens it; a re-tap while it downloads or just saved is ignored, a failed one retries. */
     fun open(path: String) {
@@ -135,12 +140,40 @@ internal class ChatMedia(
         }
     }
 
+    /**
+     * The decoded image at [url] (a reply's `![alt](url)`), or null when it failed (fetch, the 8 MB cap, or
+     * decoding). Concurrent callers share one fetch; every outcome is cached, a failure too, so a broken image is
+     * not refetched on every recomposition or scroll (no retry storm).
+     */
+    suspend fun imagePreview(url: String): ImageBitmap? {
+        if (images.containsKey(url)) return images[url]
+        return imageLoading.getOrPut(url) { scope.async { fetchImage(url) } }.await()
+    }
+
+    private suspend fun fetchImage(url: String): ImageBitmap? {
+        val bitmap = try {
+            val bytes = backend.fetchImage(url).getOrThrow()
+            withContext(io) { backend.decodePreview(bytes) }
+        } catch (c: CancellationException) {
+            imageLoading.remove(url)
+            throw c
+        } catch (e: OutOfMemoryError) {
+            null
+        } catch (e: Exception) {
+            null
+        }
+        images[url] = bitmap
+        imageLoading.remove(url)
+        return bitmap
+    }
+
     private fun set(path: String, value: MediaState?) = state.update {
         it.copy(mediaState = if (value == null) it.mediaState - path else it.mediaState + (path to value))
     }
 
     private companion object {
         const val PREVIEW_CACHE = 8
+        const val IMAGE_CACHE = 16
 
         /** How long a card shows "Saved" before it is back to idle. */
         const val SAVED_MS = 3_000L

@@ -18,7 +18,9 @@ import labs.suchattai.tsukaima.data.prefs.SettingsStore
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.OkHttpClient
+import okio.Buffer
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -28,6 +30,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 class HermesRepositoryTest {
     @get:Rule
@@ -124,5 +127,49 @@ class HermesRepositoryTest {
         snapshot.value = Settings(serverUrl = serverUrl())
         server.enqueue(MockResponse.Builder().addHeader("Content-Type", "application/json").body("""{"active":"work"}""").build())
         assertEquals("work", repo.activeProfile().getOrThrow())
+    }
+
+    @Test
+    fun fetchImageUsesAuthOnlyForSameOrigin() = runBlocking<Unit> {
+        val foreign = MockWebServer().apply { start() }
+        try {
+            // The authed client adds a bearer to everything: only routing decides who gets it.
+            val authed = okHttp.newBuilder()
+                .addInterceptor { chain -> chain.proceed(chain.request().newBuilder().header("Authorization", "Bearer tk").build()) }
+                .build()
+            val api = HermesApi(authed, { snapshot.value.serverUrl }, { snapshot.value }, plainClient = okHttp)
+            val images = HermesRepository(api, store, creds, connection, loginApi = { url -> HermesApi(okHttp, { url }) })
+            snapshot.value = Settings(serverUrl = serverUrl())
+            val png = byteArrayOf(-119, 80, 78, 71)
+
+            server.enqueue(MockResponse.Builder().addHeader("Content-Type", "image/png").body(Buffer().write(png)).build())
+            assertArrayEquals(png, images.fetchImage(server.url("/api/files/x.png").toString()).getOrThrow())
+            val own = server.takeRequest(1, TimeUnit.SECONDS)!!
+            assertEquals("Bearer tk", own.headers["Authorization"])
+
+            foreign.enqueue(MockResponse.Builder().addHeader("Content-Type", "image/png").body(Buffer().write(png)).build())
+            assertArrayEquals(png, images.fetchImage(foreign.url("/cat.png").toString()).getOrThrow())
+            val other = foreign.takeRequest(1, TimeUnit.SECONDS)!!
+            assertNull(other.headers["Authorization"])
+
+            // A foreign 401 is that host's business: no sign-in prompt.
+            foreign.enqueue(MockResponse.Builder().code(401).build())
+            assertTrue(images.fetchImage(foreign.url("/private.png").toString()).isFailure)
+            assertFalse(connection.authRequired.value)
+
+            // The 8 MB cap, by Content-Length and by what actually arrives.
+            val big = Buffer().write(ByteArray((HermesApi.IMAGE_MAX_BYTES + 1).toInt()))
+            foreign.enqueue(MockResponse.Builder().body(big.clone()).build())
+            assertTrue(images.fetchImage(foreign.url("/big.png").toString()).isFailure)
+            foreign.enqueue(MockResponse.Builder().chunkedBody(big, 64 * 1024).build())
+            assertTrue(images.fetchImage(foreign.url("/big-chunked.png").toString()).isFailure)
+
+            // Exactly at the cap is fine; not http(s) is no fetch at all.
+            foreign.enqueue(MockResponse.Builder().body(Buffer().write(ByteArray(HermesApi.IMAGE_MAX_BYTES.toInt()))).build())
+            assertEquals(HermesApi.IMAGE_MAX_BYTES.toInt(), images.fetchImage(foreign.url("/max.png").toString()).getOrThrow().size)
+            assertTrue(images.fetchImage("file:///etc/passwd").isFailure)
+        } finally {
+            foreign.close()
+        }
     }
 }

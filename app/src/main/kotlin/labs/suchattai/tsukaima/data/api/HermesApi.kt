@@ -23,6 +23,7 @@ import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -30,6 +31,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okio.BufferedSource
 import java.io.Closeable
+import java.io.IOException
 import java.net.URLDecoder
 import java.util.Base64
 import java.util.concurrent.TimeUnit
@@ -39,11 +41,14 @@ import kotlin.coroutines.resumeWithException
 /**
  * Hermes dashboard REST client. [baseUrl] has no trailing slash. [settings] supplies the active
  * profile, which is appended as `?profile=` to management endpoints when it is not "default".
+ * [plainClient] (no auth interceptor) fetches images from other origins ([fetchImage]); it defaults to [client],
+ * whose requests to other origins then go out tagged [NoAuth].
  */
 class HermesApi(
     private val client: OkHttpClient,
     private val baseUrl: () -> String,
     private val settings: () -> Settings = { Settings() },
+    private val plainClient: OkHttpClient = client,
 ) {
     // ---- public / auth -------------------------------------------------------------------
 
@@ -335,6 +340,34 @@ class HermesApi(
         return ApiException(code, message)
     }
 
+    // ---- images in replies ---------------------------------------------------------------
+
+    /**
+     * The bytes of an `http(s)` image a reply shows (`![alt](url)`), at most [IMAGE_MAX_BYTES]. A [url] on the
+     * server's own origin (scheme, host and port of [baseUrl]) goes through the authed client, so a server-hosted
+     * image gets the bearer; any other goes through [plainClient] tagged [NoAuth], so no credential leaves for a
+     * third party. Non-2xx (401 included: it is that host's verdict, not a sign-in prompt) → [ApiException]; a
+     * body over the cap (by `Content-Length` or as it arrives) → [IOException]; not http(s) → [IllegalArgumentException].
+     */
+    suspend fun fetchImage(url: String): ByteArray {
+        val target = url.toHttpUrlOrNull() ?: throw IllegalArgumentException("Not an http(s) URL")
+        val own = baseUrl().toHttpUrlOrNull()
+        val sameOrigin = own != null && own.scheme == target.scheme && own.host == target.host && own.port == target.port
+        val builder = Request.Builder().url(target)
+        if (!sameOrigin) builder.tag(NoAuth::class.java, NoAuth())
+        val response = (if (sameOrigin) client else plainClient).newCall(builder.build()).await()
+        return withContext(Dispatchers.IO) {
+            response.use {
+                if (!it.isSuccessful) throw ApiException(it.code, "Image unavailable (${it.code})")
+                val body = it.body
+                if (body.contentLength() > IMAGE_MAX_BYTES) throw IOException("Image over ${IMAGE_MAX_BYTES / 1_000_000} MB")
+                val source = body.source()
+                if (source.request(IMAGE_MAX_BYTES + 1)) throw IOException("Image over ${IMAGE_MAX_BYTES / 1_000_000} MB")
+                source.readByteArray()
+            }
+        }
+    }
+
     // ---- audio ---------------------------------------------------------------------------
 
     /**
@@ -479,26 +512,29 @@ class HermesApi(
         return value.takeIf { it.isNotEmpty() }
     }
 
-    private companion object {
-        const val SESSION_COOKIE = "hermes_session_at"
-        val DISPOSITION_PARAM = Regex(""";\s*([^=;\s]+)\s*=\s*(\"((?:[^\"\\]|\\.)*)\"|[^;]*)""")
-        val QUOTED_PAIR = Regex("""\\(.)""")
-        val COOKIE_PREFIXES = listOf("", "__Host-", "__Secure-")
-        const val DEFAULT_PROFILE = "default"
+    companion object {
+        /** [fetchImage] reads at most this much; a bigger image is a failure. */
+        const val IMAGE_MAX_BYTES = 8_000_000L
+
+        private const val SESSION_COOKIE = "hermes_session_at"
+        private val DISPOSITION_PARAM = Regex(""";\s*([^=;\s]+)\s*=\s*(\"((?:[^\"\\]|\\.)*)\"|[^;]*)""")
+        private val QUOTED_PAIR = Regex("""\\(.)""")
+        private val COOKIE_PREFIXES = listOf("", "__Host-", "__Secure-")
+        private const val DEFAULT_PROFILE = "default"
         /** `le=100` on the server's `limit` query. */
-        const val MAX_SESSIONS = 100
-        const val SEARCH_LIMIT = 20
-        val JSON = "application/json; charset=utf-8".toMediaType()
-        val EMPTY_BODY = JsonObject(emptyMap())
-        const val OCTET_STREAM = "application/octet-stream"
+        private const val MAX_SESSIONS = 100
+        private const val SEARCH_LIMIT = 20
+        private val JSON = "application/json; charset=utf-8".toMediaType()
+        private val EMPTY_BODY = JsonObject(emptyMap())
+        private const val OCTET_STREAM = "application/octet-stream"
         /** Upload plus server-side recognition of up to 30 s of audio. */
-        const val TRANSCRIBE_TIMEOUT_S = 60L
+        private const val TRANSCRIBE_TIMEOUT_S = 60L
 
         /**
          * The filename of a `Content-Disposition` header: RFC 5987 `filename*=UTF-8''…` wins over `filename="…"`
          * (Starlette sends the former for non-ASCII names). Any directory part is dropped; null when absent.
          */
-        fun dispositionFilename(header: String): String? {
+        private fun dispositionFilename(header: String): String? {
             // Quote-aware: a quoted value may hold `;` and `\"` (RFC 6266 quoted-string).
             val params = DISPOSITION_PARAM.findAll(header).associate { m ->
                 val quoted = m.groups[3]?.value

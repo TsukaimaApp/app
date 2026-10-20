@@ -45,11 +45,15 @@ import labs.suchattai.tsukaima.ui.theme.TsukaimaShapes
 import labs.suchattai.tsukaima.ui.theme.TsukaimaType
 import labs.suchattai.tsukaima.ui.theme.tsukaima
 
-/** What `MEDIA:` cards need from the chat: download state per path, the tap, and the image preview loader. */
+/**
+ * What `MEDIA:` cards need from the chat: download state per path, the tap, and the image preview loader; plus
+ * [previewImage], the loader of a reply's `![alt](url)` images ([ImageCard]), null when one fails.
+ */
 class MediaHost(
     val states: Map<String, MediaState> = emptyMap(),
     val onOpen: (String) -> Unit = {},
     val preview: suspend (String) -> ImageBitmap? = { null },
+    val previewImage: suspend (String) -> ImageBitmap? = { null },
 )
 
 private fun iconFor(kind: MediaKind) = when (kind) {

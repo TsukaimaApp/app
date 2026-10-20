@@ -170,6 +170,7 @@ class ChatViewModelTest {
             downloadGate?.await()
             return downloadResult(path)
         }
+        override suspend fun fetchImage(url: String): Result<ByteArray> = Result.failure(java.io.IOException("offline"))
 
         /** name, mime, content of every save. */
         val saved = mutableListOf<Triple<String, String, String>>()

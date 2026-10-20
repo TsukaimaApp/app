@@ -9,6 +9,11 @@ class SpeechTextTest {
         assertEquals("Done.\nSee this log and uname -a.", SpeechText.plain(md))
     }
 
+    @Test fun plainDropsWholeLineImages() {
+        val md = "Here is the chart:\n  ![CPU load](https://e.com/cpu.png)  \nLoad peaked at 3. See ![it](https://e.com/x.png) inline."
+        assertEquals("Here is the chart:\nLoad peaked at 3. See it inline.", SpeechText.plain(md))
+    }
+
     @Test fun plainStripsListAndHeadingMarkers() =
         assertEquals("Steps\nfirst\nsecond", SpeechText.plain("# Steps\n- first\n1. second"))
 

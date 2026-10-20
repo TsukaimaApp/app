@@ -58,12 +58,15 @@ sealed interface MdBlock {
 
     /** A file the agent delivered with a whole-line `MEDIA:<path>` directive (`/…` or `~/…`). */
     data class Media(val path: String) : MdBlock
+
+    /** A line that is only `![alt](url)` with an `http(s)` [url]; [alt] may be empty. Inline images stay links. */
+    data class Image(val alt: String, val url: String) : MdBlock
 }
 
 /**
  * The markdown agents emit: fenced code, GFM pipe tables, ATX and setext headings, bullet and numbered lists
- * (nested), block quotes, rules, paragraphs; inline bold, italic, code, strikethrough and links (see
- * [MarkdownInline]); plus Hermes `MEDIA:` file deliveries. Line-based and linear, since a streaming reply is
+ * (nested), block quotes, rules, paragraphs, whole-line `http(s)` images; inline bold, italic, code, strikethrough
+ * and links (see [MarkdownInline]); plus Hermes `MEDIA:` file deliveries. Line-based and linear, since a streaming reply is
  * re-parsed on every delta; a half-typed construct reads as text until it is complete enough. Never throws.
  */
 object Markdown {
@@ -119,6 +122,10 @@ object Markdown {
 
             val media = if (streaming && i == lines.lastIndex) null else mediaPath(trimmed)
             if (media != null) { flush(); blocks += MdBlock.Media(media); i++; continue }
+
+            // An indented image line under a list item continues the item, as any other line would.
+            val image = if (list != null && indentOf(line) >= 2) null else imageLine(trimmed)
+            if (image != null) { flush(); blocks += image; i++; continue }
 
             val table = MarkdownTables.parse(lines, i)
             if (table != null) {
@@ -332,6 +339,19 @@ object Markdown {
         }
         val anchored = path.startsWith("/") || path.startsWith("~/")
         return path.takeIf { anchored && it.substringAfterLast('/').isNotBlank() }
+    }
+
+    /**
+     * [trimmed] as an [MdBlock.Image] when it is exactly one `![alt](url)` (title allowed) with an `http(s)` url.
+     * Read with [MarkdownInline], so the destination rules (nested parentheses, `<…>`, titles) match an inline image.
+     */
+    private fun imageLine(trimmed: String): MdBlock.Image? {
+        if (!trimmed.startsWith("![") || !trimmed.endsWith(')')) return null
+        val link = MarkdownInline.parse(trimmed).singleOrNull() as? MdSpan.Link ?: return null
+        if (!link.url.startsWith("http://") && !link.url.startsWith("https://")) return null
+        // An empty alt reads as the URL in a link; an image keeps it empty.
+        val alt = if (trimmed.startsWith("![]")) "" else link.text
+        return MdBlock.Image(alt, link.url)
     }
 
     private val WHITESPACE = Regex("\\s+")

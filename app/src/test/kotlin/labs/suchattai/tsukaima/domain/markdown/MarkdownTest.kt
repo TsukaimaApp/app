@@ -439,6 +439,63 @@ class MarkdownTest {
     }
 
     @Test
+    fun imageBlockOnlyForHttpUrls() {
+        assertEquals(
+            listOf(MdBlock.Image("chart", "https://example.com/c.png")),
+            Markdown.parse("![chart](https://example.com/c.png)"),
+        )
+        // Surrounding whitespace is fine, a title is dropped, and an empty alt stays empty.
+        assertEquals(
+            listOf(
+                MdBlock.Paragraph(listOf(MdSpan.Text("Here:"))),
+                MdBlock.Image("", "http://h:9119/a.jpg"),
+                MdBlock.Paragraph(listOf(MdSpan.Text("Done."))),
+            ),
+            Markdown.parse("Here:\n   ![](http://h:9119/a.jpg \"title\")  \nDone."),
+        )
+        // Not http(s): a relative image reads as its alt text, a mailto: one as a link.
+        assertEquals(listOf(para(MdSpan.Text("logo"))), Markdown.parse("![logo](img/logo.png)"))
+        assertEquals(
+            listOf(para(MdSpan.Link("me", "mailto:a@b.c"))),
+            Markdown.parse("![me](mailto:a@b.c)"),
+        )
+        // A link is not an image, and an image with text after it is not a whole line.
+        assertEquals(listOf(para(MdSpan.Link("x", "https://e.com/x.png"))), Markdown.parse("[x](https://e.com/x.png)"))
+        assertEquals(
+            listOf(para(MdSpan.Link("a", "https://e.com/a.png"), MdSpan.Text(" and more"))),
+            Markdown.parse("![a](https://e.com/a.png) and more"),
+        )
+    }
+
+    @Test
+    fun inlineImageStaysALink() {
+        assertEquals(
+            listOf(para(MdSpan.Text("See "), MdSpan.Link("plot", "https://e.com/p.png"), MdSpan.Text(" here."))),
+            Markdown.parse("See ![plot](https://e.com/p.png) here."),
+        )
+        // Two images on one line are not one image.
+        assertEquals(
+            listOf(para(MdSpan.Link("a", "https://e.com/a.png"), MdSpan.Text(" "), MdSpan.Link("b", "https://e.com/b.png"))),
+            Markdown.parse("![a](https://e.com/a.png) ![b](https://e.com/b.png)"),
+        )
+    }
+
+    @Test
+    fun imageLineInsideAListItemStaysInTheItem() {
+        val out = Markdown.parse("- shot\n  ![s](https://e.com/s.png)")
+        assertEquals(1, out.size)
+        assertTrue(out.single() is MdBlock.Bullets)
+    }
+
+    @Test
+    fun imageInAQuote() {
+        assertEquals(
+            listOf(MdBlock.Quote(listOf(MdBlock.Image("q", "https://e.com/q.png")))),
+            Markdown.parse("> ![q](https://e.com/q.png)"),
+        )
+    }
+
+    @Test
     fun pathologicalInputsDoNotThrow() {
         val inputs = listOf(
             "|||", "|", "||\n||", "|\n|-|", "[", "](", "[a](", "[a](b", "~~", "~~~~", "> > >", ">", "> ```", "#", "# ",

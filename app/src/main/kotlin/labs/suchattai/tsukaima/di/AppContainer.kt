@@ -134,7 +134,7 @@ class AppContainer(context: Context) {
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
 
-    val api: HermesApi = HermesApi(httpClient, baseUrl, settingsSnapshot)
+    val api: HermesApi = HermesApi(httpClient, baseUrl, settingsSnapshot, plainClient = plainClient)
 
     val gateway: GatewayClient = GatewayClient(
         client = webSocketClient,
