@@ -3,6 +3,13 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.6.1 — 2026-10-20 (versionCode 14)
+
+### Added
+- Voice language picker (Settings → Voice → Language, and the translate button on the voice screen). One setting
+  drives both speech recognition and text-to-speech; System default unless picked. A language the text-to-speech
+  engine has not installed falls back to its default voice with a notice.
+
 ## 0.6.0 — 2026-10-20 (versionCode 13)
 
 ### Added

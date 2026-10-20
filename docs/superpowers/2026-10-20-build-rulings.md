@@ -232,3 +232,7 @@ Decisions taken on the user's behalf while implementing `design/handoff_voice/RE
 - Ruling: the assistant sheet finishes at once when the keyguard is locked (no unlock request) — "nothing on the lock screen" — cost if wrong: no assistant from the lock screen.
 - Ruling: recogniser errors back off from 300 ms doubling to 5 s; five consecutive non-speech errors end listening with the error shown (tap retries); in-app voice rests at "Tap to speak" after 2 minutes without hearing a final utterance — a phone left on the desk must not hold the mic and the screen forever — cost if wrong: one extra tap.
 - Ruling (known cost, accepted for 0.6.0): on Android 10 and 11, making Tsukaima the assistant also makes its stub recogniser the device's default speech recogniser, so other apps' speech input stops working until the assistant is changed back. Android 12+ is unaffected. A forwarding recogniser that proxies to the system one is the follow-up.
+
+## v0.6.1
+
+- Ruling: one language setting for both recognition and speech, system default unless picked; options = device locales ∪ TTS engine languages ∪ a fixed fallback list; an uninstalled TTS language reverts to the engine default with a toast.

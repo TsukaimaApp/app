@@ -42,9 +42,10 @@ approvals, questions or password prompts. End returns to the chat (the transcrip
 Keyboard returns with the composer focused. Voice closes when the app leaves the screen; rotation keeps it. After
 2 minutes without hearing you it rests at "Tap to speak".
 
-Recognition uses the platform recogniser, on-device first (API 31+) in the device locale, and falls back to the
-default recogniser when the language pack is missing. Speech uses the system text-to-speech engine and voice;
-without one, replies are shown only.
+Recognition uses the platform recogniser, on-device first (API 31+), and falls back to the default recogniser
+when the language pack is missing. Speech uses the system text-to-speech engine; without one, replies are shown
+only. Both follow one language setting, the system default unless you pick another in Settings → Voice → Language
+or with the translate button on the voice screen.
 
 To use Tsukaima as the device assistant, open Settings → Voice → "Use as device assistant" and pick it in the
 system's assistant picker. Long-press home (or the corner swipe) shows a sheet that handles one exchange per
