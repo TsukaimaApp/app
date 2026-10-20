@@ -3,7 +3,7 @@
 Native Android client (Kotlin + Jetpack Compose) for a self-hosted [Hermes Agent](https://github.com/NousResearch/hermes-agent).
 Chat with your agent, browse sessions, manage cron jobs, and get actionable notifications from your phone.
 
-Version **0.5.0** (versionCode 6). Changes per release: [`CHANGELOG.md`](CHANGELOG.md).
+Version **0.6.0** (versionCode 13). Changes per release: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Features
 
@@ -30,6 +30,32 @@ Version **0.5.0** (versionCode 6). Changes per release: [`CHANGELOG.md`](CHANGEL
   cron-failed alerts via a foreground service; each kind can be switched off
 - HTTPS fronts (Tailscale Serve or any TLS reverse proxy) as well as plain `http://` on a tailnet
 - Light/dark themes, Material You option, wide (tablet/foldable) pane layout
+- Voice mode and an assistant slot (see below)
+
+## Voice
+
+Tap the composer's mic (shown while the field is empty) to open voice mode. It listens continuously and sends
+whatever it recognises as a final utterance, including background speech, so mute while others talk. Replies are
+read aloud sentence by sentence as they stream; fenced code blocks and delivered files are shown, never spoken.
+Tap the orb while it speaks to interrupt and talk. Risky actions still need a tap on Approve: voice never answers
+approvals, questions or password prompts. End returns to the chat (the transcript is already in the session);
+Keyboard returns with the composer focused. Voice closes when the app leaves the screen; rotation keeps it. After
+2 minutes without hearing you it rests at "Tap to speak".
+
+Recognition uses the platform recogniser, on-device first (API 31+) in the device locale, and falls back to the
+default recogniser when the language pack is missing. Speech uses the system text-to-speech engine and voice;
+without one, replies are shown only.
+
+To use Tsukaima as the device assistant, open Settings → Voice → "Use as device assistant" and pick it in the
+system's assistant picker. Long-press home (or the corner swipe) shows a sheet that handles one exchange per
+invocation and then waits at "Tap to speak"; "Continue in Tsukaima" opens the chat. Assistant chats are reused for
+30 minutes, then a new chat starts. Anything needing approval is handed to the app ("That needs your approval. I’ve
+opened it in Tsukaima."). Launches of the sheet by other apps (`ACTION_ASSIST`) open idle on a new chat and never
+listen until tapped.
+
+Not supported: a hotword, and anything on the lock screen. Android 10 and 11: while Tsukaima is the assistant, its
+stub recogniser becomes the device's default speech recogniser and other apps' speech input stops working until you
+change the assistant back; Android 12+ is unaffected.
 
 ## Screenshots
 
@@ -91,6 +117,7 @@ e.g. Tailscale Serve's).
 
 - `INTERNET`: talk to your Hermes server.
 - `POST_NOTIFICATIONS` (Android 13+): approval requests and gateway alerts.
+- `RECORD_AUDIO`: voice mode and the assistant sheet; asked on the first mic tap.
 - `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_DATA_SYNC`: keeps the event connection alive in the background
   so notifications can arrive; shown as a persistent low-priority notification.
 

@@ -58,3 +58,29 @@ T1 CI concurrency group / wrapper checksum · T3 focus rings on buttons/chips, `
 ## Verified fine (skip re-checking)
 
 Credentials in EncryptedSharedPreferences with in-memory fallback; `allowBackup=false`; no TrustManager/HostnameVerifier overrides; no body logging; approval/pairing/agent channels `VISIBILITY_PRIVATE` with public versions; only `MainActivity` exported; PendingIntents immutable; WS ticket single-use 30 s in query (as the SPA does); 401 single-flight re-login with latch; reconnect backoff 1/2/5/10 s with fresh ticket; `session.events.since` replay with truncation → history rebuild; foreground service hand-off; `onTimeout` handled; adaptive + monochrome launcher icon complete; manifest permissions all exercised; R8 + resource shrinking with serialization/OkHttp keep rules; `.gitignore` covers `.local/`, `*.env`, `local.properties`; smoke script refuses the real instance and never prints the password; no TODO/FIXME/println/printStackTrace/commented-out code in main; every design screen and state is implemented (onboarding, status incl. offline/cached, chat with all cards, drawer incl. archived + long-press, two-pane ≥720 dp, cron list/edit, logs, settings, dark mode, toast).
+
+## Voice (v0.6.0)
+
+Shipped: two voice surfaces from `design/handoff_voice/` — an in-app voice overlay inside the chat screen (entered
+from the composer's mic, sharing `ChatViewModel`) and the Android assistant slot (a `VoiceInteractionService`
+whose session opens a translucent `AssistActivity` sheet). Both run on one voice controller over platform
+`SpeechRecognizer` and `TextToSpeech` adapters; the transcript is the session, and approvals, questions and
+password prompts stay a tap.
+
+Deliberately not there: a hotword; assist from the lock screen; per-word reveal of spoken text (the reveal is per
+sentence); a forwarding recogniser for Android 10/11 (the stub recogniser takes over as the default there).
+
+### Open (deferred minors)
+
+- Controller: no timeout if the status never leaves Idle after a sent final; a message rebuilt under the same id
+  mid-stream is re-spoken; stop() during the hand-off line drops the approval callback; assist hand-off is once per
+  id, not strictly the first card; an unguarded `current` clear in drain().
+- Speech adapters: stop() does not end a multi-chunk speak (> 4000 chars); a cancelled speak can stop a following
+  one (no join); the TTS engine is never shut down.
+- UI: haptic can fire again after rotation; orb ring easing is not `Motion.easing`; `ChatScreen` is 639 lines
+  (split transcript items and sheets); `onVoice?.invoke()` null branch is unreachable; swipe-down dismiss works
+  from the sheet body only.
+- Tests: thin beyond the pure parts (sendText "Still connecting", onCleared, mute/tap delegation, voicePhase for
+  Compacting/Stopped/Question/Secret, queued messages, barge-in mid-stream); no whitespace-only composer test.
+- Chunker: a same-line "```code```" at line start opens a fence that never closes; inline code containing `*` or
+  `_` is unwrapped before emphasis stripping.

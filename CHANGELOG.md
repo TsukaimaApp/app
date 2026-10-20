@@ -3,6 +3,22 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.6.0 — 2026-10-20 (versionCode 13)
+
+### Added
+- In-app voice mode: tap the composer's mic to talk to the agent hands-free. Replies are read aloud sentence by
+  sentence as they stream; End returns to the chat with the transcript already in the session. Voice never
+  answers approvals, questions or password prompts.
+- Assistant slot: Tsukaima can be the device assistant (Settings → Voice → "Use as device assistant"). A
+  long-press on home shows a sheet for one spoken exchange; "Continue in Tsukaima" opens the chat.
+- Settings → Voice row; new `RECORD_AUDIO` permission, asked on the first mic tap.
+- Limits: no hotword, nothing on the lock screen. On Android 10 and 11 the assistant role also makes Tsukaima's
+  stub the default speech recogniser (other apps' speech input stops); Android 12+ is unaffected. See the README.
+
+### Changed
+- The composer's accent circle shows a mic while the field is empty; Send appears once there is text or an
+  attachment.
+
 ## 0.5.6 — 2026-10-20 (versionCode 12)
 
 ### Added
