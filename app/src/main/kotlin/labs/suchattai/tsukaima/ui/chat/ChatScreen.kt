@@ -387,7 +387,7 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
         snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
             .collect { (scrolling, canScrollForward) -> if (scrolling) follow = !canScrollForward }
     }
-    val tail = items.lastOrNull()?.let { it.id to ((it as? ChatItem.AssistantMessage)?.text?.length ?: 0) }
+    val tail = transcriptTailKey(items)
     LaunchedEffect(items.size, tail) {
         if (follow && items.isNotEmpty()) listState.scrollToItem(items.size) // the end spacer: bottom of the last item
     }
@@ -454,6 +454,14 @@ internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatAct
         is ChatItem.Thinking -> Spacer(Modifier.height(0.dp))
     }
 }
+
+/**
+ * What the transcript follows to the bottom on: the last item's id and, for a reply, its text length (so streaming
+ * keeps it pinned). Only a reply's length counts — a [ChatItem.SideNote] finishing keeps the key, so a detached side
+ * answer landing does not scroll the chat.
+ */
+internal fun transcriptTailKey(items: List<ChatItem>): Pair<String, Int>? =
+    items.lastOrNull()?.let { it.id to ((it as? ChatItem.AssistantMessage)?.text?.length ?: 0) }
 
 /**
  * The top bar's overflow entries: Stop while a turn runs, the side entries while text is typed ([ChatSides]), then the

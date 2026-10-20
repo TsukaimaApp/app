@@ -25,12 +25,13 @@ import java.util.concurrent.atomic.AtomicInteger
  * ([synthesize], the `/api/audio/speak` call), writes the returned audio to `cache/tts/<uuid>.<ext>` (the extension
  * from its MIME type, so the player can tell the container) and plays it with a [MediaPlayer] (assistant usage, speech
  * content), suspending until playback ends. The file is deleted when the sentence finishes, fails or is cancelled;
- * files left by an earlier process are cleared when an instance is created.
+ * files left by an earlier process are cleared on the first sentence's write (off the main thread).
  *
  * Failures never surface: a refused or failed synthesis, unreadable audio or a playback error is logged at warn (never
  * with the text) and [speak] returns, so the voice controller reveals the text and moves on. Cancelling [speak] stops
- * playback (or aborts the request). Audio focus is held across a run of sentences like [AndroidSpeechOutput]'s;
- * losing it to another app stops the sentence playing.
+ * playback (or aborts the request); [stop] stops the sentence playing and drops any sentence still being synthesised,
+ * so it does not play once its audio arrives. Audio focus is held across a run of sentences like
+ * [AndroidSpeechOutput]'s; losing it to another app stops the sentence playing (and drops one being synthesised).
  *
  * The voice language setting does not apply: the server's TTS voice and language settings decide, so [languages] is
  * empty. One instance per voice session (it plays one sentence at a time).
@@ -52,9 +53,11 @@ class ServerSpeechOutput(
     @Volatile
     private var playback: Playback? = null
 
-    init {
-        dir.listFiles()?.forEach { it.delete() } // stale: a process that died mid-sentence
-    }
+    /** Bumped by [stop]: a [speak] that started before the bump does not play. */
+    private val stops = AtomicInteger()
+
+    /** The stale `cache/tts` files (a process that died mid-sentence) are cleared, once, on the first write. */
+    private val swept = AtomicBoolean()
 
     override val available: Boolean = true
 
@@ -63,9 +66,11 @@ class ServerSpeechOutput(
         // Counted from the request on: focus held from the previous sentence survives this one's synthesis.
         inFlight.incrementAndGet()
         main.removeCallbacks(releaseFocus)
+        val epoch = stops.get()
         try {
             val file = synthesizeToFile(text) ?: return
             try {
+                if (stops.get() != epoch) return // stopped while synthesising
                 focus.request()
                 play(file)
             } finally {
@@ -89,26 +94,29 @@ class ServerSpeechOutput(
             Log.w(TAG, "Server speech output: synthesis failed (${e.javaClass.simpleName}$code)")
             return null
         }
-        val (mime, audio) = try {
-            DataUrl.decode(speech.dataUrl)
+        if (!speech.ok) {
+            Log.w(TAG, "Server speech output: no audio (ok=false)")
+            return null
+        }
+        var file: File? = null
+        try {
+            withContext(Dispatchers.IO) {
+                if (swept.compareAndSet(false, true)) dir.listFiles()?.forEach { it.delete() }
+                val (mime, audio) = DataUrl.decode(speech.dataUrl)
+                if (audio.isEmpty()) return@withContext
+                val f = File(dir, "${UUID.randomUUID()}.${DataUrl.audioExtension(speech.mimeType ?: mime)}")
+                file = f
+                dir.mkdirs()
+                f.writeBytes(audio)
+            }
         } catch (e: IllegalArgumentException) {
             Log.w(TAG, "Server speech output: unreadable audio (${e.message})")
             return null
-        }
-        if (!speech.ok || audio.isEmpty()) {
-            Log.w(TAG, "Server speech output: no audio (ok=${speech.ok}, ${audio.size} bytes)")
-            return null
-        }
-        val file = File(dir, "${UUID.randomUUID()}.${DataUrl.audioExtension(speech.mimeType ?: mime)}")
-        try {
-            withContext(Dispatchers.IO) {
-                dir.mkdirs()
-                file.writeBytes(audio)
-            }
         } catch (e: Throwable) { // cancelled, or the write failed (IOException, logged by speak)
-            file.delete()
+            file?.delete()
             throw e
         }
+        if (file == null) Log.w(TAG, "Server speech output: no audio (0 bytes)")
         return file
     }
 
@@ -139,6 +147,7 @@ class ServerSpeechOutput(
     }
 
     override fun stop() {
+        stops.incrementAndGet()
         playback?.let {
             it.done.complete(Unit)
             it.release()

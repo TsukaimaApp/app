@@ -998,6 +998,15 @@ class ChatReducerTest {
     }
 
     @Test
+    fun sideCompletionWithEmptyTextFallsBackToNoAnswer() {
+        val started = ChatReducer.onSideStarted(live, "t-1", SideKind.Question, "anything?")
+        val empty = started.feed(ev("btw.complete", """{"task_id":"t-1","text":""}"""))
+        assertEquals(ChatItem.SideNote("side-t-1", SideKind.Question, "anything?", "No answer", pending = false), empty.items.single())
+        val missing = live.feed(ev("background.complete", """{"task_id":"t-2"}"""))
+        assertEquals("No answer", (missing.items.single() as ChatItem.SideNote).text)
+    }
+
+    @Test
     fun sideNoteAfterAStreamingReplyDoesNotCloseIt() {
         val streaming = live.feed(ev("message.start", seq = 1), ev("message.delta", """{"text":"Hel"}""", seq = 2))
         val withNote = ChatReducer.onSideStarted(streaming, "t-1", SideKind.Question, "side?")

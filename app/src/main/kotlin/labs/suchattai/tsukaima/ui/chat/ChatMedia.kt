@@ -162,7 +162,7 @@ internal class ChatMedia(
      * The decoded image at [url] (a reply's `![alt](url)`), or null when it is not [imageAllowed] or failed.
      * Concurrent callers share one fetch. Final failures are cached (the server's answer, over the 8 MB cap, not
      * http(s), undecodable), so a broken image is not refetched on every recomposition or scroll; a transient
-     * one (connection, timeout) is not, and a later call retries.
+     * one (connection, timeout, a 5xx or 429 answer) is not, and a later call retries.
      */
     suspend fun imagePreview(url: String): ImageBitmap? {
         if (!imageAllowed(url)) return null
@@ -182,12 +182,18 @@ internal class ChatMedia(
             images[url] = null
             return null
         } catch (e: Exception) {
-            val transient = e is IOException && e !is ApiException && e !is ImageTooLargeException
-            if (!transient) images[url] = null
+            if (!transientImageFailure(e)) images[url] = null
             return null
         } finally {
             imageLoading.remove(url)
         }
+    }
+
+    /** A failure worth retrying: a dropped connection or timeout, or a 5xx / 429 answer (busy, not a verdict). */
+    private fun transientImageFailure(e: Exception): Boolean = when (e) {
+        is ApiException -> e.code >= 500 || e.code == 429
+        is ImageTooLargeException -> false
+        else -> e is IOException
     }
 
     private fun set(path: String, value: MediaState?) = state.update {

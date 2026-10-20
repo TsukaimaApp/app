@@ -28,7 +28,7 @@ internal class ChatSides(
     fun send(kind: SideKind) {
         val s = state.value
         val text = s.input.trim()
-        if (text.isEmpty() || !s.writable || s.compacting) return
+        if (text.isEmpty() || !s.writable || s.compacting || s.pendingEdit != null) return
         val live = s.chat.liveSessionId ?: return backend.toast("Still connecting to Hermes")
         if (s.attachments.any { it.status == AttachmentStatus.Ready }) backend.toast("Attachments aren’t sent with side questions")
         state.update { it.copy(input = "") }
@@ -49,8 +49,11 @@ internal class ChatSides(
     }
 
     companion object {
-        /** The overflow offers the side entries with text typed in a live, writable chat that is not compacting. */
+        /**
+         * The overflow offers the side entries with text typed in a live, writable chat that is not compacting, and
+         * not while a message is being edited (the composer holds the edit).
+         */
         fun available(s: ChatUiState): Boolean =
-            s.input.isNotBlank() && s.chat.liveSessionId != null && s.writable && !s.compacting
+            s.input.isNotBlank() && s.chat.liveSessionId != null && s.writable && !s.compacting && s.pendingEdit == null
     }
 }

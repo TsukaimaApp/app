@@ -112,6 +112,28 @@ class ChatMediaTest {
     }
 
     @Test
+    fun serverErrorsAndRateLimitsAreRetriedLater() = runTest {
+        // 5xx and 429 are the server having a bad moment, not its verdict on the image: not cached.
+        for (code in listOf(500, 503, 429)) {
+            val b = Backend().apply { result = { Result.failure(ApiException(code, "busy")) } }
+            val h = Harness(this, b)
+            assertNull(h.media.imagePreview(url))
+            b.result = { Result.success(byteArrayOf(1)) }
+            assertSame("$code is retried", Bitmap, h.media.imagePreview(url))
+            assertEquals(2, b.fetched.size)
+        }
+        // Other 4xx (and a refused redirect) stay cached.
+        for (code in listOf(400, 403, 404, 302)) {
+            val b = Backend().apply { result = { Result.failure(ApiException(code, "no")) } }
+            val h = Harness(this, b)
+            assertNull(h.media.imagePreview(url))
+            b.result = { Result.success(byteArrayOf(1)) }
+            assertNull("$code is final", h.media.imagePreview(url))
+            assertEquals(1, b.fetched.size)
+        }
+    }
+
+    @Test
     fun foreignImageLoadsOnlyAfterATap() = runTest {
         val b = Backend()
         val h = Harness(this, b)

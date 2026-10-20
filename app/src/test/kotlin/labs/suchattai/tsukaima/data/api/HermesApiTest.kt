@@ -612,4 +612,26 @@ class HermesApiTest {
         assertTrue(job.isCancelled)
         assertTrue("cancel took too long", System.nanoTime() - started < 3_000_000_000L)
     }
+
+    @Test
+    fun sameOriginImageRedirectOffOriginIsNotFollowed() = runBlocking<Unit> {
+        val foreign = MockWebServer().apply { start() }
+        try {
+            // The authed client adds a bearer to everything: a followed redirect would carry it to the other host.
+            val authed = OkHttpClient.Builder()
+                .addInterceptor { chain -> chain.proceed(chain.request().newBuilder().header("Authorization", "Bearer tok").build()) }
+                .build()
+            val api = HermesApi(authed, { server.url("/").toString().trimEnd('/') }, plainClient = OkHttpClient())
+            server.enqueue(MockResponse.Builder().code(302).addHeader("Location", foreign.url("/steal.png").toString()).build())
+            foreign.enqueue(MockResponse.Builder().addHeader("Content-Type", "image/png").body("png").build())
+
+            val e = assertThrows(ApiException::class.java) { runBlocking { api.fetchImage(server.url("/api/files/x.png").toString()) } }
+            assertEquals(302, e.code)
+            assertEquals("Bearer tok", server.takeRequest(1, TimeUnit.SECONDS)!!.headers["Authorization"])
+            assertNull("the redirect is not followed", foreign.takeRequest(200, TimeUnit.MILLISECONDS))
+            assertEquals(0, foreign.requestCount)
+        } finally {
+            foreign.close()
+        }
+    }
 }

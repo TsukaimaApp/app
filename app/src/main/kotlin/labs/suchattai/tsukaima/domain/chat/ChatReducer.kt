@@ -321,13 +321,15 @@ object ChatReducer {
 
     /**
      * `btw.complete` / `background.complete {task_id, text, question?}`: completes the note of `task_id`, or appends a
-     * completed one for a task this app did not start (another client). The status is unchanged.
+     * completed one for a task this app did not start (another client). An empty answer reads "No answer". The status
+     * is unchanged.
      */
     private fun onSideComplete(s: ChatState, kind: SideKind, p: JsonObject): ChatState {
         val id = sideId(p.string("task_id")?.takeIf { it.isNotBlank() } ?: return s)
         val existing = s.items.firstOrNull { it.id == id } as? ChatItem.SideNote
         val question = p.string("question")?.takeIf { it.isNotBlank() } ?: existing?.question
-        val done = ChatItem.SideNote(id, existing?.kind ?: kind, question, p.string("text").orEmpty(), pending = false)
+        val text = p.string("text")?.takeIf { it.isNotBlank() } ?: "No answer"
+        val done = ChatItem.SideNote(id, existing?.kind ?: kind, question, text, pending = false)
         return s.copy(items = if (existing != null) s.items.replace(existing) { done } else s.items + done)
     }
 

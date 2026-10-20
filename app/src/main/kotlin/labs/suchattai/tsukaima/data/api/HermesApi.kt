@@ -346,16 +346,18 @@ class HermesApi(
      * The bytes of an `http(s)` image a reply shows (`![alt](url)`), at most [IMAGE_MAX_BYTES]. A [url] on the
      * server's own origin ([ImageOrigin.sameOrigin] with [baseUrl]) goes through the authed client, so a
      * server-hosted image gets the bearer; any other goes through [plainClient] tagged [NoAuth], so no credential
-     * leaves for a third party. Non-2xx (401 included: it is that host's verdict, not a sign-in prompt) →
-     * [ApiException]; a body over the cap (by `Content-Length` or as it arrives) → [ImageTooLargeException]; not
-     * http(s) → [IllegalArgumentException]; anything else is a (transient) [IOException].
+     * leaves for a third party. The authed fetch follows no redirect ([imageClient]): a same-origin 3xx could
+     * otherwise carry the bearer to another host, so it fails like any other non-2xx. Non-2xx (401 included: it is
+     * that host's verdict, not a sign-in prompt) → [ApiException]; a body over the cap (by `Content-Length` or as
+     * it arrives) → [ImageTooLargeException]; not http(s) → [IllegalArgumentException]; anything else is a
+     * (transient) [IOException].
      */
     suspend fun fetchImage(url: String): ByteArray {
         val target = url.toHttpUrlOrNull() ?: throw IllegalArgumentException("Not an http(s) URL")
         val sameOrigin = ImageOrigin.sameOrigin(url, baseUrl())
         val builder = Request.Builder().url(target)
         if (!sameOrigin) builder.tag(NoAuth::class.java, NoAuth())
-        val response = (if (sameOrigin) client else plainClient).newCall(builder.build()).await()
+        val response = (if (sameOrigin) imageClient else plainClient).newCall(builder.build()).await()
         // `use` first: a cancellation at the dispatcher hop would otherwise discard the response unclosed.
         return response.use {
             withContext(Dispatchers.IO) {
@@ -368,6 +370,11 @@ class HermesApi(
                 source.readByteArray()
             }
         }
+    }
+
+    /** [client] (bearer, re-login, pool) without redirects, for same-origin images ([fetchImage]). */
+    private val imageClient: OkHttpClient by lazy {
+        client.newBuilder().followRedirects(false).followSslRedirects(false).build()
     }
 
     // ---- audio ---------------------------------------------------------------------------

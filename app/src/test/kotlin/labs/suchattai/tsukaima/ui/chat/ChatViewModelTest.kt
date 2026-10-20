@@ -43,6 +43,7 @@ import labs.suchattai.tsukaima.data.gateway.RpcTransport
 import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ChatItem
+import labs.suchattai.tsukaima.domain.chat.ChatReducer
 import labs.suchattai.tsukaima.domain.chat.ChatState
 import labs.suchattai.tsukaima.domain.chat.SecretKind
 import labs.suchattai.tsukaima.domain.chat.VaultAnswers
@@ -60,6 +61,7 @@ import labs.suchattai.tsukaima.ui.voice.voiceLine
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -2775,6 +2777,27 @@ class ChatViewModelTest {
         advanceUntilIdle()
         assertEquals("Couldn’t send the side question", b.toasts.last())
         assertEquals("again", vm.state.value.input)
+    }
+
+    @Test
+    fun aSideNoteCompletingKeepsTheTranscriptTailKey() {
+        val streaming = ChatState(liveSessionId = live, items = listOf(ChatItem.AssistantMessage("a-1", "Hel", streaming = true, reasoning = null)))
+        val pending = ChatReducer.onSideStarted(streaming, "t-1", SideKind.Question, "side?")
+        val key = transcriptTailKey(pending.items)
+        val done = pending.items.map { if (it is ChatItem.SideNote) it.copy(text = "A long side answer.", pending = false) else it }
+        assertEquals("a side note finishing does not move the transcript", key, transcriptTailKey(done))
+        // A new last item, or the streaming reply growing, still does.
+        assertNotEquals(transcriptTailKey(streaming.items), key)
+        val grown = listOf(ChatItem.AssistantMessage("a-1", "Hello", streaming = true, reasoning = null))
+        assertNotEquals(transcriptTailKey(streaming.items), transcriptTailKey(grown))
+    }
+
+    @Test
+    fun sideEntriesAreHiddenWhileEditing() {
+        val typed = ChatUiState(input = "side?", chat = ChatState(liveSessionId = live, status = AgentStatus.Idle))
+        assertTrue(ChatSides.available(typed))
+        assertFalse(ChatSides.available(typed.copy(pendingEdit = 3L)))
+        assertTrue(overflowItems(typed.copy(pendingEdit = 3L), ChatActions()).none { it.label.startsWith("Send as") })
     }
 
     @Test
