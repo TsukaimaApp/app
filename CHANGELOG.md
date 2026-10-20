@@ -3,6 +3,12 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.5.2 — 2026-10-20 (versionCode 8)
+
+### Changed
+- The "Thinking…" status flair now rotates every 2.6 s (the design's `StatusLine.jsx` interval) instead of on
+  every streamed delta, which re-rolled it many times a second.
+
 ## 0.5.1 — 2026-10-20 (versionCode 7)
 
 The Tier 3 batch (release hygiene) of the completeness pass, plus the deferred S-size minors. No new features.

@@ -43,11 +43,14 @@ class ThinkingFlairTest {
     @Test
     fun nextCyclesWithoutRepeatingConsecutively() {
         val all = (ThinkingFlair.BASE + ThinkingFlair.WATCHLIST).toSet()
+        ThinkingFlair.resetForTest()
         val random = Random(42)
         val seen = mutableSetOf<String>()
-        var prev = ThinkingFlair.next(random)
+        var now = 0L
+        var prev = ThinkingFlair.next(random, now)
         repeat(5_000) {
-            val line = ThinkingFlair.next(random)
+            now += ThinkingFlair.HOLD_MS
+            val line = ThinkingFlair.next(random, now)
             assertNotEquals(prev, line)
             assertTrue(line in all)
             seen += line
@@ -55,5 +58,19 @@ class ThinkingFlairTest {
         }
         // Over many draws every line shows up.
         assertEquals(all, seen)
+    }
+
+    @Test
+    fun lineIsHeldForTheRotationInterval() {
+        ThinkingFlair.resetForTest()
+        val random = Random(7)
+        val t0 = 1_000_000L
+        val first = ThinkingFlair.next(random, t0)
+        // Streaming deltas arrive many times a second: the line must not flicker between them.
+        repeat(50) { i -> assertEquals(first, ThinkingFlair.next(random, t0 + i * 50L)) }
+        assertEquals(first, ThinkingFlair.next(random, t0 + ThinkingFlair.HOLD_MS - 1))
+        val second = ThinkingFlair.next(random, t0 + ThinkingFlair.HOLD_MS)
+        assertNotEquals(first, second)
+        assertEquals(second, ThinkingFlair.next(random, t0 + ThinkingFlair.HOLD_MS + 100))
     }
 }

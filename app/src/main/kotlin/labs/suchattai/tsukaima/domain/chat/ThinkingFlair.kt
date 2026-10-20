@@ -32,12 +32,29 @@ object ThinkingFlair {
 
     private val ALL: List<String> = BASE + WATCHLIST
 
+    /** How long a line stays before the next call may swap it: the design rotates every 2.6 s (`StatusLine.jsx`). */
+    const val HOLD_MS = 2_600L
+
     @Volatile
     private var last: Int = -1
 
-    /** A random line from both lists, never the same as the previous call's line. */
-    fun next(random: Random = Random.Default): String {
+    @Volatile
+    private var lastAt: Long = Long.MIN_VALUE
+
+    /** Tests share this singleton; each starts from no previous line. */
+    internal fun resetForTest() {
+        last = -1
+        lastAt = Long.MIN_VALUE
+    }
+
+    /**
+     * A random line from both lists, never the same as the previous call's line. Callers ask on every streamed
+     * delta (~30 per second), so the previous line is kept until [HOLD_MS] have passed since it was chosen.
+     */
+    fun next(random: Random = Random.Default, now: Long = System.currentTimeMillis()): String {
         val prev = last
+        if (prev in ALL.indices && now - lastAt < HOLD_MS) return ALL[prev]
+        lastAt = now
         val idx = if (prev !in ALL.indices) {
             random.nextInt(ALL.size)
         } else {
