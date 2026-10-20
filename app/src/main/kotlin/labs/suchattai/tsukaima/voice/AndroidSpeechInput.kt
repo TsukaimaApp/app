@@ -47,7 +47,8 @@ class AndroidSpeechInput(
     private val language: () -> String? = { null },
 ) : SpeechInput {
     override val available: Boolean
-        get() = onDeviceAvailable() || if (stubIsDefault()) systemRecognizer(context) != null else recognizers(context).isNotEmpty()
+        get() = onDeviceAvailable() ||
+            if (stubIsDefault()) systemRecognizer(context) != null else recognizers(context).isNotEmpty()
 
     private fun onDeviceAvailable() = preferOnDevice &&
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
@@ -84,7 +85,9 @@ class AndroidSpeechInput(
         tag: String?,
     ): Flow<SpeechEvent> = callbackFlow {
         val recognizer = when {
-            onDevice && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> SpeechRecognizer.createOnDeviceSpeechRecognizer(context) // S: spelled out for lint
+            // S: spelled out for lint
+            onDevice && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+                SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
             explicit != null -> SpeechRecognizer.createSpeechRecognizer(context, explicit)
             else -> SpeechRecognizer.createSpeechRecognizer(context)
         }

@@ -21,5 +21,7 @@ internal fun recognizers(context: Context): List<ServiceInfo> =
  * third-party app the user did not pick for the microphone. Null when there is none.
  */
 internal fun systemRecognizer(context: Context): ComponentName? = recognizers(context)
-    .firstOrNull { (it.applicationInfo.flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0 }
+    .firstOrNull { (it.applicationInfo.flags and SYSTEM_FLAGS) != 0 }
     ?.let { ComponentName(it.packageName, it.name) }
+
+private const val SYSTEM_FLAGS = ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP

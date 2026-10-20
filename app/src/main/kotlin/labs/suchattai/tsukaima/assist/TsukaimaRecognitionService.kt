@@ -1,7 +1,9 @@
 package labs.suchattai.tsukaima.assist
 
+import android.Manifest
 import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -22,16 +24,25 @@ import labs.suchattai.tsukaima.voice.systemRecognizer
  * delegate is destroyed on cancel, after results and after an error. No system recogniser →
  * [SpeechRecognizer.ERROR_CLIENT]. Voice mode itself never uses this service
  * ([labs.suchattai.tsukaima.voice.AndroidSpeechInput] skips it); it is not selectable as the default. Recognised
- * text is never logged.
+ * text is never logged. Only callers holding `RECORD_AUDIO` are served (the manifest permission plus a per-request
+ * uid check answering [SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS]), because the relay records under
+ * Tsukaima's own microphone grant. Stop and cancel from any callback but the current request's are ignored.
  */
 class TsukaimaRecognitionService : RecognitionService() {
     private val main = Handler(Looper.getMainLooper())
 
-    /** The live delegate; touched on the main thread only. */
+    /** The live delegate and the request it serves; touched on the main thread only. */
     private var delegate: SpeechRecognizer? = null
+    private var client: Callback? = null
 
     override fun onStartListening(recognizerIntent: Intent?, listener: Callback) = onMain {
         release()
+        val uid = listener.callingUid
+        if (!mayRecord(uid)) {
+            Log.w(TAG, "Recognition refused: uid $uid lacks RECORD_AUDIO")
+            relay(listener) { error(SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) }
+            return@onMain
+        }
         val target = systemRecognizer(this)
         if (target == null || target.packageName == packageName) {
             relay(listener) { error(SpeechRecognizer.ERROR_CLIENT) }
@@ -40,9 +51,13 @@ class TsukaimaRecognitionService : RecognitionService() {
         start(target, recognizerIntent, listener)
     }
 
-    override fun onStopListening(listener: Callback) = onMain { delegate?.stopListening() }
+    override fun onStopListening(listener: Callback) = onMain {
+        if (listener === client) delegate?.stopListening()
+    }
 
-    override fun onCancel(listener: Callback) = onMain { release() }
+    override fun onCancel(listener: Callback) = onMain {
+        if (listener === client) release()
+    }
 
     override fun onDestroy() {
         release()
@@ -52,6 +67,7 @@ class TsukaimaRecognitionService : RecognitionService() {
     private fun start(target: ComponentName, recognizerIntent: Intent?, listener: Callback) {
         val recognizer = SpeechRecognizer.createSpeechRecognizer(this, target)
         delegate = recognizer
+        client = listener
         recognizer.setRecognitionListener(object : RecognitionListener {
             /** Relays [call] while [recognizer] is still the live delegate; [end] destroys it afterwards. */
             private fun forward(end: Boolean = false, call: Callback.() -> Unit) {
@@ -89,8 +105,18 @@ class TsukaimaRecognitionService : RecognitionService() {
         val current = delegate ?: return
         if (only != null && only !== current) return
         delegate = null
+        client = null
         current.cancel()
         current.destroy()
+    }
+
+    /** True when every package sharing [uid] holds `RECORD_AUDIO` (the system and this app pass). */
+    private fun mayRecord(uid: Int): Boolean {
+        val packages = packageManager.getPackagesForUid(uid)
+        if (packages.isNullOrEmpty()) return false
+        return packages.all {
+            packageManager.checkPermission(Manifest.permission.RECORD_AUDIO, it) == PackageManager.PERMISSION_GRANTED
+        }
     }
 
     private fun onMain(block: () -> Unit) {

@@ -72,11 +72,12 @@
             android:permission="android.permission.BIND_VOICE_INTERACTION" />
 
         <!-- Required by the assistant on Android 10/11; forwards to the system recogniser (see TsukaimaRecognitionService).
-             Exported without a permission like every recogniser: clients bind it from their own process. -->
+             Exported because clients bind it from their own process, but only callers holding RECORD_AUDIO may bind
+             (the relay records under Tsukaima's grant); the system and the assistant stack hold it. -->
         <service
             android:name=".assist.TsukaimaRecognitionService"
             android:exported="true"
-            tools:ignore="ExportedService">
+            android:permission="android.permission.RECORD_AUDIO">
             <intent-filter>
                 <action android:name="android.speech.RecognitionService" />
             </intent-filter>
