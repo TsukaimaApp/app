@@ -1,5 +1,8 @@
 package labs.suchattai.tsukaima.ui.navigation
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -13,6 +16,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
@@ -26,7 +34,10 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import labs.suchattai.tsukaima.ui.components.IconButton44
 import labs.suchattai.tsukaima.ui.components.IconName
-import labs.suchattai.tsukaima.ui.components.PrimaryButton
+import labs.suchattai.tsukaima.di.AppContainer
+import labs.suchattai.tsukaima.ui.onboarding.OnboardingScreen
+import labs.suchattai.tsukaima.ui.settings.SettingsScreen
+import labs.suchattai.tsukaima.ui.settings.SettingsViewModel
 import labs.suchattai.tsukaima.ui.theme.Motion
 import labs.suchattai.tsukaima.ui.theme.TsukaimaTheme
 import labs.suchattai.tsukaima.ui.theme.TsukaimaType
@@ -38,6 +49,7 @@ import labs.suchattai.tsukaima.ui.theme.tsukaima
  */
 @Composable
 fun TsukaimaNavHost(
+    container: AppContainer,
     navController: NavHostController,
     startRoute: String,
     showMenu: Boolean,
@@ -56,9 +68,7 @@ fun TsukaimaNavHost(
         popExitTransition = { fadeOut(fade) },
     ) {
         composable(Route.Onboarding.path) {
-            PlaceholderScreen("Tsukaima") {
-                PrimaryButton("Connect", onClick = { navController.navigate(Route.Settings.path) })
-            }
+            OnboardingScreen(onConnect = { navController.navigate(Route.Settings.path) })
         }
         composable(Route.Status.path) {
             PlaceholderScreen("Status", menu = showMenu, onMenu = onMenu)
@@ -88,7 +98,40 @@ fun TsukaimaNavHost(
         ) {
             PlaceholderScreen("Edit job", onBack = back)
         }
-        composable(Route.Settings.path) { PlaceholderScreen("Settings", onBack = back) }
+        composable(Route.Settings.path) {
+            val context = LocalContext.current
+            val vm: SettingsViewModel = viewModel(
+                factory = viewModelFactory {
+                    initializer {
+                        SettingsViewModel(container.repository, container.settingsStore, container.credentials, container.connection)
+                    }
+                },
+            )
+            LaunchedEffect(vm) {
+                // First run: sign-in finished from Onboarding, so Settings is the only screen; go home.
+                vm.signedIn.collect {
+                    val hasStatus = runCatching { navController.getBackStackEntry(Route.Status.path) }.isSuccess
+                    if (!hasStatus) navController.navigateTop(Route.Status.path)
+                }
+            }
+            SettingsScreen(
+                vm = vm,
+                onBack = back,
+                onLogs = { navController.navigate(Route.Logs.path) },
+                onOpenDashboard = {
+                    val url = container.settings.value?.serverUrl.orEmpty()
+                    if (url.isEmpty()) {
+                        container.toastState.show("Sign in first")
+                    } else {
+                        try {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        } catch (_: ActivityNotFoundException) {
+                            container.toastState.show("No browser to open $url")
+                        }
+                    }
+                },
+            )
+        }
         composable(Route.Logs.path) { PlaceholderScreen("Logs", onBack = back) }
     }
 }

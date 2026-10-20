@@ -154,6 +154,7 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
     }
     val screens: @Composable (Modifier) -> Unit = { modifier ->
         TsukaimaNavHost(
+            container = container,
             navController = navController,
             startRoute = startRoute,
             showMenu = !wide,

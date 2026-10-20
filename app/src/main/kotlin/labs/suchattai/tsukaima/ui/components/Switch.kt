@@ -19,6 +19,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
@@ -40,6 +41,7 @@ fun TsukaimaSwitch(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     val colors = MaterialTheme.tsukaima
     val source = remember { MutableInteractionSource() }
@@ -57,7 +59,9 @@ fun TsukaimaSwitch(
     Box(
         modifier = modifier
             .size(Dimens.hit)
+            .alpha(if (enabled) 1f else 0.5f)
             .toggleable(
+                enabled = enabled,
                 value = checked,
                 interactionSource = source,
                 indication = null,

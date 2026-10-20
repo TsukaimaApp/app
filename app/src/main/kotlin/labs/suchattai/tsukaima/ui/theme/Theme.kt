@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 
@@ -43,6 +44,10 @@ private fun TsukaimaColors.toMaterial(dark: Boolean) = if (dark) {
     )
 }
 
+/** Pressed accent derived from the dynamic primary: slightly darker in light mode, lighter in dark mode. */
+internal fun dynamicAccentPressed(primary: Color, dark: Boolean): Color =
+    lerp(primary, if (dark) Color.White else Color.Black, if (dark) 0.2f else 0.15f)
+
 private val TsukaimaMaterialTypography = Typography().copy(
     bodyLarge = TsukaimaType.body,
     bodyMedium = TsukaimaType.ui,
@@ -67,6 +72,7 @@ fun TsukaimaTheme(
         base.copy(
             accent = dyn.primary,
             onAccent = dyn.onPrimary,
+            accentPressed = dynamicAccentPressed(dyn.primary, darkTheme),
             accentSelected = dyn.primaryContainer,
             accentWash = lerp(base.surfacePage, dyn.primaryContainer, 0.45f),
         )

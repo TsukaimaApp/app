@@ -84,6 +84,13 @@ class HermesRepository(
     // ---- pass-through --------------------------------------------------------------------
 
     suspend fun health(): Result<HealthDto> = call { api.health() }
+
+    /** Unauthenticated health check against an arbitrary [url] (the sign-in form's, before it is saved). */
+    suspend fun health(url: String): Result<HealthDto> = attempt {
+        val base = ServerUrl.normalize(url) ?: throw IllegalArgumentException("Invalid server URL: '$url'")
+        loginApi(base).health()
+    }
+
     suspend fun status(): Result<StatusDto> = call { api.status() }
     suspend fun systemStats(): Result<SystemStatsDto> = call { api.systemStats() }
     suspend fun authProviders(): Result<List<String>> = call { api.authProviders() }
