@@ -1,0 +1,44 @@
+package labs.suchattai.tsukaima.ui.chat.components
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import labs.suchattai.tsukaima.ui.components.SkeletonBlock
+import labs.suchattai.tsukaima.ui.theme.Dimens
+
+/** Loading placeholder for the transcript: a user bubble, assistant text lines and a tool row. */
+@Composable
+fun ChatSkeleton(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = Dimens.gutter, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        SkeletonBlock(Modifier.fillMaxWidth(0.56f).height(40.dp).align(Alignment.End), radius = 16.dp)
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SkeletonBlock(Modifier.fillMaxWidth(0.92f).height(14.dp))
+            SkeletonBlock(Modifier.fillMaxWidth(0.78f).height(14.dp))
+            SkeletonBlock(Modifier.fillMaxWidth(0.40f).height(14.dp))
+        }
+        SkeletonBlock(Modifier.fillMaxWidth().height(Dimens.hit), radius = 12.dp)
+    }
+}
+
+@Composable
+private fun SkeletonPreview(dark: Boolean) = PreviewPage(dark) { ChatSkeleton() }
+
+@Preview(name = "ChatSkeleton light")
+@Composable
+private fun SkeletonLightPreview() = SkeletonPreview(dark = false)
+
+@Preview(name = "ChatSkeleton dark")
+@Composable
+private fun SkeletonDarkPreview() = SkeletonPreview(dark = true)
