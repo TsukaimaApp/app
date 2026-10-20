@@ -40,12 +40,12 @@ import labs.suchattai.tsukaima.ui.theme.tsukaima
 @Composable
 fun ConversationItem(
     title: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     meta: String? = null,
     selected: Boolean = false,
-    onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
     icon: IconName? = null,
-    modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.tsukaima
     val shape = TsukaimaShapes.row
@@ -69,7 +69,7 @@ fun ConversationItem(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (icon != null) TsukaimaIcon(icon, size = 20.dp, tint = colors.ink2)
+            if (icon != null) TsukaimaIcon(icon, contentDescription = null, size = 20.dp, tint = colors.ink2)
             Text(
                 title,
                 style = TsukaimaType.ui,

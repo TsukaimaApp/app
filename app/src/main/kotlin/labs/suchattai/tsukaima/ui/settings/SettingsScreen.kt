@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.serialization.json.JsonObject
+import labs.suchattai.tsukaima.BuildConfig
 import labs.suchattai.tsukaima.data.api.PairingDto
 import labs.suchattai.tsukaima.data.api.ProfileDto
 import labs.suchattai.tsukaima.data.api.SkillDto
@@ -301,13 +302,15 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                         leading = IconName.OpenInNew,
                         onClick = actions.onOpenDashboard,
                     )
-                    TsukaimaRow(
-                        title = "Simulate Hermes unreachable",
-                        subtitle = "Preview the offline state",
-                        leading = IconName.CloudOff,
-                        trailing = { TsukaimaSwitch(state.simulateOffline, actions.onSimulateOffline) },
-                        onClick = { actions.onSimulateOffline(!state.simulateOffline) },
-                    )
+                    if (BuildConfig.DEBUG) { // kit-only in the design: a debugging aid, not shipped in release builds
+                        TsukaimaRow(
+                            title = "Simulate Hermes unreachable",
+                            subtitle = "Preview the offline state",
+                            leading = IconName.CloudOff,
+                            trailing = { TsukaimaSwitch(state.simulateOffline, actions.onSimulateOffline) },
+                            onClick = { actions.onSimulateOffline(!state.simulateOffline) },
+                        )
+                    }
                 }
             }
 
@@ -386,7 +389,7 @@ private fun Caption(text: String) =
 
 @Composable
 private fun Chevron() =
-    labs.suchattai.tsukaima.ui.components.TsukaimaIcon(IconName.ChevronRight, size = 22.dp, tint = MaterialTheme.tsukaima.ink3)
+    labs.suchattai.tsukaima.ui.components.TsukaimaIcon(IconName.ChevronRight, contentDescription = null, size = 22.dp, tint = MaterialTheme.tsukaima.ink3)
 
 private fun platformIcon(platform: String): IconName = when (platform.lowercase()) {
     "telegram" -> IconName.Send

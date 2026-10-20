@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Resting wisp, hand-translated from design/assets/resting-wisp.svg (viewBox 340 270 510 290).
-     Stroke is white so the screen can tint it (ink3 at 80% alpha). -->
+<!-- Resting wisp, hand-translated from design/assets/resting-wisp.svg (viewBox 340 270 510 290, stroke #8D847A).
+     Drawn at its 180dp display width (the viewport keeps the asset's 510x290 units), so no >200dp raster. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="510dp"
-    android:height="290dp"
+    android:width="180dp"
+    android:height="102.35dp"
     android:viewportWidth="510"
     android:viewportHeight="290">
     <group
@@ -11,7 +11,7 @@
         android:translateY="-270">
         <path
             android:pathData="M716 462 C679 492 614 500 574 474 C533 447 544 402 590 393 C629 386 665 407 704 414 C737 420 770 411 793 394 C773 389 753 380 741 366 C733 354 731 329 729 304 C709 314 692 329 680 345 C667 339 651 335 636 334 C627 315 613 296 596 286 C593 309 590 331 584 343 C536 320 469 322 422 350 C362 386 351 451 389 492 C437 544 550 548 642 532 C735 516 804 478 824 435 C844 393 828 355 803 336 C829 382 799 430 750 451 C702 472 648 465 622 440"
-            android:strokeColor="#FFFFFF"
+            android:strokeColor="#8D847A"
             android:strokeWidth="4"
             android:strokeLineCap="round"
             android:strokeLineJoin="round" />

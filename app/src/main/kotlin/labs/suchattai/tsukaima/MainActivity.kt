@@ -72,7 +72,9 @@ class MainActivity : ComponentActivity() {
                 } catch (e: IOException) {
                     Log.w("Tsukaima", "saving notification-permission flag failed", e)
                 }
-                notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) { // checked by the policy; spelled out for lint
+                    notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
             }
         }
     }

@@ -28,8 +28,8 @@ fun PairingCard(
     who: String,
     code: String,
     onApprove: () -> Unit,
-    onRevoke: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    onRevoke: (() -> Unit)? = null,
 ) {
     val colors = MaterialTheme.tsukaima
     FloatingCard(modifier) {
@@ -67,7 +67,7 @@ fun PairingCard(
 
 @Composable
 private fun PairingPreview(dark: Boolean) = PreviewPage(dark) {
-    PairingCard("Telegram", "@mario", "4F2-91K", {}, {})
+    PairingCard("Telegram", "@mario", "4F2-91K", onApprove = {}, onRevoke = {})
 }
 
 @Preview(name = "PairingCard light")

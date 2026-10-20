@@ -48,6 +48,7 @@ import labs.suchattai.tsukaima.ui.theme.tsukaima
 fun TsukaimaTextField(
     value: String,
     onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
     label: String? = null,
     placeholder: String? = null,
     helper: String? = null,
@@ -56,7 +57,6 @@ fun TsukaimaTextField(
     minLines: Int = 1,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     visualTransformation: VisualTransformation = VisualTransformation.None,
-    modifier: Modifier = Modifier,
     error: String? = null,
     maxLines: Int = Int.MAX_VALUE,
     keyboardActions: KeyboardActions = KeyboardActions.Default,

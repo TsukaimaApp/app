@@ -28,11 +28,11 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import labs.suchattai.tsukaima.data.gateway.ApprovalChoice
 import labs.suchattai.tsukaima.domain.chat.ChatItem
-import labs.suchattai.tsukaima.ui.components.GhostButton
 import labs.suchattai.tsukaima.ui.components.IconName
 import labs.suchattai.tsukaima.ui.components.MenuItem
 import labs.suchattai.tsukaima.ui.components.MenuSheet
 import labs.suchattai.tsukaima.ui.components.PrimaryButton
+import labs.suchattai.tsukaima.ui.components.SecondaryButton
 import labs.suchattai.tsukaima.ui.components.Tone
 import labs.suchattai.tsukaima.ui.components.TsukaimaIcon
 import labs.suchattai.tsukaima.ui.components.floatShadow
@@ -68,7 +68,7 @@ internal fun CardHeader(icon: IconName, title: String) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        TsukaimaIcon(icon, size = 20.dp, tint = colors.warn)
+        TsukaimaIcon(icon, contentDescription = null, size = 20.dp, tint = colors.warn)
         Text(title, style = TsukaimaType.statusLine, color = colors.ink1)
     }
 }
@@ -212,7 +212,7 @@ fun ApprovalCard(
                         .wrapContentHeight(Alignment.CenterVertically),
                 )
             }
-            GhostButton("Deny", onDeny, tone = Tone.Danger, enabled = answerable && !item.answered)
+            SecondaryButton("Deny", onDeny, tone = Tone.Danger, enabled = answerable && !item.answered)
             PrimaryButton("Approve", onApprove, icon = IconName.Check, enabled = answerable && !item.answered && !blocked)
         }
     }

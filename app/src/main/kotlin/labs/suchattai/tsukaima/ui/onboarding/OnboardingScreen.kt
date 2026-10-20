@@ -18,7 +18,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -28,6 +27,7 @@ import labs.suchattai.tsukaima.ui.components.PrimaryButton
 import labs.suchattai.tsukaima.ui.theme.TsukaimaTheme
 import labs.suchattai.tsukaima.ui.theme.TsukaimaType
 import labs.suchattai.tsukaima.ui.theme.tsukaima
+import labs.suchattai.tsukaima.ui.theme.windowHeight
 
 /**
  * First-run screen (HANDOFF §1, `onboarding-screen.jsx`). Spacing follows the jsx: a 10dp column gap plus the
@@ -37,7 +37,7 @@ import labs.suchattai.tsukaima.ui.theme.tsukaima
 @Composable
 fun OnboardingScreen(onConnect: () -> Unit, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.tsukaima
-    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val screenHeight = windowHeight()
     Box(
         modifier
             .fillMaxSize()
@@ -89,10 +89,12 @@ fun OnboardingScreen(onConnect: () -> Unit, modifier: Modifier = Modifier) {
                     .widthIn(max = 260.dp),
             )
             PrimaryButton("Connect", onClick = onConnect, modifier = Modifier.padding(top = 32.dp))
+            // The design's two assets (light / dark stroke), untinted at the handoff's 80% opacity. Chosen by the
+            // app's theme, which can differ from the system night mode a drawable-night qualifier would follow.
             Image(
-                painter = painterResource(R.drawable.resting_wisp),
+                painter = painterResource(if (colors.isDark) R.drawable.resting_wisp_dark else R.drawable.resting_wisp),
                 contentDescription = null,
-                colorFilter = ColorFilter.tint(colors.ink3.copy(alpha = 0.8f)),
+                alpha = 0.8f,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .padding(top = 50.dp)

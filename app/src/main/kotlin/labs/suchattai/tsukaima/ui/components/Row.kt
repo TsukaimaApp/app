@@ -34,13 +34,13 @@ import labs.suchattai.tsukaima.ui.theme.tsukaima
 @Composable
 fun TsukaimaRow(
     title: String,
+    modifier: Modifier = Modifier,
     subtitle: String? = null,
     leading: IconName? = null,
     trailing: @Composable () -> Unit = {},
     onClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
     danger: Boolean = false,
-    modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.tsukaima
     val shape = TsukaimaShapes.row
@@ -73,7 +73,7 @@ fun TsukaimaRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (leading != null) {
-                TsukaimaIcon(leading, size = 22.dp, tint = if (danger) colors.danger else colors.ink2)
+                TsukaimaIcon(leading, contentDescription = null, size = 22.dp, tint = if (danger) colors.danger else colors.ink2)
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(

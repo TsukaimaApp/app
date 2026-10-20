@@ -12,6 +12,7 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.net.toUri
 import labs.suchattai.tsukaima.MainActivity
 import labs.suchattai.tsukaima.R
 
@@ -111,7 +112,7 @@ class AndroidNotificationPoster(context: Context) : NotificationPoster {
         return PendingIntent.getActivity(context, id * 31 + slot.hashCode(), intent, FLAGS)
     }
 
-    private fun uri(id: Int, slot: String): Uri = Uri.parse("tsukaima://n/$id/$slot")
+    private fun uri(id: Int, slot: String): Uri = "tsukaima://n/$id/$slot".toUri()
 
     @SuppressLint("MissingPermission") // checked: areNotificationsEnabled covers POST_NOTIFICATIONS on API 33+
     override fun post(spec: NotificationSpec) {

@@ -17,7 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -53,11 +53,13 @@ fun CodeBlock(
     val colors = MaterialTheme.tsukaima
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
-    var copied by remember { mutableStateOf(false) }
-    LaunchedEffect(copied) {
-        if (copied) {
+    // Taps since the label last reset: each tap is a new key, so a re-tap restarts the full 1.5 s.
+    var copies by remember { mutableIntStateOf(0) }
+    val copied = copies > 0
+    LaunchedEffect(copies) {
+        if (copies > 0) {
             delay(CopiedMs)
-            copied = false
+            copies = 0
         }
     }
     Column(
@@ -81,7 +83,7 @@ fun CodeBlock(
                 modifier = Modifier
                     .clickable(role = Role.Button, onClickLabel = "Copy code") {
                         scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("code", code))) }
-                        copied = true
+                        copies++
                     }
                     .heightIn(min = Dimens.hit)
                     .padding(horizontal = 8.dp, vertical = 6.dp),
@@ -90,6 +92,7 @@ fun CodeBlock(
             ) {
                 TsukaimaIcon(
                     if (copied) IconName.Check else IconName.ContentCopy,
+                    contentDescription = null, // the "Copy"/"Copied" label beside it says it
                     size = 16.dp,
                     tint = colors.codeInk.copy(alpha = 0.75f),
                 )

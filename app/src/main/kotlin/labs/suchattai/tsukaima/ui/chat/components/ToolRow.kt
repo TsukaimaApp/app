@@ -75,6 +75,7 @@ fun ToolRow(item: ChatItem.ToolCall, modifier: Modifier = Modifier) {
         ) {
             TsukaimaIcon(
                 if (thinking) IconName.Psychology else IconName.Terminal,
+                contentDescription = null,
                 size = 18.dp,
                 tint = if (running) colors.accent else colors.ink3,
             )
@@ -96,7 +97,7 @@ fun ToolRow(item: ChatItem.ToolCall, modifier: Modifier = Modifier) {
                 ToolStatus.Failed -> TsukaimaIcon(IconName.Error, size = 16.dp, tint = colors.danger, contentDescription = "Failed")
                 ToolStatus.Done -> TsukaimaIcon(IconName.Check, size = 16.dp, tint = colors.ink3, contentDescription = "Done")
             }
-            TsukaimaIcon(IconName.ExpandMore, size = 18.dp, tint = colors.ink2, modifier = Modifier.rotate(rotation))
+            TsukaimaIcon(IconName.ExpandMore, contentDescription = null, size = 18.dp, tint = colors.ink2, modifier = Modifier.rotate(rotation))
         }
         item.risk?.let { RiskNote(it) }
         if (open) {
@@ -123,7 +124,7 @@ private fun RiskNote(risk: ToolRisk) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        TsukaimaIcon(IconName.Warning, size = 14.dp, tint = colors.warn)
+        TsukaimaIcon(IconName.Warning, contentDescription = null, size = 14.dp, tint = colors.warn)
         Text(riskText(risk), style = TsukaimaType.caption, color = colors.warn, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }

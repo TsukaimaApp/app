@@ -69,7 +69,7 @@ fun UserBubble(
             }
             if (failed) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    TsukaimaIcon(IconName.Error, size = 14.dp, tint = colors.danger)
+                    TsukaimaIcon(IconName.Error, contentDescription = null, size = 14.dp, tint = colors.danger)
                     Text("Not sent", style = TsukaimaType.caption, color = colors.danger, modifier = Modifier.padding(start = 4.dp, end = 4.dp))
                     GhostButton("Dismiss", onDismiss, size = ButtonSize.Sm)
                     GhostButton("Retry", onRetry, size = ButtonSize.Sm, icon = IconName.Refresh)

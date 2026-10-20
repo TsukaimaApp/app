@@ -31,7 +31,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -52,6 +51,7 @@ import labs.suchattai.tsukaima.ui.navigation.Route
 import labs.suchattai.tsukaima.ui.navigation.TsukaimaNavHost
 import labs.suchattai.tsukaima.ui.navigation.navigateTop
 import labs.suchattai.tsukaima.ui.theme.Dimens
+import labs.suchattai.tsukaima.ui.theme.windowWidth
 import labs.suchattai.tsukaima.ui.theme.Motion
 import labs.suchattai.tsukaima.ui.theme.tsukaima
 import labs.suchattai.tsukaima.notifications.ApprovalNotifier
@@ -109,7 +109,7 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
     )
     val drawerState by drawerVm.state.collectAsStateWithLifecycle()
     val drawerOpen by vm.drawerOpen.collectAsStateWithLifecycle()
-    val wide = LocalConfiguration.current.screenWidthDp.dp >= Dimens.wideBreakpoint
+    val wide = windowWidth() >= Dimens.wideBreakpoint
 
     val entry by navController.currentBackStackEntryAsState()
     val currentRoute = entry?.destination?.route

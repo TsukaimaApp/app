@@ -126,7 +126,7 @@ fun MediaCard(path: String, host: MediaHost, modifier: Modifier = Modifier) {
                     .background(colors.surfaceSunken, TsukaimaShapes.code),
                 contentAlignment = Alignment.Center,
             ) {
-                TsukaimaIcon(iconFor(Media.kind(path)), size = 20.dp, tint = if (failed) colors.danger else colors.ink2)
+                TsukaimaIcon(iconFor(Media.kind(path)), contentDescription = null, size = 20.dp, tint = if (failed) colors.danger else colors.ink2)
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(

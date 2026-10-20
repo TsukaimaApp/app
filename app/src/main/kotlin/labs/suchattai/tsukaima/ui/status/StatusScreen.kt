@@ -275,13 +275,13 @@ private fun ContinueRow(session: SessionDto, subtitle: String, onClick: () -> Un
         title = session.title?.takeIf { it.isNotBlank() } ?: session.preview?.takeIf { it.isNotBlank() } ?: "Untitled chat",
         subtitle = subtitle,
         leading = IconName.History,
-        trailing = { TsukaimaIcon(IconName.ChevronRight, size = 22.dp, tint = MaterialTheme.tsukaima.ink3) },
+        trailing = { TsukaimaIcon(IconName.ChevronRight, contentDescription = null, size = 22.dp, tint = MaterialTheme.tsukaima.ink3) },
         onClick = onClick,
     )
 }
 
 @Composable
-private fun FactRow(fact: Fact) = TsukaimaRow(fact.title, fact.subtitle, fact.icon, danger = fact.danger)
+private fun FactRow(fact: Fact) = TsukaimaRow(fact.title, subtitle = fact.subtitle, leading = fact.icon, danger = fact.danger)
 
 // ---- previews ----------------------------------------------------------------------------
 

@@ -52,6 +52,7 @@ import labs.suchattai.tsukaima.ui.components.IconButton44
 import labs.suchattai.tsukaima.ui.components.IconName
 import labs.suchattai.tsukaima.ui.components.Tone
 import labs.suchattai.tsukaima.ui.components.floatShadow
+import labs.suchattai.tsukaima.ui.theme.Dimens
 import labs.suchattai.tsukaima.ui.theme.TsukaimaShapes
 import labs.suchattai.tsukaima.ui.theme.TsukaimaType
 import labs.suchattai.tsukaima.ui.theme.tsukaima
@@ -180,6 +181,7 @@ private fun AttachmentChip(a: PendingAttachment, onRemove: () -> Unit, onRetry: 
     ) {
         TsukaimaIcon(
             if (failed) IconName.Refresh else if (a.kind == AttachmentKind.Image) IconName.Image else IconName.AttachFile,
+            contentDescription = null,
             size = 16.dp,
             tint = ink,
         )
@@ -194,7 +196,7 @@ private fun AttachmentChip(a: PendingAttachment, onRemove: () -> Unit, onRetry: 
         Text(Attachments.humanSize(a.sizeBytes), style = TsukaimaType.caption, color = ink)
         Box(
             modifier = Modifier
-                .size(36.dp)
+                .size(Dimens.hit) // the 44dp hit minimum; the pill grows to match
                 .clickable(role = Role.Button, onClickLabel = "Remove ${a.name}", onClick = onRemove),
             contentAlignment = Alignment.Center,
         ) {

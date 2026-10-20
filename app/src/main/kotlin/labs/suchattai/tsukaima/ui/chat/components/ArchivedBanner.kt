@@ -36,7 +36,7 @@ fun ArchivedBanner(onUnarchive: () -> Unit, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        TsukaimaIcon(IconName.Archive, size = 18.dp, tint = colors.ink3)
+        TsukaimaIcon(IconName.Archive, contentDescription = null, size = 18.dp, tint = colors.ink3)
         Text("This chat is archived", style = TsukaimaType.ui, color = colors.ink2, modifier = Modifier.weight(1f))
         SecondaryButton("Unarchive", onUnarchive, size = ButtonSize.Sm, icon = IconName.Unarchive)
     }

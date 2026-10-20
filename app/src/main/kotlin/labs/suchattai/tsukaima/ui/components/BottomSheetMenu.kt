@@ -100,7 +100,7 @@ private fun MenuSheetItems(items: List<MenuItem>, onPick: (MenuItem) -> Unit) {
                 danger = item.danger,
                 trailing = {
                     if (item.checked) {
-                        TsukaimaIcon(IconName.Check, size = 20.dp, tint = MaterialTheme.tsukaima.accent)
+                        TsukaimaIcon(IconName.Check, contentDescription = null, size = 20.dp, tint = MaterialTheme.tsukaima.accent)
                     }
                 },
                 onClick = { onPick(item) },

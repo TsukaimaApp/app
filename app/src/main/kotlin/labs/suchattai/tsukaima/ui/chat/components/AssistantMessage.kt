@@ -66,7 +66,7 @@ fun AssistantMessage(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text("Reasoning", style = TsukaimaType.caption, color = colors.ink3)
-                TsukaimaIcon(IconName.ExpandMore, size = 16.dp, tint = colors.ink3, modifier = Modifier.rotate(rotation))
+                TsukaimaIcon(IconName.ExpandMore, contentDescription = null, size = 16.dp, tint = colors.ink3, modifier = Modifier.rotate(rotation))
             }
             if (open) Text(reasoning, style = TsukaimaType.caption, color = colors.ink2)
         }

@@ -217,16 +217,17 @@ fun iconFor(name: IconName): ImageVector = when (name) {
 }
 
 /**
- * Decorative icon (`aria-hidden` in the design); pass [contentDescription] only when the icon
- * is the sole carrier of meaning. Default tint is ink2, matching the `--ink-2` context.
+ * An icon. [contentDescription] is required so every call site decides: null for a decorative icon (`aria-hidden`
+ * in the design, or one whose meaning a neighbouring label already carries), text when the icon is the sole carrier
+ * of meaning. Default tint is ink2, matching the `--ink-2` context.
  */
 @Composable
 fun TsukaimaIcon(
     name: IconName,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
     size: Dp = 24.dp,
     tint: Color = MaterialTheme.tsukaima.ink2,
-    modifier: Modifier = Modifier,
-    contentDescription: String? = null,
 ) {
     Icon(
         imageVector = iconFor(name),

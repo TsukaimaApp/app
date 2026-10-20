@@ -25,6 +25,8 @@ data class TsukaimaColors(
     val scrim: Color,
     val pressWash: Color,
     val hoverWash: Color,
+    /** The palette is the dark one: picks dark-only assets (the app's theme setting, not the system's night mode). */
+    val isDark: Boolean = false,
 )
 
 private val Ink1Light = Color(0xFF272220)
@@ -75,4 +77,5 @@ val DarkColors = TsukaimaColors(
     scrim = Color.Black.copy(alpha = 0.28f),
     pressWash = Ink1Dark.copy(alpha = 0.10f),
     hoverWash = Ink1Dark.copy(alpha = 0.05f),
+    isDark = true,
 )

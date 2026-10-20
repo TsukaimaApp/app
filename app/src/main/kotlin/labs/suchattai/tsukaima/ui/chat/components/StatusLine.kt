@@ -78,7 +78,7 @@ private fun StatusDot(visual: StatusVisual) {
  * right end in caption type.
  */
 @Composable
-fun StatusLine(status: AgentStatus, onClick: (() -> Unit)? = null, modifier: Modifier = Modifier, meter: String? = null) {
+fun StatusLine(status: AgentStatus, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null, meter: String? = null) {
     val colors = MaterialTheme.tsukaima
     val visual = statusVisual(status, colors)
     Row(

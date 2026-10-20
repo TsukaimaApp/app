@@ -45,11 +45,11 @@ import labs.suchattai.tsukaima.ui.theme.tsukaima
 fun Chip(
     label: String,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     selected: Boolean = false,
     leading: IconName? = null,
     trailing: IconName? = null,
     borderless: Boolean = false,
-    modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.tsukaima
     val source = remember { MutableInteractionSource() }
@@ -81,9 +81,9 @@ fun Chip(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (leading != null) TsukaimaIcon(leading, size = 18.dp, tint = content)
+            if (leading != null) TsukaimaIcon(leading, contentDescription = null, size = 18.dp, tint = content)
             Text(label, style = TsukaimaType.ui, color = content, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (trailing != null) TsukaimaIcon(trailing, size = 18.dp, tint = content)
+            if (trailing != null) TsukaimaIcon(trailing, contentDescription = null, size = 18.dp, tint = content)
         }
     }
 }

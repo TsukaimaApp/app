@@ -60,7 +60,7 @@ fun PrimaryButton(
     size: ButtonSize = ButtonSize.Md,
 ) = PillButton(ButtonVariant.Primary, text, onClick, modifier, icon, enabled, size, Tone.Ink)
 
-/** Raised pill with a hairline border and ink text. */
+/** Raised pill with a hairline border and ink text; [Tone.Danger] renders the label in the danger red (`Button danger`). */
 @Composable
 fun SecondaryButton(
     text: String,
@@ -69,7 +69,8 @@ fun SecondaryButton(
     icon: IconName? = null,
     enabled: Boolean = true,
     size: ButtonSize = ButtonSize.Md,
-) = PillButton(ButtonVariant.Secondary, text, onClick, modifier, icon, enabled, size, Tone.Ink)
+    tone: Tone = Tone.Ink,
+) = PillButton(ButtonVariant.Secondary, text, onClick, modifier, icon, enabled, size, tone)
 
 /** Borderless pill; [Tone.Danger] renders the label in the danger red. */
 @Composable
@@ -110,7 +111,7 @@ private fun PillButton(
     )
     val content = when (variant) {
         ButtonVariant.Primary -> colors.onAccent
-        ButtonVariant.Secondary -> colors.ink1
+        ButtonVariant.Secondary -> if (tone == Tone.Danger) colors.danger else colors.ink1
         ButtonVariant.Ghost -> if (tone == Tone.Danger) colors.danger else colors.ink2
     }
     val border = if (variant == ButtonVariant.Secondary) colors.hairline else Color.Transparent
@@ -150,7 +151,7 @@ private fun PillButton(
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (icon != null) TsukaimaIcon(icon, size = if (sm) 18.dp else 20.dp, tint = content)
+            if (icon != null) TsukaimaIcon(icon, contentDescription = null, size = if (sm) 18.dp else 20.dp, tint = content)
             val fontSize = if (sm) 13.sp else 14.5.sp
             Text(
                 text = text,
@@ -171,8 +172,8 @@ fun IconButton44(
     icon: IconName,
     contentDescription: String,
     onClick: () -> Unit,
-    filled: Boolean = false,
     modifier: Modifier = Modifier,
+    filled: Boolean = false,
     enabled: Boolean = true,
     tone: Tone = Tone.Ink,
 ) {

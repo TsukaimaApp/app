@@ -9,7 +9,6 @@ lifecycle = "2.9.4"
 navigation = "2.9.5"
 datastore = "1.1.7"
 securityCrypto = "1.1.0"
-material3Adaptive = "1.1.0"
 materialIconsExtended = "1.7.8"
 activityCompose = "1.11.0"
 coreKtx = "1.17.0"
@@ -21,7 +20,6 @@ androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = 
 androidx-compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 androidx-material3 = { module = "androidx.compose.material3:material3" }
-androidx-material3-adaptive = { module = "androidx.compose.material3.adaptive:adaptive", version.ref = "material3Adaptive" }
 androidx-material-icons-extended = { module = "androidx.compose.material:material-icons-extended", version.ref = "materialIconsExtended" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }

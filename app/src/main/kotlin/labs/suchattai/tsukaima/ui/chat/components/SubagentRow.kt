@@ -75,6 +75,7 @@ fun SubagentRow(item: ChatItem.Subagent, modifier: Modifier = Modifier) {
         ) {
             TsukaimaIcon(
                 IconName.AccountTree,
+                contentDescription = null,
                 size = 18.dp,
                 tint = if (item.status == SubagentStatus.Running) colors.accent else colors.ink3,
             )
@@ -94,7 +95,7 @@ fun SubagentRow(item: ChatItem.Subagent, modifier: Modifier = Modifier) {
                 SubagentStatus.Failed -> TsukaimaIcon(IconName.Error, size = 16.dp, tint = colors.danger, contentDescription = "Failed")
                 SubagentStatus.Done -> TsukaimaIcon(IconName.Check, size = 16.dp, tint = colors.ink3, contentDescription = "Done")
             }
-            TsukaimaIcon(IconName.ExpandMore, size = 18.dp, tint = colors.ink2, modifier = Modifier.rotate(rotation))
+            TsukaimaIcon(IconName.ExpandMore, contentDescription = null, size = 18.dp, tint = colors.ink2, modifier = Modifier.rotate(rotation))
         }
         if (open) {
             Column(

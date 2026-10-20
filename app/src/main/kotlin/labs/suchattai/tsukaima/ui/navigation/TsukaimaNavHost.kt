@@ -2,39 +2,25 @@ package labs.suchattai.tsukaima.ui.navigation
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
-import android.net.Uri
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.core.net.toUri
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
-import labs.suchattai.tsukaima.ui.components.IconButton44
-import labs.suchattai.tsukaima.ui.components.IconName
 import labs.suchattai.tsukaima.data.ServerChanges
 import labs.suchattai.tsukaima.data.ticks
 import labs.suchattai.tsukaima.di.AppContainer
@@ -55,13 +41,10 @@ import labs.suchattai.tsukaima.ui.status.HermesStatusSource
 import labs.suchattai.tsukaima.ui.status.StatusScreen
 import labs.suchattai.tsukaima.ui.status.StatusViewModel
 import labs.suchattai.tsukaima.ui.theme.Motion
-import labs.suchattai.tsukaima.ui.theme.TsukaimaTheme
-import labs.suchattai.tsukaima.ui.theme.TsukaimaType
-import labs.suchattai.tsukaima.ui.theme.tsukaima
 
 /**
- * Every [Route], cross-fading 220 ms between screens. Screens not built yet are titled placeholders; later
- * tasks swap in the real bodies. [showMenu] is false on the wide layout, where the drawer is a persistent pane.
+ * Every [Route], cross-fading 220 ms between screens. [showMenu] is false on the wide layout, where the drawer is
+ * a persistent pane.
  */
 @Composable
 fun TsukaimaNavHost(
@@ -192,7 +175,7 @@ fun TsukaimaNavHost(
                         container.toastState.show("Sign in first")
                     } else {
                         try {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                            context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
                         } catch (_: ActivityNotFoundException) {
                             container.toastState.show("No browser to open $url")
                         }
@@ -242,53 +225,3 @@ fun NavController.navigateTop(route: String) {
         launchSingleTop = route != Route.Chat.create() && !route.startsWith(Route.Chat.create() + "?")
     }
 }
-
-/** Header (menu or back, title) over an empty page: the frame later tasks replace. */
-@Composable
-private fun PlaceholderScreen(
-    title: String,
-    menu: Boolean = false,
-    onMenu: () -> Unit = {},
-    onBack: (() -> Unit)? = null,
-    content: @Composable () -> Unit = {},
-) {
-    val colors = MaterialTheme.tsukaima
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(colors.surfacePage),
-    ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            when {
-                onBack != null -> IconButton44(IconName.ArrowBack, "Back", onBack)
-                menu -> IconButton44(IconName.Menu, "Open sessions", onMenu)
-            }
-            Text(
-                title,
-                style = TsukaimaType.title,
-                color = colors.ink1,
-                modifier = Modifier.padding(start = if (onBack == null && !menu) 12.dp else 0.dp),
-            )
-        }
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) { content() }
-    }
-}
-
-@Composable
-private fun PlaceholderPreview(dark: Boolean) {
-    TsukaimaTheme(darkTheme = dark) { PlaceholderScreen("Status", menu = true) }
-}
-
-@Preview(name = "Placeholder light", heightDp = 240)
-@Composable
-private fun PlaceholderLightPreview() = PlaceholderPreview(dark = false)
-
-@Preview(name = "Placeholder dark", heightDp = 240)
-@Composable
-private fun PlaceholderDarkPreview() = PlaceholderPreview(dark = true)

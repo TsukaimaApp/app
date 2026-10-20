@@ -24,6 +24,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import labs.suchattai.tsukaima.ui.theme.Dimens
 import labs.suchattai.tsukaima.ui.theme.Motion
@@ -80,7 +81,7 @@ fun TsukaimaSwitch(
         ) {
             Box(
                 Modifier
-                    .offset(x = thumbX, y = 4.dp)
+                    .offset { IntOffset(thumbX.roundToPx(), 4.dp.roundToPx()) } // read at layout: no recomposition per frame
                     .size(18.dp)
                     .clip(TsukaimaShapes.pill)
                     .background(thumb),
