@@ -3,7 +3,7 @@
 Native Android client (Kotlin + Jetpack Compose) for a self-hosted [Hermes Agent](https://github.com/NousResearch/hermes-agent).
 Chat with your agent, browse sessions, manage cron jobs, and get actionable notifications from your phone.
 
-Version **0.6.1** (versionCode 14). Changes per release: [`CHANGELOG.md`](CHANGELOG.md).
+Version **0.8.0** (versionCode 18). Changes per release: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Features
 
@@ -12,12 +12,18 @@ Version **0.6.1** (versionCode 14). Changes per release: [`CHANGELOG.md`](CHANGE
 - **Live model switch** for the open chat (session-scoped; mid-turn picks apply at the next turn), **reasoning
   effort**, a context meter in the status line ("42% ctx · 12.3k tok") and **Compact context**
 - **Retry** a failed send from its bubble; long-press a message to **copy** its text or reasoning
+- **Edit** a sent message or **Regenerate** a reply (long-press): Hermes rewinds the chat to that point and runs
+  the turn again
+- **Side questions** and **background tasks** from the composer's overflow menu; answers arrive as cards in the chat
 - Subagent (delegation) rows, a risk note on flagged tool output, archived chats read-only with **Unarchive**
 - Tool approvals in chat: Deny / Approve, plus "Approve for…" this session or always when the server allows it
 - Answer the agent's **clarify** questions (choices, multi-select, free text) in chat
 - **Masked prompts**: a `sudo` password, a skill's secret or a password-manager unlock, typed into a hidden
-  field and never stored or logged
-- **Attachments**: send files and images with a message (up to 12 MB each)
+  field and never stored or logged; password-manager **one-time codes** and **save-login** offers answered in chat
+- **Attachments**: send files and images with a message (up to 12 MB each); a **PDF** goes as page images (first
+  25 pages)
+- **Images in replies**: shown inline when they come from your Hermes server; images from any other host load
+  only when tapped (the card names the host)
 - **File deliveries**: the agent's `MEDIA:` lines become file cards with image previews; tap to save to
   Downloads and open
 - Resume a running chat with the reply streamed so far; replay missed events after a reconnect
@@ -31,6 +37,8 @@ Version **0.6.1** (versionCode 14). Changes per release: [`CHANGELOG.md`](CHANGE
 - HTTPS fronts (Tailscale Serve or any TLS reverse proxy) as well as plain `http://` on a tailnet
 - Light/dark themes, Material You option, wide (tablet/foldable) pane layout
 - Voice mode and an assistant slot (see below)
+- **Report a problem** (Settings → Support): shares a text report with versions, device, server host, the last
+  crash and the app's own log (never your username, password or token)
 
 ## Voice
 
@@ -40,7 +48,8 @@ read aloud sentence by sentence as they stream; fenced code blocks and delivered
 Tap the orb while it speaks to interrupt and talk. Risky actions still need a tap on Approve: voice never answers
 approvals, questions or password prompts. End returns to the chat (the transcript is already in the session);
 Keyboard returns with the composer focused. Voice closes when the app leaves the screen; rotation keeps it. After
-2 minutes without hearing you it rests at "Tap to speak".
+2 minutes without hearing you it rests at "Tap to speak". Spoken turns reach Hermes flagged as voice turns (its
+voice-chat model and persona apply), and a turn after you interrupted a reply says so.
 
 Recognition uses the platform recogniser, on-device first (API 31+), and falls back to the default recogniser
 when the language pack is missing. Speech uses the system text-to-speech engine; without one, replies are shown
@@ -54,7 +63,8 @@ transcribes it with its configured speech-to-text. There are no live partial wor
 "Transcribing…" until the text arrives. Replies are spoken sentence by sentence through `/api/audio/speak` with
 Hermes' configured text-to-speech and played on the phone. Hermes' own language settings decide both ways, so the
 voice language then has no effect. Audio is held in memory for one utterance and never saved. Recognising on one
-side and speaking on the other is not offered. The switch applies from the next voice session.
+side and speaking on the other is not offered. The switch applies from the next voice session. In a loud room,
+two 30-second clips in a row that transcribe empty stop listening with "Too noisy to hear you — tap to retry".
 
 To use Tsukaima as the device assistant, open Settings → Voice → "Use as device assistant" and pick it in the
 system's assistant picker. Long-press home (or the corner swipe) shows a sheet that handles one exchange per
@@ -65,7 +75,8 @@ listen until tapped.
 
 Not supported: a hotword, and anything on the lock screen. Android 10 and 11: while Tsukaima is the assistant, its
 recogniser becomes the device's default speech recogniser and forwards to the system one, so voice input from the
-assistant gesture and other apps keeps working there; Android 12+ keeps the two apart.
+assistant gesture and other apps keeps working there (only for apps that hold the microphone permission
+themselves); Android 12+ keeps the two apart.
 
 ## Screenshots
 

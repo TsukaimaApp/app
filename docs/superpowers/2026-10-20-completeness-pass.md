@@ -85,3 +85,35 @@ recogniser instead of failing.)
   Compacting/Stopped/Question/Secret, queued messages, barge-in mid-stream); no whitespace-only composer test.
 - Chunker: a same-line "```code```" at line start opens a fence that never closes; inline code containing `*` or
   `_` is unwrapped before emphasis stripping.
+
+## v0.8.0 (2026-10-21)
+
+Closed in this release:
+
+- Chat: edit and regenerate (rewind via `truncate_before_row_id`), side questions and background tasks
+  (`prompt.btw` / `prompt.background`, `btw.complete` / `background.complete` handled — previously listed as
+  unhandled in Tier 2), PDF attach (first 25 pages as images), images in replies (foreign origins on tap only),
+  vault one-time code and save-login prompts answered in chat (no longer declined).
+- Support: Settings → Support → Report a problem, and a crash banner after a crash.
+- Voice: spoken turns flagged `voice_turn` / `interrupted`; one "Voice processing" switch for recognition and
+  speech (migrates 0.7.x `voice_recognition`); server speech output through `/api/audio/speak`; Opus uploads with
+  a WAV fallback; the loud-room guard; the Android 10/11 forwarding recogniser (callers must hold RECORD_AUDIO).
+- Tests: Robolectric Compose UI tests (composer, markdown table/links, Settings → Voice, voice screen, an a11y
+  walk of the chat screen).
+- Final-wave fixes: a completing side note no longer scrolls the chat and an empty one reads "No answer"; side
+  entries hidden while editing; same-origin image fetches do not follow redirects; 5xx/429 image failures retried;
+  server speech `stop()` drops a sentence still being synthesised.
+
+Still open:
+
+- **Localisation** — deferred by the user (UI strings are still literals).
+- **In-app updates** — out of scope by decision (the user updates through Obtainium).
+- **Device checks pending**: Opus output on a real device (first upload starts with `OggS`, logcat shows
+  `audio/ogg`, and it transcribes), the Android 10/11 forwarder, server TTS playback, long-press on links, the
+  server-recognition end-of-speech thresholds.
+- Editing a message that carried attachments resends its text only; Regenerate is not offered after a message
+  that sent images.
+- Mixed voice setups (phone recognition + server speech, or the reverse) are not a supported configuration.
+- The forwarding recogniser does not relay `segmentResults` on API 33+.
+- Smaller deferred review items (test gaps, KDoc line lengths, edge cases such as a PDF retry toast that says
+  "images") are tracked outside the repo.

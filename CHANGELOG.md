@@ -3,6 +3,50 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.8.0 — 2026-10-21 (versionCode 18)
+
+### Added
+- Edit and Regenerate: long-press your message to edit it, or a reply to regenerate it; Hermes rewinds the chat to
+  that point and runs the turn again. Editing a message that carried attachments resends its text only;
+  Regenerate is not offered for a message that sent images.
+- Side questions and background tasks: the composer's overflow menu sends the text as a side question (answered
+  over a snapshot of the chat, without joining it) or as a background task; the answer appears as a card in the
+  chat.
+- PDF attach: a picked PDF is sent as page images for the next message (first 25 pages); the chip shows the page
+  count.
+- Images in replies: a markdown image on its own line renders inline (tap opens it in the browser).
+- Settings → Support → Report a problem: shares a text report with the app and Android version, the device, the
+  server host (never your username, password or token), the last crash and the app's own recent log. After a
+  crash, Settings shows "The app crashed last time" with Report / Dismiss.
+- Voice processing "On Hermes" now also speaks replies with Hermes' text-to-speech (`/api/audio/speak`).
+- Recordings for Hermes recognition upload as Opus (16 kB instead of 276 kB of WAV for a 5-second clip); WAV
+  when the phone has no Opus encoder.
+- Hermes' password-manager prompts are answered in the chat: "Enter the code" for a one-time code, and a
+  "Save login" card (username or email, password) when the agent offers to store a login; either can be declined.
+- Spoken turns are flagged as voice turns, so Hermes can use its voice-chat model and persona; a turn sent after
+  you interrupted a spoken reply tells the agent it was interrupted.
+
+### Changed
+- Settings → Voice: one "Voice processing" switch (On this phone / On Hermes) decides where both recognition and
+  speech run, replacing the separate Speech recognition row; a 0.7.x choice of On Hermes is kept.
+
+### Fixed
+- In a loud room, server recognition no longer keeps uploading 30-second clips that come back empty: after two in
+  a row voice stops with "Too noisy to hear you — tap to retry".
+- Android 10 and 11: while Tsukaima is the assistant, its recogniser now forwards to the system one, so voice
+  input from the assistant gesture and other apps keeps working.
+- A finished side question no longer scrolls the chat; an empty answer reads "No answer".
+- Ending voice mode while Hermes is still synthesising a sentence no longer lets it play afterwards.
+- An image that failed with a server error (5xx or 429) is retried when shown again instead of staying broken.
+
+### Security
+- Images from a host other than your Hermes server never load until you tap them (the card shows the host), so a
+  reply cannot send data out through an image URL; images from the server itself no longer follow redirects to
+  another host.
+- The assistant recogniser serves only apps that hold the microphone permission themselves.
+- The save-login card shows the full origin when it differs from the site name, so a lookalike label cannot pass
+  for another site.
+
 ## 0.7.1 — 2026-10-20 (versionCode 17)
 
 ### Fixed

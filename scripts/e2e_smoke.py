@@ -1,7 +1,8 @@
 """Tsukaima e2e smoke: login, REST contract (the app's exact GETs), WS session, one prompt,
 config.set model round trip (same model, session scope), session detail `archived` flag,
-file.attach + /api/files/download round trip, cron create/list/delete, session cleanup, STT and TTS relays."""
-import asyncio, base64, http.cookiejar, json, os, sys, time, urllib.error, urllib.parse, urllib.request
+file.attach + /api/files/download round trip, cron create/list/delete, session cleanup, STT and TTS relays,
+pdf.attach."""
+import asyncio, base64, contextlib, http.cookiejar, json, os, sys, time, urllib.error, urllib.parse, urllib.request
 
 BASE = os.environ["HERMES_TEST_URL"].rstrip("/")
 USER, PASSWORD = os.environ["HERMES_TEST_USER"], os.environ["HERMES_TEST_PASSWORD"]
@@ -233,6 +234,94 @@ def speak_part(token):
     step(f"POST /api/audio/speak ({r.get('mime_type')}, {len(audio)} bytes, provider={r.get('provider')})")
 
 
+def minimal_pdf():
+    """A valid one-page PDF (blank US Letter page) with a byte-exact xref table, built in code."""
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
+               b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+               b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> >>"]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for i, body in enumerate(objects, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % i + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    out += b"".join(b"%010d 00000 n \n" % off for off in offsets)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+    return bytes(out)
+
+
+@contextlib.asynccontextmanager
+async def ws_rpc(token):
+    """A WS connection with a reader task; yields `rpc(method, params)`. Server requests are denied like ws_part."""
+    import websockets
+    ticket = http_json("POST", "/api/auth/ws-ticket", token=token)["ticket"]
+    url = BASE.replace("http", "ws", 1) + "/api/ws?ticket=" + ticket
+    pending, n = {}, 0
+    async with websockets.connect(url, max_size=None) as ws:
+        async def reader():
+            async for raw in ws:
+                for line in raw.split("\n"):
+                    if not line.strip():
+                        continue
+                    m = json.loads(line)
+                    if "id" in m and m["id"] in pending and "method" not in m:
+                        pending.pop(m["id"]).set_result(m)
+                    elif "method" in m and "id" in m and m["method"] != "event":
+                        await ws.send(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {"choice": "deny"}}))
+
+        async def rpc(method, params=None, check=True):
+            """The result; with check=False the whole reply (so a caller can inspect an error)."""
+            nonlocal n
+            n += 1
+            rid = f"p{n}"
+            fut = asyncio.get_running_loop().create_future()
+            pending[rid] = fut
+            await ws.send(json.dumps({"jsonrpc": "2.0", "id": rid, "method": method, "params": params or {}}))
+            m = await asyncio.wait_for(fut, 60)
+            if not check:
+                return m
+            if "error" in m:
+                fail(f"{method}: {m['error']}")
+            return m["result"]
+
+        rt = asyncio.create_task(reader())
+        try:
+            yield rpc
+        finally:
+            rt.cancel()
+
+
+async def pdf_attach_part(token):
+    """PDF attach: `pdf.attach` renders the pages server-side and queues them as images for the next turn."""
+    async with ws_rpc(token) as rpc:
+        await rpc("client.capabilities", {"server_requests": True})
+        r = await rpc("session.create", {"source": "tsukaima-smoke"})
+        sid, stored = r["session_id"], r["stored_session_id"]
+        try:
+            pdf = minimal_pdf()
+            a = await rpc("pdf.attach", {"session_id": sid, "content_base64": base64.b64encode(pdf).decode(),
+                                         "filename": "smoke.pdf"})
+            if not (a.get("pages_attached", 0) >= 1 and a.get("count", 0) >= 1):
+                fail(f"pdf.attach: unexpected result keys={sorted(a)} pages_attached={a.get('pages_attached')!r} "
+                     f"count={a.get('count')!r}")
+            step(f"pdf.attach ({len(pdf)} B PDF -> pages_attached={a['pages_attached']}, count={a['count']})")
+        finally:
+            # No turn ran, so the lazy session may never have been stored: 4007 on delete means nothing to clean up.
+            try:
+                await rpc("session.close", {"session_id": sid})
+                d = await rpc("session.delete", {"session_id": stored}, check=False)
+                err = d.get("error")
+                if err is None:
+                    step("session.delete (pdf)")
+                elif err.get("code") == 4007:
+                    step("session cleanup (pdf; never stored)")
+                else:
+                    print(f"warn: session.delete failed: {err!r}", file=sys.stderr)
+            except Exception as e:  # noqa: BLE001
+                print(f"warn: session cleanup failed: {e!r}", file=sys.stderr)
+
+
 def cron_part(token):
     name = f"tsukaima-smoke-{int(time.time())}"
     job = http_json("POST", "/api/cron/jobs", {"name": name, "schedule": "0 4 * * *",
@@ -258,6 +347,7 @@ def main():
     cron_part(token)
     transcribe_part(token)
     speak_part(token)
+    asyncio.run(pdf_attach_part(token))
     print("PASS")
 
 

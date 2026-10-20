@@ -257,3 +257,50 @@ All need the bearer header unless marked public. Management endpoints accept `?p
   the app records one utterance, ends it with its own voice-activity detection and uploads it whole.
 - The gateway's `voice.record` and `wake.*` RPCs capture on the **gateway host's own microphone**; they cannot serve
   a remote client and the app does not use them.
+
+### v0.8.0 — rewind, side tasks, PDF, vault prompts (2026-10-21, verified live against 0.22.2)
+
+- **`prompt.submit` flags**: `voice_turn: true` runs the turn on the server's `auxiliary.voice_chat` model/persona;
+  `interrupted: true` (client-side barge-in) gives the model an "interrupted" note. The app sends each key only when
+  true. Result: `{"status":"streaming","user_row_id":138}`; `user_row_id` is the persisted row of the accepted input.
+  `message.complete` payload keys: `persisted_turn`, `status`, `text`, `usage`, with
+  `persisted_turn = {"row_ids":[138,139],"complete":true,"user_row_id":138,"final_assistant_row_id":139}`.
+  Transcript messages (`session.resume` / `session.history`) carry `row_id`.
+- **Rewind (edit / regenerate)**: `prompt.submit {session_id, text, truncate_before_row_id: <user row>,
+  confirm_truncate: true, confirm_deep_truncate: true}` archives the rows from that user row on, then runs the new
+  turn. `confirm_deep_truncate` is required when the cut archives more than one user turn, `confirm_empty_truncate`
+  when it archives the whole transcript; the app sends all three confirmations with every rewind (the user asked for
+  exactly that cut).
+  Result: `{"status":"streaming","survivor_user_row_ids":[138],"user_row_id":142}` (plus `survivor_row_id_map`). The
+  RPC answers in about 20 ms; the first event after it is `session.info`, then the reply streams. Afterwards
+  `session.history` holds only the surviving rows; archived rows are gone from the transcript.
+  - Cutting before the **first** user row needs `confirm_empty_truncate: true`, else error **4028** "truncation
+    would erase the entire session transcript; resubmit with confirm_empty_truncate=true"; with it →
+    `{"status":"streaming","survivor_user_row_ids":[],"user_row_id":144}`.
+  - A target row archived by an earlier rewind → error **4018** "target user message is no longer in session
+    history", `data {user_turn_count, ordinal, segment_ordinal, prefix_user_count}` (the app restores the
+    transcript; an edit stays in the composer to send as a new message). 4009 = a turn is still running; 5070–5072 =
+    storage failed after the cut was written (the app reloads history).
+- **Side questions / background tasks**: `prompt.btw {session_id, text}` (answered over a snapshot of the live
+  conversation, not added to it) and `prompt.background {session_id, text}` → `{task_id}`. Results arrive later as
+  events on the parent session: `btw.complete {task_id, text, question}` and `background.complete {task_id, text}`
+  (`text` is `error: <exc>` when the side agent failed). Other clients' tasks arrive the same way; the app shows
+  them as new cards.
+- **`pdf.attach {session_id, content_base64, filename, first_page?, last_page?}`** →
+  `{attached, filename, pages_attached, pages:[{path, page, width, height}], count, text}`. The server renders pages
+  with `pdftoppm` at 150 dpi and queues them as images for the next turn (`count` = all images now queued;
+  `image.detach {session_id, path}` drops one page). Without a range it renders pages 1–25 (`_PDF_ATTACH_MAX_PAGES`
+  = 25 per call) and silently stops there; an explicit range over 25 → 4019. `text` is the server's note
+  (`[User attached PDF: <name> (N page(s))]`). Errors: 4017 not a PDF (no `%PDF-` magic), 4018 over 50 MB, 4015 bad
+  range, 5028 `pdftoppm` missing/failed.
+- **`POST /api/audio/transcribe`** accepts `audio/ogg` (Opus, 24 kbps): a 5 s clip is 16 kB against 276 kB of WAV
+  and came back verbatim.
+- **`POST /api/audio/speak {text}`** → `{"ok":true,"data_url":"data:audio/mpeg;base64,…","mime_type":"audio/mpeg",
+  "provider":"piper"}` (Piper on the test instance: mp3, 22050 Hz mono); `400` with `detail` when the provider
+  fails. Speech follows Hermes' TTS settings (voice, language); the request carries neither.
+- **`GET /api/audio/voice-config`** `tts`: `{mode, provider, …}`; the app reads only `tts.mode` and `tts.provider`
+  (never `api_key`).
+- **Vault prompts** (server requests, answered `{"value": …}`, `""` declines; see §2):
+  `vault.code {site?, hint?}` → `{"value":"<code>"}`; `vault.save_login {origin, site}` →
+  `{"value":"{\"identifier\":\"…\",\"password\":\"…\"}"}` (a JSON *string*). `site` is the host Hermes derives from
+  `origin` (`tools/browser_vault_tool.py`), never agent text; the app shows the full `origin` too when it differs.
