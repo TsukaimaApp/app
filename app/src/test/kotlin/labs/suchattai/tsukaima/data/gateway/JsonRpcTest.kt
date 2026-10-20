@@ -9,6 +9,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+private object HermesJsonForTest {
+    fun parse(text: String): JsonObject = labs.suchattai.tsukaima.data.api.HermesJson.parseToJsonElement(text).jsonObject
+}
+
 class JsonRpcTest {
     @Test
     fun decodesEventFrame() {
@@ -18,6 +22,17 @@ class JsonRpcTest {
         assertEquals("d4fb0dea", f.sessionId)
         assertEquals(12L, f.seq)
         assertEquals("Hello", f.payload["text"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun encodesErrorResponse() {
+        val frame = HermesJsonForTest.parse(JsonRpc.encodeError("srq-1", 4404, "not shown"))
+        assertEquals("2.0", frame["jsonrpc"]!!.jsonPrimitive.content)
+        assertEquals("srq-1", frame["id"]!!.jsonPrimitive.content)
+        val error = frame["error"]!!.jsonObject
+        assertEquals(4404, error["code"]!!.jsonPrimitive.content.toInt())
+        assertEquals("not shown", error["message"]!!.jsonPrimitive.content)
+        assertTrue("result" !in frame)
     }
 
     @Test

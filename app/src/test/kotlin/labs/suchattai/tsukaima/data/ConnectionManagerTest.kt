@@ -3,6 +3,7 @@ package labs.suchattai.tsukaima.data
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -285,6 +286,40 @@ class ConnectionManagerTest {
         assertEquals("srq-1", req.id)
         assertEquals("approval", req.method)
         assertEquals(1, cm.serverRequests.replayCache.size)
+    }
+
+    @Test
+    fun onlyApprovalsForwarded() = runBlocking<Unit> {
+        val answers = java.util.concurrent.ConcurrentHashMap<String, kotlinx.serialization.json.JsonObject>()
+        wsListener = object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                val frame = HermesJson.parseToJsonElement(text).jsonObject
+                val id = frame["id"]?.jsonPrimitive?.content
+                if (id != null && id.startsWith("srq-")) answers[id] = frame
+                if (method(text) == "client.capabilities") {
+                    webSocket.send(READY)
+                    for ((rid, m) in listOf("srq-c" to "clarify", "srq-p" to "preview.read", "srq-s" to "secret", "srq-a" to "approval")) {
+                        webSocket.send("""{"jsonrpc":"2.0","id":"$rid","method":"$m","params":{"session_id":"live-1"}}""")
+                    }
+                }
+            }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                webSocket.close(1000, null)
+            }
+        }
+        creds.save("pw", "tok", serverUrl())
+        val cm = manager()
+        val hint = scope.async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { cm.hints.first() }
+        cm.start()
+        await { while (answers.size < 3 || cm.serverRequests.replayCache.isEmpty()) delay(10) }
+
+        assertEquals(listOf("srq-a"), cm.serverRequests.replayCache.map { it.id })
+        assertEquals("{\"answers\":null}", answers["srq-c"]!!["result"].toString())
+        assertEquals("4404", answers["srq-p"]!!["error"]!!.jsonObject["code"]!!.jsonPrimitive.content)
+        assertEquals("-32601", answers["srq-s"]!!["error"]!!.jsonObject["code"]!!.jsonPrimitive.content)
+        assertNull("approvals wait for the user", answers["srq-a"])
+        assertEquals(ServerRequestRouter.CLARIFY_HINT, await { hint.await() })
     }
 
     @Test

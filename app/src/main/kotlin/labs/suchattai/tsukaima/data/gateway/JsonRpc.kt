@@ -72,6 +72,20 @@ object JsonRpc {
             put("params", params ?: JsonObject(emptyMap()))
         }.toString()
 
+    /** A JSON-RPC error response to a server→client request ([id] echoed). */
+    fun encodeError(id: String, code: Int, message: String): String =
+        buildJsonObject {
+            put("jsonrpc", "2.0")
+            put("id", id)
+            put(
+                "error",
+                buildJsonObject {
+                    put("code", code)
+                    put("message", message)
+                },
+            )
+        }.toString()
+
     fun encodeResult(id: String, result: JsonObject): String =
         buildJsonObject {
             put("jsonrpc", "2.0")

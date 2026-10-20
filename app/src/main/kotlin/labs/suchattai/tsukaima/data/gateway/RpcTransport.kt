@@ -18,6 +18,9 @@ interface RpcTransport {
      * whether the frame was enqueued on a live connection; false means it was not sent.
      */
     fun respond(id: String, result: JsonObject): Boolean
+
+    /** Declines a server→client request with a JSON-RPC error frame; same return contract as [respond]. */
+    fun respondError(id: String, code: Int, message: String): Boolean
 }
 
 /** The server answered a request with a JSON-RPC error frame. */

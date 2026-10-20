@@ -205,6 +205,10 @@ class GatewayClient(
     override fun respond(id: String, result: JsonObject): Boolean =
         liveSocket?.send(JsonRpc.encodeResult(id, result)) ?: false
 
+    /** Like [respond], with a JSON-RPC error frame. */
+    override fun respondError(id: String, code: Int, message: String): Boolean =
+        liveSocket?.send(JsonRpc.encodeError(id, code, message)) ?: false
+
     private suspend fun awaitConnected() {
         val s = combine(state, wanted) { s, w -> if (s == ConnectionState.Disconnected && !w) null else s }
             .first { it == null || it == ConnectionState.Connected }

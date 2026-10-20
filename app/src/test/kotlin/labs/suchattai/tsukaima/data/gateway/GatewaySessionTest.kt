@@ -26,6 +26,7 @@ class GatewaySessionTest {
             responses += id to result
             return true
         }
+        override fun respondError(id: String, code: Int, message: String): Boolean = true
     }
 
     private fun obj(s: String) = HermesJson.parseToJsonElement(s).jsonObject
@@ -40,6 +41,44 @@ class GatewaySessionTest {
           {"role":"assistant","text":"Linux.","row_id":4}
          ]}
     """.trimIndent()
+
+    /** Every RPC [GatewaySession] can send, with throwaway arguments. */
+    private suspend fun GatewaySession.callEveryRpc() {
+        create("/w", "m")
+        resume("st")
+        history("s")
+        list()
+        mostRecent()
+        submit("s", "hi")
+        interrupt("s")
+        setCwd("s", "/w")
+        setTitle("s", "t")
+        archive("st", true)
+        delete("st")
+        close("s")
+        runCatching { modelOptions("s") }
+        eventsSince("s", 0)
+        approvalRespond("s", "r", ApprovalChoice.once)
+    }
+
+    @Test
+    fun rpcParamsIncludeProfileWhenNotDefault() = runBlocking {
+        val t = FakeTransport(obj("""{"session_id":"s1","messages":[],"sessions":[]}"""))
+        GatewaySession(t) { "research" }.callEveryRpc()
+        assertEquals(15, t.calls.size)
+        for ((method, params) in t.calls) {
+            assertEquals(method, "research", params["profile"]?.jsonPrimitive?.content)
+        }
+    }
+
+    @Test
+    fun rpcParamsOmitProfileWhenDefault() = runBlocking {
+        val t = FakeTransport(obj("""{"session_id":"s1","messages":[],"sessions":[]}"""))
+        GatewaySession(t) { "default" }.callEveryRpc()
+        GatewaySession(t).callEveryRpc()
+        assertEquals(30, t.calls.size)
+        for ((method, params) in t.calls) assertFalse(method, params.containsKey("profile"))
+    }
 
     @Test
     fun createSendsSourceAndCwd() = runBlocking {
