@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.ChatState
 import labs.suchattai.tsukaima.domain.voice.VoiceController
 import labs.suchattai.tsukaima.domain.voice.VoiceMode
@@ -88,14 +89,22 @@ internal class ChatVoice(
 
     fun tapIndicator() = controller?.tapIndicator() ?: Unit
 
-    /** [ChatUiState.chat] as a [StateFlow] whose [value] is always current (no collector in between). */
+    /** The transcript was rebuilt from stored history; [itemsBefore] is the one it replaced. See [VoiceController.rebased]. */
+    fun rebased(itemsBefore: List<ChatItem>) = controller?.rebased(itemsBefore) ?: Unit
+
+    /**
+     * [ChatUiState.chat] with the merged [ChatUiState.status] (compacting, gateway Offline/Stopped) as a [StateFlow]
+     * whose [value] is always current (no collector in between).
+     */
     @OptIn(ExperimentalForInheritanceCoroutinesApi::class)
     private class ChatView(private val source: StateFlow<ChatUiState>) : StateFlow<ChatState> {
-        override val value: ChatState get() = source.value.chat
+        override val value: ChatState get() = source.value.voiceChat()
         override val replayCache: List<ChatState> get() = listOf(value)
         override suspend fun collect(collector: FlowCollector<ChatState>): Nothing {
-            source.map { it.chat }.distinctUntilChanged { a, b -> a === b }.collect(collector)
+            source.distinctUntilChanged { a, b -> a.chat === b.chat && a.status == b.status }.map { it.voiceChat() }.collect(collector)
             awaitCancellation()
         }
+
+        private fun ChatUiState.voiceChat(): ChatState = if (chat.status == status) chat else chat.copy(status = status)
     }
 }

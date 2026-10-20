@@ -10,8 +10,11 @@ sealed interface SpeechEvent {
     /** The utterance is complete; the run ends. */
     data class Final(val text: String) : SpeechEvent
 
-    /** The run failed; [retry] = a transient failure (no match, busy) worth listening again after. */
-    data class Error(val message: String, val retry: Boolean) : SpeechEvent
+    /**
+     * The run failed; [retry] = a transient failure (no match, busy) worth listening again after. [silence] = nothing
+     * was said (no match, speech timeout): listening again soon is normal, not a failing recogniser.
+     */
+    data class Error(val message: String, val retry: Boolean, val silence: Boolean = false) : SpeechEvent
 }
 
 /** Speech recognition seam (Android's SpeechRecognizer in the app, a fake in tests). */

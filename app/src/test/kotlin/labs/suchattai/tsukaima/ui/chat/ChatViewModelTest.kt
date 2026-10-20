@@ -38,6 +38,7 @@ import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.SecretKind
+import labs.suchattai.tsukaima.domain.chat.StatusTone
 import labs.suchattai.tsukaima.domain.chat.running
 import labs.suchattai.tsukaima.domain.chat.ToolStatus
 import labs.suchattai.tsukaima.domain.voice.FakeSpeechInput
@@ -45,6 +46,7 @@ import labs.suchattai.tsukaima.domain.voice.FakeSpeechOutput
 import labs.suchattai.tsukaima.domain.voice.VoiceMode
 import labs.suchattai.tsukaima.domain.voice.SpeechEvent
 import labs.suchattai.tsukaima.domain.voice.VoicePhase
+import labs.suchattai.tsukaima.ui.voice.voiceLine
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -2065,5 +2067,85 @@ class ChatViewModelTest {
         vm.voiceDenied()
         assertEquals(listOf("Microphone access is needed for voice mode"), b.toasts)
         assertNull(vm.state.value.voice)
+    }
+
+    @Test
+    fun voiceDoesNotReadARebuiltTranscriptAloud() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.openVoice()
+        advanceUntilIdle()
+        b.speech.emit(SpeechEvent.Final("what kernel?"))
+        advanceUntilIdle()
+        b.events.emit(ev("message.start", 1))
+        b.events.emit(ev("message.complete", 2, """{"text":"6.17.2"}"""))
+        advanceUntilIdle()
+        assertEquals(listOf("6.17.2"), b.speechOutput.spoken)
+
+        // The server session expired: the resume answers with a new live id and the transcript is rebuilt (new ids).
+        b.transport.on("session.resume", obj(resumeJson.replace(live, "beef0001")))
+        b.transport.on("session.events.since", obj("""{"events":[],"latest_seq":0,"truncated":false,"open_requests":[]}"""))
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+
+        val s = vm.state.value
+        assertEquals(listOf("h-1", "h-2"), s.chat.items.map { it.id })
+        assertEquals("nothing is read aloud again", listOf("6.17.2"), b.speechOutput.spoken)
+        assertEquals(0, s.voice?.startIndex)
+        assertEquals("6.17.2".length, s.voice?.revealed?.get("h-2"))
+        assertEquals(VoicePhase.Listening, s.voice?.phase)
+    }
+
+    @Test
+    fun voiceWaitsWhileCompactingAndSendTextIsRefused() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val b = backend().apply {
+            transport.on("session.compress", obj("""{"status":"compressed","summary":{"headline":"ok"}}"""))
+            transport.gateNext["session.compress"] = gate
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.openVoice()
+        advanceUntilIdle()
+        assertTrue(b.speech.active)
+
+        vm.compact()
+        advanceUntilIdle()
+        assertEquals(VoicePhase.Thinking, vm.state.value.voice?.phase)
+        assertFalse("the mic is released while compacting", b.speech.active)
+        assertFalse(vm.sendText("hello"))
+        assertEquals("Compacting the context, try again in a moment", b.toasts.last())
+        assertFalse("prompt.submit" in b.transport.methods())
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(VoicePhase.Listening, vm.state.value.voice?.phase)
+        assertTrue(b.speech.active)
+    }
+
+    @Test
+    fun voiceRestsWhileTheGatewayIsOffline() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.openVoice()
+        advanceUntilIdle()
+        assertTrue(b.speech.active)
+
+        b.hermes.value = HermesState(reachable = false)
+        advanceUntilIdle()
+        assertEquals(AgentStatus.Idle, vm.state.value.chat.status) // only the gateway knows
+        assertFalse("the mic is released", b.speech.active)
+        val s = vm.state.value
+        assertEquals(VoicePhase.Idle, s.voice?.phase)
+        assertEquals(StatusTone.Red, voiceLine(s.voice!!.phase, s.status, VoiceMode.InApp).tone)
+
+        b.hermes.value = HermesState()
+        advanceUntilIdle()
+        assertEquals(VoicePhase.Listening, vm.state.value.voice?.phase)
+        assertTrue(b.speech.active)
     }
 }

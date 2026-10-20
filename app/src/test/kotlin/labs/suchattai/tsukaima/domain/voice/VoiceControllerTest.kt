@@ -54,7 +54,7 @@ class VoiceControllerTest {
         val approvals = intArrayOf(0)
         // Not backgroundScope: TestScope.advanceUntilIdle does not run background work, so the jobs get their own scope.
         val scope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()).also { scopes += it }
-        val c = VoiceController(input, output, scope, chat, { sent += it; sendResult }, mode, { approvals[0]++ })
+        val c = VoiceController(input, output, scope, chat, { sent += it; sendResult }, mode, { approvals[0]++ }, { testScheduler.currentTime })
         c.start()
         advanceUntilIdle()
         return Rig(c, input, output, chat, sent, approvals)
@@ -276,6 +276,146 @@ class VoiceControllerTest {
         advanceUntilIdle()
         assertEquals(listOf("hello"), r.sent)
         assertEquals(2, r.input.listenCount)
+        assertEquals(VoicePhase.Listening, r.state.phase)
+    }
+
+    @Test fun rebasedTranscriptIsRevealedNotSpokenAgain() = runTest {
+        val r = rig(output = FakeSpeechOutput(instant = true))
+        say(r, "which kernel")
+        r.add(ChatItem.UserMessage("u-l1", "which kernel"))
+        r.add(reply("a1", "Version 6.17.", streaming = false), AgentStatus.Idle)
+        advanceUntilIdle()
+        assertEquals(listOf("Version 6.17."), r.output.spoken)
+        val before = r.chat.value.items // [u0 | u-l1, a1]: two voice-era items
+
+        // A reconnect rebuilt the transcript from stored history: new ids, one more earlier item, a reply streaming.
+        r.chat.update {
+            it.copy(
+                items = listOf(
+                    ChatItem.UserMessage("h-1", "earlier"),
+                    ChatItem.UserMessage("h-2", "older still"),
+                    ChatItem.UserMessage("h-3", "which kernel"),
+                    reply("h-4", "Version 6.17.", streaming = false),
+                    reply("h-5", "And more", streaming = true),
+                ),
+                status = AgentStatus.Replying,
+            )
+        }
+        r.controller.rebased(before)
+        advanceUntilIdle()
+        assertEquals(listOf("Version 6.17."), r.output.spoken)
+        assertEquals(3, r.state.startIndex) // five items minus the two voice-era ones
+        assertEquals("Version 6.17.".length, r.state.revealed["h-4"])
+        assertEquals("And more".length, r.state.revealed["h-5"])
+
+        r.replace(reply("h-5", "And more. Done.", streaming = false), AgentStatus.Idle)
+        advanceUntilIdle()
+        assertEquals("a reply present at the rebuild is never spoken", listOf("Version 6.17."), r.output.spoken)
+        assertEquals("And more. Done.".length, r.state.revealed["h-5"])
+
+        r.add(reply("a2", "New one.", streaming = false), AgentStatus.Idle)
+        advanceUntilIdle()
+        assertEquals(listOf("Version 6.17.", "New one."), r.output.spoken)
+    }
+
+    @Test fun rebasedClampsTheStartIndex() = runTest {
+        val r = rig()
+        r.chat.update { it.copy(items = emptyList()) }
+        r.controller.rebased(listOf(ChatItem.UserMessage("u0", "earlier"), ChatItem.UserMessage("u1", "x")))
+        advanceUntilIdle()
+        assertEquals(0, r.state.startIndex)
+    }
+
+    /** Fails the current run with [event], then waits [ms]; true when a new run started by then. */
+    private fun TestScope.failAndWait(r: Rig, event: SpeechEvent.Error, ms: Long): Boolean {
+        val runs = r.input.listenCount
+        r.input.emit(event)
+        runCurrent()
+        advanceTimeBy(ms)
+        runCurrent()
+        return r.input.listenCount > runs
+    }
+
+    @Test fun recogniserErrorsBackOffExponentially() = runTest {
+        val r = rig()
+        val busy = SpeechEvent.Error("busy", retry = true)
+        assertTrue(failAndWait(r, busy, 300))
+        assertFalse(failAndWait(r, busy, 599))
+        advanceTimeBy(1); runCurrent()
+        assertEquals(3, r.input.listenCount)
+        assertFalse(failAndWait(r, busy, 1199))
+        advanceTimeBy(1); runCurrent()
+        assertFalse(failAndWait(r, busy, 2399))
+        advanceTimeBy(1); runCurrent()
+        assertEquals(5, r.input.listenCount)
+        assertEquals(null, r.state.error)
+    }
+
+    @Test fun silenceKeepsTheShortDelayAndIsNeverFatal() = runTest {
+        val r = rig()
+        repeat(8) { assertTrue(failAndWait(r, SpeechEvent.Error("No speech heard", retry = true, silence = true), 300)) }
+        assertEquals(null, r.state.error)
+        assertEquals(VoicePhase.Listening, r.state.phase)
+    }
+
+    @Test fun fiveErrorsInARowAreFatalUntilTapped() = runTest {
+        val r = rig()
+        repeat(4) {
+            r.input.emit(SpeechEvent.Error("busy", retry = true))
+            advanceUntilIdle()
+        }
+        r.input.emit(SpeechEvent.Partial("he")) // speech in between resets the count
+        advanceUntilIdle()
+        r.input.emit(SpeechEvent.Error("busy", retry = true))
+        advanceUntilIdle()
+        assertEquals(null, r.state.error)
+        repeat(4) {
+            r.input.emit(SpeechEvent.Error("Speech recognition failed", retry = true))
+            advanceUntilIdle()
+        }
+        assertEquals("Speech recognition failed", r.state.error)
+        assertEquals(VoicePhase.Idle, r.state.phase)
+        assertFalse(r.input.active)
+        val runs = r.input.listenCount
+
+        r.controller.tapIndicator()
+        advanceUntilIdle()
+        assertEquals(null, r.state.error)
+        assertEquals(VoicePhase.Listening, r.state.phase)
+        assertEquals(runs + 1, r.input.listenCount)
+        r.input.emit(SpeechEvent.Error("busy", retry = true))
+        advanceUntilIdle()
+        assertEquals("the tap reset the count", null, r.state.error)
+    }
+
+    @Test fun inAppRestsAfterTwoMinutesWithoutAFinal() = runTest {
+        val r = rig()
+        advanceTimeBy(60_000)
+        assertTrue(failAndWait(r, SpeechEvent.Error("No speech heard", retry = true, silence = true), 300))
+        advanceTimeBy(59_700)
+        r.input.emit(SpeechEvent.Error("No speech heard", retry = true, silence = true))
+        advanceUntilIdle()
+        assertEquals(VoicePhase.Idle, r.state.phase)
+        assertFalse(r.input.active)
+        assertEquals(null, r.state.error)
+
+        r.controller.tapIndicator()
+        advanceUntilIdle()
+        assertEquals(VoicePhase.Listening, r.state.phase)
+        assertTrue(r.input.active)
+        advanceTimeBy(119_000)
+        assertTrue("a fresh window after the tap", failAndWait(r, SpeechEvent.Error("No speech heard", retry = true, silence = true), 300))
+    }
+
+    @Test fun aFinalStartsANewListeningWindow() = runTest {
+        val r = rig(output = FakeSpeechOutput(instant = true))
+        advanceTimeBy(100_000)
+        say(r, "status")
+        r.add(reply("a1", "Fine.", streaming = false), AgentStatus.Idle)
+        advanceUntilIdle()
+        assertTrue(r.input.active)
+        advanceTimeBy(100_000)
+        assertTrue(failAndWait(r, SpeechEvent.Error("No speech heard", retry = true, silence = true), 300))
         assertEquals(VoicePhase.Listening, r.state.phase)
     }
 }

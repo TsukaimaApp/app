@@ -27,12 +27,18 @@ import labs.suchattai.tsukaima.domain.voice.SpeechInput
  * destroyed when the flow ends or its collector cancels), so a new run may start right after an old one is
  * cancelled. The flow runs on `Dispatchers.Main.immediate` regardless of the collector, because
  * [SpeechRecognizer] must be created and used on the main thread. Recognised text is never logged.
+ *
+ * On Android 12+ the on-device recogniser is preferred, but [SpeechRecognizer.isOnDeviceRecognitionAvailable] does
+ * not look at the language: without the language pack every on-device run fails with `ERROR_LANGUAGE_UNAVAILABLE` /
+ * `ERROR_LANGUAGE_NOT_SUPPORTED`. The first such failure turns the on-device recogniser off for the rest of the
+ * process ([preferOnDevice]) and is reported once as retryable, so the next run uses the default recogniser; only
+ * when that one reports the language too is the error fatal.
  */
 class AndroidSpeechInput(private val context: Context) : SpeechInput {
     override val available: Boolean
         get() = onDeviceAvailable() || if (stubIsDefault()) systemRecognizer() != null else recognizers().isNotEmpty()
 
-    private fun onDeviceAvailable() =
+    private fun onDeviceAvailable() = preferOnDevice &&
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
 
     /** Installed recognition services other than Tsukaima's own stub (`assist.TsukaimaRecognitionService`). */
@@ -86,22 +92,23 @@ class AndroidSpeechInput(private val context: Context) : SpeechInput {
                 val text = first(results)
                 trySend(
                     if (text != null) SpeechEvent.Final(text)
-                    else SpeechEvent.Error("Nothing recognised", retry = true),
+                    else SpeechEvent.Error("Nothing recognised", retry = true, silence = true),
                 )
                 close()
             }
 
             override fun onError(error: Int) {
-                val retry = when (error) {
-                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS,
-                    SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED,
-                    SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> false
+                val language = error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
+                    error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
+                val retry = when {
+                    // No language pack for the on-device recogniser: fall back to the default one from now on.
+                    language && onDevice -> true.also { preferOnDevice = false }
+                    language || error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> false
                     else -> true // no match, timeout, client, busy and the rest
                 }
-                if (error != SpeechRecognizer.ERROR_NO_MATCH && error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-                    Log.w(TAG, "Speech recogniser error $error")
-                }
-                trySend(SpeechEvent.Error(describe(error), retry))
+                val silence = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                if (!silence) Log.w(TAG, "Speech recogniser error $error")
+                trySend(SpeechEvent.Error(describe(error), retry, silence))
                 close()
             }
 
@@ -128,10 +135,10 @@ class AndroidSpeechInput(private val context: Context) : SpeechInput {
         bundle?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.takeIf { it.isNotBlank() }
 
     private fun describe(error: Int) = when (error) {
-        SpeechRecognizer.ERROR_NO_MATCH -> "Didn't catch that"
+        SpeechRecognizer.ERROR_NO_MATCH -> "Didn’t catch that"
         SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech heard"
         SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Recogniser busy"
-        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission needed"
+        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone access is needed for voice mode"
         SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED,
         SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> "Language not supported for speech recognition"
         SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Speech recognition needs a network"
@@ -145,5 +152,9 @@ class AndroidSpeechInput(private val context: Context) : SpeechInput {
         const val DEFAULT_RECOGNIZER_SETTING = "voice_recognition_service"
 
         const val UNAVAILABLE = "Speech recognition isn’t available on this device"
+
+        /** False once the on-device recogniser reported a missing language pack: the default one is used instead. */
+        @Volatile
+        var preferOnDevice = true
     }
 }

@@ -74,7 +74,10 @@ class ChatViewModel(
     private val failedSends = mutableMapOf<String, FailedSend>()
     private val sync = ChatReconnector(
         session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), storedSessionId, flair, _state,
-        onRebuilt = ::restoreFailedSends,
+        onRebuilt = { before ->
+            restoreFailedSends()
+            voice.rebased(before)
+        },
     )
 
     private val attachments = ChatAttachments(
@@ -202,13 +205,14 @@ class ChatViewModel(
 
     /**
      * Sends [text] (trimmed) without attachments, leaving the composer alone (voice mode). False, with a toast,
-     * when Hermes is unreachable, the chat archived, or no live session is open yet. The status turns Thinking
-     * before this returns.
+     * when Hermes is unreachable, the chat archived, the context is being compacted, or no live session is open
+     * yet. The status turns Thinking before this returns.
      */
     fun sendText(text: String): Boolean {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return false
         if (!_state.value.writable) return false.also { backend.toast("Not connected to Hermes") }
+        if (_state.value.compacting) return false.also { backend.toast("Compacting the context, try again in a moment") }
         val live = chat.liveSessionId ?: return false.also { backend.toast("Still connecting to Hermes") }
         startTurn(live, trimmed, emptyList(), fromComposer = false)
         return true

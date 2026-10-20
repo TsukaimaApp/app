@@ -55,7 +55,7 @@ object SpeechText {
 data class SpokenChunk(val text: String, val end: Int)
 
 /**
- * Splits a streaming reply into sentences, never inside a ``` fence. Feed it the reply's full text so far; it remembers
+ * Splits a streaming reply into sentences, never inside a ``` or ~~~ fence. Feed it the reply's full text so far; it remembers
  * how much it already emitted, so repeated calls on a growing prefix are idempotent.
  */
 class SentenceChunker {
@@ -73,11 +73,7 @@ class SentenceChunker {
         var inFence = false
         while (i < text.length) {
             val c = text[i]
-            if (i == 0 || text[i - 1] == '\n') {
-                var j = i
-                while (j < text.length && text[j] != '\n' && text[j].isWhitespace()) j++
-                if (text.startsWith("```", j)) inFence = !inFence
-            }
+            if ((i == 0 || text[i - 1] == '\n') && togglesFence(text, i)) inFence = !inFence
             val end = when {
                 inFence -> -1
                 c == '\n' && i + 1 < text.length -> i + 1
@@ -93,6 +89,21 @@ class SentenceChunker {
         }
         pending = text.substring(cursor)
         return out
+    }
+
+    /**
+     * Whether the line starting at [start] opens or closes a fence: after indentation, a run of 3+ backticks or
+     * tildes not followed by another such run on the same line (`` ```x``` `` is inline, not a fence).
+     */
+    private fun togglesFence(text: String, start: Int): Boolean {
+        var j = start
+        while (j < text.length && text[j] != '\n' && text[j].isWhitespace()) j++
+        val mark = text.getOrNull(j)?.takeIf { it == '`' || it == '~' } ?: return false
+        var k = j
+        while (k < text.length && text[k] == mark) k++
+        if (k - j < 3) return false
+        val lineEnd = text.indexOf('\n', k).let { if (it < 0) text.length else it }
+        return text.substring(k, lineEnd).indexOf(mark.toString().repeat(3)) < 0
     }
 
     /** Whatever is left, trimmed (null when blank); resets the chunker. */

@@ -23,6 +23,11 @@ import labs.suchattai.tsukaima.domain.chat.ChatState
  * It only reads [chat] and calls [send] (`ChatViewModel.sendText`; false = not sent). Everything runs in [scope],
  * whose dispatcher must be single-threaded (the chat's Main-immediate in the app): the fields below are unguarded.
  * [onApprovalNeeded] (Assist only) fires once per request card, after the hand-off line was spoken.
+ *
+ * Recogniser failures: silence (no match, speech timeout) listens again after [RETRY_DELAY_MS]; other retryable
+ * errors back off from [RETRY_DELAY_MS] doubling up to [ERROR_BACKOFF_MAX_MS], and [MAX_CONSECUTIVE_ERRORS] in a
+ * row (no Partial or Final between) are fatal until [tapIndicator]. In-app, [LISTEN_WINDOW_MS] of listening without
+ * a Final rests in Idle ("Tap to speak"); [now] is the clock for it (milliseconds, monotonic).
  */
 class VoiceController(
     private val input: SpeechInput,
@@ -32,6 +37,7 @@ class VoiceController(
     private val send: (String) -> Boolean,
     private val mode: VoiceMode,
     private val onApprovalNeeded: () -> Unit = {},
+    private val now: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
     private val _state = MutableStateFlow(VoiceState())
     val state: StateFlow<VoiceState> = _state.asStateFlow()
@@ -54,8 +60,14 @@ class VoiceController(
     private var awaitingTurn = false
     private var turnSeen = false
 
-    /** Assist: the exchange is over (or the chat went offline); idle until [tapIndicator]. */
+    /** Assist: the exchange is over (or the chat went offline); in-app: listened too long in silence. Idle until [tapIndicator]. */
     private var resting = false
+
+    /** Non-silence recogniser errors in a row (reset by a Partial, a Final or a tap). */
+    private var consecutiveErrors = 0
+
+    /** When the mic opened and has stayed wanted since without a Final; null while it is not wanted. */
+    private var listeningSince: Long? = null
 
     private val speaking get() = current != null || queue.any { it.text != null }
 
@@ -69,6 +81,8 @@ class VoiceController(
         awaitingTurn = false
         turnSeen = false
         resting = !listen
+        consecutiveErrors = 0
+        listeningSince = null
         listOf(chunkers.keys, finished, silenced, handledRequests).forEach { it.clear() }
         _state.value = VoiceState(
             muted = _state.value.muted,
@@ -106,11 +120,33 @@ class VoiceController(
             VoicePhase.Speaking -> bargeIn()
             VoicePhase.Idle -> if (chat.value.status == AgentStatus.Idle) {
                 resting = false
+                consecutiveErrors = 0
                 if (input.available) _state.update { it.copy(error = null) }
                 refresh()
             }
             else -> Unit
         }
+    }
+
+    /**
+     * The chat's transcript was replaced (a reconnect rebuilt it from stored history, so every item has a new id);
+     * [itemsBeforeRebuild] is the transcript just before. Call it before the chat's collector runs again (the
+     * reconnector's `onRebuilt`, same thread). Every reply present now counts as heard: revealed in full, also while
+     * it keeps streaming, and never spoken. The voice transcript keeps as many trailing items as it showed before.
+     */
+    fun rebased(itemsBeforeRebuild: List<ChatItem>) {
+        if (!started) return
+        val items = chat.value.items
+        val voiceEra = (itemsBeforeRebuild.size - _state.value.startIndex).coerceAtLeast(0)
+        val replies = items.filterIsInstance<ChatItem.AssistantMessage>()
+        val ids = replies.mapTo(HashSet()) { it.id }
+        queue.removeAll { it.id in ids } // queued from the rebuilt transcript before this call: never spoken
+        chunkers.keys.removeAll(ids)
+        finished += ids
+        silenced += ids
+        replies.forEach { reveal(it.id, it.text.length) }
+        _state.update { it.copy(startIndex = (items.size - voiceEra).coerceIn(0, items.size)) }
+        refresh()
     }
 
     private fun bargeIn() {
@@ -222,6 +258,7 @@ class VoiceController(
         val s = _state.value
         val eligible = s.error == null && !awaitingTurn && !resting && status == AgentStatus.Idle
         val wantMic = eligible && !s.muted && !speaking
+        if (!wantMic) listeningSince = null
         if (wantMic && listenJob == null) {
             listenJob = scope.launch(start = CoroutineStart.LAZY) { listenOnce() }.also { it.start() }
         } else if (!wantMic && listenJob != null) {
@@ -237,31 +274,70 @@ class VoiceController(
 
     /** One recogniser run up to its result; then (unless cancelled meanwhile) refresh, which may listen again. */
     private suspend fun listenOnce() {
+        if (listeningSince == null) listeningSince = now()
         val end = input.listen().firstOrNull { e ->
-            if (e is SpeechEvent.Partial) _state.update { it.copy(heard = e.text) }
+            if (e is SpeechEvent.Partial) {
+                consecutiveErrors = 0
+                _state.update { it.copy(heard = e.text) }
+            }
             e !is SpeechEvent.Partial
         }
         _state.update { it.copy(heard = "") }
         when (end) {
             is SpeechEvent.Final -> {
+                consecutiveErrors = 0
                 val text = end.text.trim()
                 if (text.isNotEmpty()) {
+                    listeningSince = null
                     awaitingTurn = true // before send: it may update the chat synchronously
                     turnSeen = false
                     if (send(text)) turnSeen = turnSeen || chat.value.status != AgentStatus.Idle else awaitingTurn = false
+                } else {
+                    listenedTooLong()
                 }
             }
-            is SpeechEvent.Error -> if (end.retry) delay(RETRY_DELAY_MS) else _state.update { it.copy(error = end.message) }
+            is SpeechEvent.Error -> when {
+                !end.retry -> _state.update { it.copy(error = end.message) }
+                end.silence -> if (!listenedTooLong()) delay(RETRY_DELAY_MS)
+                ++consecutiveErrors >= MAX_CONSECUTIVE_ERRORS -> {
+                    consecutiveErrors = 0
+                    _state.update { it.copy(error = end.message) }
+                }
+                else -> if (!listenedTooLong()) delay(backoff(consecutiveErrors))
+            }
             is SpeechEvent.Partial -> Unit
-            null -> delay(RETRY_DELAY_MS) // ended without a result: do not spin on a recogniser that ends at once
+            // Ended without a result: do not spin on a recogniser that ends at once.
+            null -> if (!listenedTooLong()) delay(RETRY_DELAY_MS)
         }
         if (listenJob === currentCoroutineContext().job) listenJob = null
         refresh()
     }
 
+    /** In-app, after [LISTEN_WINDOW_MS] of listening without a Final: rest (true). */
+    private fun listenedTooLong(): Boolean {
+        val since = listeningSince ?: return false
+        if (mode != VoiceMode.InApp || now() - since < LISTEN_WINDOW_MS) return false
+        resting = true
+        return true
+    }
+
+    /** The wait before listening again after the [n]th non-silence error in a row. */
+    private fun backoff(n: Int): Long = (RETRY_DELAY_MS shl (n - 1).coerceIn(0, 10)).coerceAtMost(ERROR_BACKOFF_MAX_MS)
+
     private companion object {
         const val UNAVAILABLE = "Speech recognition isn’t available on this device"
         const val APPROVAL_LINE = "That needs your approval. I’ve opened it in Tsukaima."
+
+        /** The wait before listening again after silence or a recogniser that ended without a result. */
         const val RETRY_DELAY_MS = 300L
+
+        /** The longest wait between retries of a failing recogniser. */
+        const val ERROR_BACKOFF_MAX_MS = 5_000L
+
+        /** Non-silence recogniser errors in a row that stop listening until a tap. */
+        const val MAX_CONSECUTIVE_ERRORS = 5
+
+        /** In-app: listening this long without a Final rests in Idle. */
+        const val LISTEN_WINDOW_MS = 120_000L
     }
 }

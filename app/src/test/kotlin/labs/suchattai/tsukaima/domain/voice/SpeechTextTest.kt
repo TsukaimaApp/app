@@ -72,4 +72,18 @@ class SpeechTextTest {
         assertEquals("B", c.flush())
         assertEquals(listOf("C."), c.feed("C. D"))
     }
+
+    @Test fun chunkerNeverSplitsInsideATildeFence() {
+        val c = SentenceChunker()
+        assertEquals(listOf("Run:", "~~~~sh\nrm -rf x. Really.\n~~~~"), c.feed("Run:\n~~~~sh\nrm -rf x. Really.\n~~~~\nDone."))
+        assertEquals("Done.", c.flush())
+        assertEquals("", SpeechText.plain("~~~~sh\nrm -rf x. Really.\n~~~~"))
+    }
+
+    @Test fun chunkerIgnoresASameLineFence() {
+        val c = SentenceChunker()
+        assertEquals(listOf("Use:", "```x``` is it."), c.feed("Use:\n```x``` is it. Next one"))
+        assertEquals(listOf("Next one."), c.feed("Use:\n```x``` is it. Next one. Then"))
+        assertEquals(listOf("~~ not a fence.", "A."), SentenceChunker().feed("~~ not a fence. A. B"))
+    }
 }
