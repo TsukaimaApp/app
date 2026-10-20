@@ -1,9 +1,11 @@
 package labs.suchattai.tsukaima.assist
 
 import android.Manifest
+import android.app.KeyguardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -12,7 +14,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,8 +35,11 @@ import labs.suchattai.tsukaima.TsukaimaApp
 import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.di.AppContainer
 import labs.suchattai.tsukaima.domain.voice.VoiceMode
+import labs.suchattai.tsukaima.domain.voice.VoicePhase
+import labs.suchattai.tsukaima.domain.voice.VoiceState
 import labs.suchattai.tsukaima.notifications.ApprovalNotifier
 import labs.suchattai.tsukaima.notifications.DeepLink
+import labs.suchattai.tsukaima.ui.chat.ChatUiState
 import labs.suchattai.tsukaima.ui.chat.ChatViewModel
 import labs.suchattai.tsukaima.ui.chat.ContainerChatBackend
 import labs.suchattai.tsukaima.ui.theme.TsukaimaTheme
@@ -41,24 +48,34 @@ import labs.suchattai.tsukaima.ui.voice.AssistOverlay
 
 /**
  * The device-assistant sheet ([AssistOverlay]) in a translucent window over the current app, started by
- * [TsukaimaVoiceSession] (or `ACTION_ASSIST`). A trusted launch ([AssistLaunch]: the session's) opens voice mode in
- * [VoiceMode.Assist], listening, on the chat the sheet used within the last half hour ([AssistSessionPolicy]), else a
- * new one; any other launch gets a new chat at rest until the indicator is tapped. The microphone is asked first. Back, a tap on
- * the scrim, a swipe down and leaving it (`noHistory`) close it; "Continue in Tsukaima", the Open and Keyboard icons
- * and any approval the turn needs open the app on the chat. Not shown over the lock screen.
+ * [TsukaimaVoiceSession]. `ACTION_ASSIST` is only an entry point (any app can send it), never a source of trust. A
+ * trusted launch ([AssistLaunch]: it carries the session's nonce) opens voice mode in [VoiceMode.Assist], listening, on
+ * the chat the sheet used within the last half hour ([AssistSessionPolicy]), else a new one. Any other launch shows the
+ * sheet at rest and creates no chat until the indicator is tapped, then a new one that listens. The microphone is
+ * asked before voice starts. A second assistant gesture while the sheet is open ([onNewIntent]) listens again. Back, a
+ * tap on the scrim, a swipe down and leaving it (`noHistory`) close it; "Continue in Tsukaima", the Open and Keyboard
+ * icons and any approval the turn needs open the app on the chat. Never shown over the lock screen: a launch while
+ * the keyguard is locked finishes at once (no keyguard dismissal is asked for).
  */
 class AssistActivity : ComponentActivity() {
     private lateinit var container: AppContainer
 
-    /** Decided once per launch (kept across recreation): see [AssistLaunch]. */
-    private var trusted = false
+    /** Decided per launch (kept across recreation), see [AssistLaunch]; a later trusted gesture ([onNewIntent]) sets it. */
+    private var trusted by mutableStateOf(false)
 
     /** The chat's stored id once it has one, for [openApp]. */
     private var storedSessionId: String? = null
 
+    /** The sheet's chat once created, for [onNewIntent]. */
+    private var chat: ChatViewModel? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        if (getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true) {
+            finish() // nothing on the lock screen
+            return
+        }
         container = (application as TsukaimaApp).container
         trusted = savedInstanceState?.getBoolean(STATE_TRUSTED)
             ?: (AssistLaunch.trust(AssistNonce.consume(intent?.getStringExtra(AssistNonce.EXTRA))) == AssistLaunch.Trusted)
@@ -71,6 +88,15 @@ class AssistActivity : ComponentActivity() {
         }
     }
 
+    /** The assistant gesture again while the sheet is open (`singleTask`): a trusted one listens again. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (!AssistNonce.consume(intent.getStringExtra(AssistNonce.EXTRA))) return
+        trusted = true // a sheet still at rest creates its chat now, trusted
+        val vm = chat ?: return
+        if (vm.state.value.voice?.phase == VoicePhase.Idle) vm.tapVoiceIndicator()
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean(STATE_TRUSTED, trusted)
@@ -80,6 +106,26 @@ class AssistActivity : ComponentActivity() {
     private fun AssistContent(settings: Settings) {
         LaunchedEffect(Unit) { if (!settings.onboarded) openApp() } // not signed in yet: onboarding is in the app
         if (!settings.onboarded) return
+        BackHandler { finish() }
+        // An untrusted launch creates no Hermes session until the user taps the indicator.
+        var tapped by rememberSaveable { mutableStateOf(false) }
+        if (!trusted && !tapped) {
+            AssistOverlay(
+                state = ChatUiState(),
+                voice = VoiceState(phase = VoicePhase.Idle),
+                onKeyboard = ::openApp,
+                onOpenApp = ::openApp,
+                onTap = { tapped = true },
+                onDismiss = ::finish,
+                canOpenApp = false,
+            )
+            return
+        }
+        AssistChat(settings, listen = trusted || tapped)
+    }
+
+    @Composable
+    private fun AssistChat(settings: Settings, listen: Boolean) {
         val backend = remember { ContainerChatBackend(container) }
         // One chat per activity; the resumed id is read once, when the view model is created. An untrusted launch
         // never resumes the assist chat.
@@ -92,13 +138,14 @@ class AssistActivity : ComponentActivity() {
                 }
             },
         )
+        SideEffect { chat = vm }
         // The voice controller outlives a configuration change, so it reaches this activity only through a flag.
         val bridge: AssistBridge = viewModel { AssistBridge() }
         val state by vm.state.collectAsStateWithLifecycle()
 
         val stored = state.chat.storedSessionId
         var persisted by rememberSaveable { mutableStateOf<String?>(null) }
-        LaunchedEffect(stored) {
+        LaunchedEffect(stored, trusted) {
             storedSessionId = stored
             // Once per chat id and activity (not again on rotation); an untrusted launch's chat is not remembered.
             if (trusted && stored != null && stored != persisted) {
@@ -109,8 +156,8 @@ class AssistActivity : ComponentActivity() {
         }
         LaunchedEffect(bridge) { bridge.openApp.filter { it }.collect { openApp() } }
 
-        // The view model waits for a resumed chat's history before voice starts; untrusted launches wait for a tap.
-        val startVoice = { vm.openVoice(VoiceMode.Assist, onApprovalNeeded = { bridge.openApp.value = true }, listen = trusted) }
+        // The view model waits for a resumed chat's history before voice starts.
+        val startVoice = { vm.openVoice(VoiceMode.Assist, onApprovalNeeded = { bridge.openApp.value = true }, listen = listen) }
         var started by rememberSaveable { mutableStateOf(false) }
         val mic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) {
@@ -122,17 +169,26 @@ class AssistActivity : ComponentActivity() {
             }
         }
         LaunchedEffect(Unit) {
-            if (started) return@LaunchedEffect
-            started = true
-            if (ContextCompat.checkSelfPermission(this@AssistActivity, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                startVoice()
-            } else {
-                mic.launch(Manifest.permission.RECORD_AUDIO)
+            val granted = ContextCompat.checkSelfPermission(this@AssistActivity, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+            if (started) {
+                // Restored after process death: the new view model has no voice yet. (A pending permission request
+                // answers through `mic`.)
+                if (vm.state.value.voice == null && granted) startVoice()
+                return@LaunchedEffect
             }
+            started = true
+            if (granted) startVoice() else mic.launch(Manifest.permission.RECORD_AUDIO)
         }
 
-        BackHandler { finish() }
         val voice = state.voice ?: return
+        // Keep the screen on while the sheet listens, thinks or speaks; a resting sheet lets it sleep.
+        val awake = voice.phase != VoicePhase.Idle
+        DisposableEffect(awake) {
+            if (awake) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            onDispose { window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+        }
         AssistOverlay(
             state = state,
             voice = voice,
