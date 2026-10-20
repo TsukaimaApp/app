@@ -104,7 +104,8 @@ class ServerSpeechInput(
                 pcm.reset()
                 val utterance = all.copyOfRange(from, all.size)
                 send(SpeechEvent.Transcribing)
-                send(uploader.upload(utterance))
+                val maxLength = utterance.size / 2 * 1000L / SAMPLE_RATE >= vad.config.maxUtteranceMs - vad.config.frameMs
+                send(uploader.upload(utterance, maxLength))
             }
             else -> Unit // cancelled, or the recorder failed (reported above)
         }
@@ -128,10 +129,24 @@ internal class Uploader(
     private val encoder: AudioEncoder,
     private val transcribe: suspend (ByteArray, String) -> Result<TranscriptionDto>,
 ) {
-    /** [pcm16kMono] transcribed: a [SpeechEvent.Final], or the [SpeechEvent.Error] that ends the run. */
-    suspend fun upload(pcm16kMono: ByteArray): SpeechEvent {
+    /** Max-length utterances in a row (across this uploader's runs) that came back empty: the room is too loud. */
+    private var emptyMaxLength = 0
+
+    /**
+     * [pcm16kMono] transcribed: a [SpeechEvent.Final], or the [SpeechEvent.Error] that ends the run. [maxLength] says
+     * the utterance ran to the VAD's limit (it never saw silence); the second such utterance in a row to come back
+     * empty is reported as a fatal "too noisy" error instead of letting the run loop on 30-second uploads.
+     */
+    suspend fun upload(pcm16kMono: ByteArray, maxLength: Boolean): SpeechEvent {
         val audio = encoder.encode(pcm16kMono) ?: EncodedAudio(Pcm.wav(pcm16kMono, SAMPLE_RATE), WAV)
-        return outcome(transcribe(audio.bytes, audio.mime))
+        val event = outcome(transcribe(audio.bytes, audio.mime))
+        when {
+            event is SpeechEvent.Final -> emptyMaxLength = 0
+            event is SpeechEvent.Error && event.silence && maxLength -> {
+                if (++emptyMaxLength >= 2) return SpeechEvent.Error(TOO_NOISY, retry = false)
+            }
+        }
+        return event
     }
 
     /** The run's result from the relay's answer; nothing of the transcript is logged. */
@@ -159,6 +174,7 @@ internal class Uploader(
     private companion object {
         const val WAV = "audio/wav"
         const val NOTHING = "Nothing recognised"
+        const val TOO_NOISY = "Too noisy to hear you — tap to retry"
         const val UNREACHABLE = "Couldn’t reach Hermes to transcribe"
         const val REFUSED = "Hermes couldn’t transcribe that"
 

@@ -24,7 +24,7 @@ class OpusEncoderTest {
         val sent = mutableListOf<Sent>()
         val event = uploader(object : AudioEncoder {
             override fun encode(pcm16kMono: ByteArray): EncodedAudio? = null
-        }, sent).upload(pcm)
+        }, sent).upload(pcm, maxLength = false)
         assertEquals(SpeechEvent.Final("hello"), event)
         assertEquals(1, sent.size)
         assertEquals("audio/wav", sent[0].mime)
@@ -41,7 +41,7 @@ class OpusEncoderTest {
                 given = pcm16kMono
                 return EncodedAudio(opus, "audio/ogg")
             }
-        }, sent).upload(pcm)
+        }, sent).upload(pcm, maxLength = false)
         assertEquals(SpeechEvent.Final("hello"), event)
         assertArrayEquals(pcm, given)
         assertEquals(1, sent.size)
