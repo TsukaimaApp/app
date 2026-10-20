@@ -99,10 +99,16 @@ class SettingsViewModelTest {
 
     private val vms = mutableListOf<SettingsViewModel>()
 
+    /**
+     * Bounds a hang, not a race: the store is a real DataStore on a temp file, and a cold CI runner has taken
+     * more than 5 s for its first write while the ViewModel's initial load fans out over the mock server.
+     */
+    private val STORE_TIMEOUT_MS = 30_000L
+
     private fun vm() = SettingsViewModel(repo, store, creds, connection).also { vms += it }
 
     private suspend fun SettingsViewModel.await(cond: (SettingsUiState) -> Boolean) =
-        withTimeout(5_000) { state.first(cond) }
+        withTimeout(STORE_TIMEOUT_MS) { state.first(cond) }
 
     @Test
     fun signInNormalizesUrlAndPersists() = runBlocking<Unit> {
@@ -159,7 +165,7 @@ class SettingsViewModelTest {
     fun setProfilePersists() = runBlocking<Unit> {
         val vm = vm()
         vm.setProfile("research")
-        assertEquals("research", withTimeout(5_000) { store.settings.first { it.profile == "research" } }.profile)
+        assertEquals("research", withTimeout(STORE_TIMEOUT_MS) { store.settings.first { it.profile == "research" } }.profile)
         assertEquals("research", vm.await { it.profile == "research" }.profile)
     }
 
@@ -307,7 +313,7 @@ class SettingsViewModelTest {
         store.update { it.copy(model = "old", modelProvider = "stale-provider") }
         val vm = vm()
         vm.setModel("openrouter", "hermes-4-70b")
-        val s = withTimeout(5_000) { store.settings.first { it.model == "hermes-4-70b" } }
+        val s = withTimeout(STORE_TIMEOUT_MS) { store.settings.first { it.model == "hermes-4-70b" } }
         assertEquals("openrouter", s.modelProvider)
         assertEquals("hermes-4-70b", vm.await { it.model == "hermes-4-70b" }.model)
     }
@@ -325,7 +331,7 @@ class SettingsViewModelTest {
         vm.askSignOut(true)
         assertTrue(vm.state.value.confirmSignOut)
         vm.signOut()
-        withTimeout(5_000) { vm.signedOut.first() }
+        withTimeout(STORE_TIMEOUT_MS) { vm.signedOut.first() }
 
         assertNull(creds.password())
         assertNull(creds.accessToken())
@@ -335,7 +341,7 @@ class SettingsViewModelTest {
         assertEquals("the sign-in form stays prefilled", "alice", s.username)
         assertEquals("http://${hostPort()}", s.serverUrl)
         assertFalse(connection.authRequired.value)
-        withTimeout(5_000) {
+        withTimeout(STORE_TIMEOUT_MS) {
             connection.hermes.first { it.connection == labs.suchattai.tsukaima.data.gateway.ConnectionState.Disconnected }
         }
         assertEquals(1, sideEffects)
@@ -358,13 +364,13 @@ class SettingsViewModelTest {
         vm.await { it.passwordSaved }
         connection.start()
         vm.signOut()
-        withTimeout(5_000) { vm.signedOut.first() }
+        withTimeout(STORE_TIMEOUT_MS) { vm.signedOut.first() }
         vm.setServerUrl(hostPort()); vm.setUsername("alice"); vm.setPassword("pw")
         assertTrue(vm.signIn().isSuccess)
         assertEquals("pw", creds.password())
         assertTrue(store.settings.first().onboarded)
         // A connect attempt follows (the mock has no WebSocket: it then retries, which is all this asserts).
-        withTimeout(5_000) {
+        withTimeout(STORE_TIMEOUT_MS) {
             connection.hermes.first { it.connection != labs.suchattai.tsukaima.data.gateway.ConnectionState.Disconnected }
         }
         connection.stop()
