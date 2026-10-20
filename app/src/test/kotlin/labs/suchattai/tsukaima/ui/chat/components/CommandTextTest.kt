@@ -96,10 +96,15 @@ class CommandTextTest {
     }
 
     @Test
-    fun blankLineWithOnlyInvisiblesCollapsed() {
-        val r = CommandText.reveal("a\n\u2800\n\u200B \n\u034F\nb")
-        assertEquals("a\n\u27E83 blank lines\u27E9\nb", r.text)
+    fun linesWithInvisiblesAreRevealedNotCollapsed() {
+        val r = CommandText.reveal("a" + "\n\u200B".repeat(4) + "\nb")
+        assertEquals("a" + ("\n" + m("200B")).repeat(4) + "\nb", r.text)
+        assertFalse(r.text.contains("blank lines"))
         assertTrue(r.hadHiddenChars)
+        // Whitespace mixed with flagged code points is revealed too.
+        val mixed = CommandText.reveal("a\n\u2800\n\u200B \n\u034F\nb")
+        assertEquals("a\n" + m("2800") + "\n" + m("200B") + " \n" + m("034F") + "\nb", mixed.text)
+        assertTrue(mixed.hadHiddenChars)
     }
 
     @Test
@@ -132,5 +137,36 @@ class CommandTextTest {
         assertTrue(r.text.contains(m("200D")))
         assertTrue(r.hadHiddenChars)
         assertTrue(CommandText.reveal("a\uFE0F").hadHiddenChars)
+    }
+
+    @Test
+    fun zwjAfterEmojiBeforeLetterFlagged() {
+        val r = CommandText.reveal(cp(0x1F468) + "\u200Da")
+        assertEquals(cp(0x1F468) + m("200D") + "a", r.text)
+        assertTrue(r.hadHiddenChars)
+    }
+
+    @Test
+    fun vs16AfterNonEmojiSymbolFlagged() {
+        val r = CommandText.reveal("\u2E80\uFE0F")
+        assertEquals("\u2E80" + m("FE0F"), r.text)
+        assertTrue(r.hadHiddenChars)
+    }
+
+    @Test
+    fun trailingZwjFlagged() {
+        val r = CommandText.reveal("echo " + cp(0x1F468) + "\u200D\nls")
+        assertEquals("echo " + cp(0x1F468) + m("200D") + "\nls", r.text)
+        assertTrue(r.hadHiddenChars)
+    }
+
+    @Test
+    fun keycapOnlyExemptsVs16BeforeEnclosingKeycap() {
+        val keycap = "1\uFE0F\u20E3"
+        val ok = CommandText.reveal("echo $keycap")
+        assertEquals("echo $keycap", ok.text)
+        assertFalse(ok.hadHiddenChars)
+        assertEquals("file1" + m("FE0F"), CommandText.reveal("file1\uFE0F").text)
+        assertEquals("1" + m("200D") + "2", CommandText.reveal("1\u200D2").text)
     }
 }
