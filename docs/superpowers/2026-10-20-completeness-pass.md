@@ -117,3 +117,36 @@ Still open:
 - The forwarding recogniser does not relay `segmentResults` on API 33+.
 - Smaller deferred review items (test gaps, KDoc line lengths, edge cases such as a PDF retry toast that says
   "images") are tracked outside the repo.
+
+Device-check list from the final whole-branch review (only a phone can verify these), most important first:
+
+1. Server voice end to end: a 3+ sentence reply plays via Piper; a tap while speaking stops at once and the next
+   sentence never plays; End voice mid-synthesis plays nothing afterwards; music ducks and returns after the last
+   sentence.
+2. The first server-recognition upload is Opus (logcat `audio/ogg`, body starts `OggS`) and transcribes; a phone
+   without the encoder falls back to WAV in the same run.
+3. Loud room: two 30-second empty utterances show "Too noisy to hear you — tap to retry"; the tap listens again with
+   two fresh chances.
+4. Android 10/11 as the assistant: the assistant gesture recognises speech through the forwarder; another app's
+   `SpeechRecognizer` works; an app without RECORD_AUDIO gets `ERROR_INSUFFICIENT_PERMISSIONS`.
+5. Edit and Regenerate on a live chat and after a kill-and-reopen; editing the first message; Regenerate hidden on
+   an image-bearing message.
+6. A side question mid-turn with the phone locked until it completes; a background task across a reconnect keeps
+   its question on the answer card.
+7. PDF attach: a 30-page PDF shows "25 pages" and "First 25 pages attached"; removing the chip detaches every page;
+   an unreadable PDF fails with the server's detail.
+8. Reply images: same-origin loads with the bearer; foreign shows "From <host> — tap to load" and loads on tap;
+   a 404 shows the alt text; an image over 8 MB fails cleanly; a same-origin 401 fails quietly without a sign-in.
+9. Report a problem: the share sheet opens with the text file and a host-only header; after a forced crash the
+   banner appears on the next launch and Dismiss clears it.
+10. Upgrade from 0.7.1 with "Speech recognition: On Hermes" shows "Voice processing: On Hermes" and runs voice on
+    Hermes both ways.
+11. `vault.code` / `vault.save_login` from the browser tool: the cards render (number keyboard for a digits hint),
+    Decline / Don't save answer `""`, the notification reads "Hermes needs your attention", and the tool proceeds
+    with the typed code.
+
+Parked from the final review (rulings in the SDD ledger): failed images share the 8-entry cache with decoded
+bitmaps (refetch churn on image-heavy replies); an edit/regenerate failure restores the pre-edit snapshot and can
+drop an event that landed during the request; a problem report requested just before leaving Settings can open the
+share sheet on the next visit; server speech has no sentence prefetch (one round trip per sentence).
+

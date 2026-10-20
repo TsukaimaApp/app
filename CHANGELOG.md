@@ -40,6 +40,8 @@ release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers
 - An image that failed with a server error (5xx or 429) is retried when shown again instead of staying broken.
 
 ### Security
+- A reply image on the Hermes origin that answers 401 fails quietly: it never re-logins with the stored
+  password and never sends the app to sign-in.
 - Images from a host other than your Hermes server never load until you tap them (the card shows the host), so a
   reply cannot send data out through an image URL; images from the server itself no longer follow redirects to
   another host.
