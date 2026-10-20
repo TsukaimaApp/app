@@ -1,0 +1,157 @@
+package labs.suchattai.tsukaima.ui.drawer
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import labs.suchattai.tsukaima.data.SessionsSource
+import labs.suchattai.tsukaima.data.api.SessionDto
+import labs.suchattai.tsukaima.data.prefs.Settings
+
+/** Profile a session belongs to, for grouping: the display name, else the id, else `default`. */
+val SessionDto.profileKey: String get() = profileName ?: profile ?: DEFAULT_PROFILE
+
+private const val DEFAULT_PROFILE = "default"
+
+data class DrawerUiState(
+    val sessions: List<SessionDto> = emptyList(),
+    val query: String = "",
+    val showArchived: Boolean = false,
+    val selectedId: String? = null,
+    val loading: Boolean = true,
+) {
+    private val matching: List<SessionDto> by lazy {
+        val q = query.trim()
+        if (q.isEmpty()) {
+            sessions
+        } else {
+            sessions.filter {
+                it.title?.contains(q, ignoreCase = true) == true || it.preview?.contains(q, ignoreCase = true) == true
+            }
+        }
+    }
+
+    /**
+     * Unarchived sessions matching [query], grouped by [profileKey]. `default` leads; other profiles keep the
+     * order in which they first appear in [sessions] (the server's order, most recent first).
+     */
+    val grouped: Map<String, List<SessionDto>> by lazy {
+        val groups = matching.filterNot { it.archived }.groupBy { it.profileKey }
+        val default = groups[DEFAULT_PROFILE]
+        if (default == null) groups else linkedMapOf(DEFAULT_PROFILE to default) + groups
+    }
+
+    /** Archived sessions matching [query] (the archived view). */
+    val archived: List<SessionDto> by lazy { matching.filter { it.archived } }
+
+    /** Every archived session, whatever the query: the count on the "Archived" row. */
+    val archivedCount: Int by lazy { sessions.count { it.archived } }
+}
+
+/**
+ * Sessions drawer state: the session list, search, archived view and session mutations. Reloads whenever the
+ * server URL in [settings] changes (and once DataStore has loaded); [refresh] reloads on demand. Each mutation
+ * is followed by a [refresh]. Failures are reported on [errors] as toast text.
+ */
+class DrawerViewModel(
+    private val repo: SessionsSource,
+    settings: StateFlow<Settings?>,
+) : ViewModel() {
+    private val _state = MutableStateFlow(DrawerUiState())
+    val state: StateFlow<DrawerUiState> = _state.asStateFlow()
+
+    private val _errors = Channel<String>(Channel.BUFFERED)
+
+    /** One-shot error messages for the shell's toast. */
+    val errors: Flow<String> = _errors.receiveAsFlow()
+
+    private var serverUrl: String = ""
+    private var refreshJob: Job? = null
+
+    init {
+        viewModelScope.launch {
+            settings.filterNotNull().map { it.serverUrl }.distinctUntilChanged().collect { url ->
+                serverUrl = url
+                if (url.isEmpty()) {
+                    refreshJob?.cancel()
+                    _state.update { it.copy(sessions = emptyList(), loading = false) }
+                } else {
+                    // A different server: never show the old server's sessions.
+                    _state.update { it.copy(sessions = emptyList(), loading = true) }
+                    refresh()
+                }
+            }
+        }
+    }
+
+    /** Reloads the list; a newer call supersedes one in flight. Keeps the old list if the load fails. */
+    fun refresh() {
+        if (serverUrl.isEmpty()) return
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch { load() }
+    }
+
+    fun setQuery(query: String) = _state.update { it.copy(query = query) }
+
+    fun setShowArchived(show: Boolean) = _state.update { it.copy(showArchived = show) }
+
+    /** The session the main pane is showing (null for a new chat or a non-chat screen). */
+    fun select(id: String?) = _state.update { it.copy(selectedId = id) }
+
+    fun rename(id: String, title: String) = mutate("Couldn't rename the session") { repo.rename(id, title) }
+
+    fun archive(id: String, archived: Boolean) = mutate(
+        if (archived) "Couldn't archive the session" else "Couldn't unarchive the session",
+    ) { repo.archive(id, archived) }
+
+    fun delete(id: String) = mutate("Couldn't delete the session") { repo.delete(id) }
+
+    private fun mutate(failure: String, block: suspend () -> Result<Unit>) {
+        viewModelScope.launch {
+            block().onFailure { _errors.trySend(failure) }
+            refreshJob?.cancel()
+            load()
+        }
+    }
+
+    private suspend fun load() {
+        repo.sessions()
+            .onSuccess { list -> _state.update { it.copy(sessions = list, loading = false) } }
+            .onFailure {
+                _state.update { it.copy(loading = false) }
+                _errors.trySend("Couldn't load sessions")
+            }
+    }
+}
+
+/**
+ * Compact age for a session row: `now` under a minute, then `5m`, `3h`, `2d`, `1w`, `2mo`, `1y`. [startedAt] is
+ * unix seconds (as Hermes reports it), [now] epoch millis. Null [startedAt] gives an empty label; a start in
+ * the future (clock skew) reads `now`.
+ */
+fun ageLabel(startedAt: Double?, now: Long): String {
+    if (startedAt == null) return ""
+    val seconds = (now / 1000.0 - startedAt).toLong()
+    val minutes = seconds / 60
+    val hours = minutes / 60
+    val days = hours / 24
+    return when {
+        minutes < 1 -> "now"
+        hours < 1 -> "${minutes}m"
+        days < 1 -> "${hours}h"
+        days < 7 -> "${days}d"
+        days < 30 -> "${days / 7}w"
+        days < 365 -> "${days / 30}mo"
+        else -> "${days / 365}y"
+    }
+}

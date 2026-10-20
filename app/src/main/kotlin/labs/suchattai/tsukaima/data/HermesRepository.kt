@@ -48,7 +48,7 @@ class HermesRepository(
     private val connection: ConnectionManager,
     private val loginApi: (baseUrl: String) -> HermesApi,
     private val io: CoroutineDispatcher = Dispatchers.IO,
-) {
+) : SessionsSource {
     /** Bumped on every credential write so [isConfigured] re-reads the (non-observable) credential store. */
     private val credsVersion = MutableStateFlow(0)
 
@@ -90,10 +90,16 @@ class HermesRepository(
     suspend fun me(): Result<AuthMeDto> = call { api.me() }
     suspend fun wsTicket(): Result<String> = call { api.wsTicket() }
 
-    suspend fun sessions(limit: Int = 200): Result<List<SessionDto>> = call { api.sessions(limit) }
+    suspend fun sessions(limit: Int): Result<List<SessionDto>> = call { api.sessions(limit) }
     suspend fun renameSession(id: String, title: String): Result<Unit> = call { api.renameSession(id, title) }
     suspend fun archiveSession(id: String, archived: Boolean): Result<Unit> = call { api.archiveSession(id, archived) }
     suspend fun deleteSession(id: String): Result<Unit> = call { api.deleteSession(id) }
+
+    override suspend fun sessions(): Result<List<SessionDto>> = sessions(limit = 200)
+    override suspend fun rename(id: String, title: String): Result<Unit> = renameSession(id, title)
+    override suspend fun archive(id: String, archived: Boolean): Result<Unit> = archiveSession(id, archived)
+    override suspend fun delete(id: String): Result<Unit> = deleteSession(id)
+
     suspend fun modelOptions(): Result<ModelOptionsDto> = call { api.modelOptions() }
     suspend fun workspaces(): Result<WorkspacesDto> = call { api.workspaces() }
 
