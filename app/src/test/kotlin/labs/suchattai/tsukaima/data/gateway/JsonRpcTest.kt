@@ -88,4 +88,33 @@ class JsonRpcTest {
             JsonRpc.encodeResult("srq-abc", buildJsonObject { put("choice", "once") }),
         )
     }
+
+    @Test
+    fun pathologicallyDeepLineIsUnknownNotAStackOverflow() {
+        val n = 200_000 // overflows kotlinx.serialization's recursive reader
+        val line = "[".repeat(n) + "]".repeat(n)
+        val f = JsonRpc.decodeFrames(line + "\n" + """{"jsonrpc":"2.0","id":"t1","result":{}}""")
+        assertTrue(f[0] is Frame.Unknown)
+        assertEquals("t1", (f[1] as Frame.Response).id)
+    }
+
+    @Test
+    fun stringSeqIsRejected() {
+        val line = """{"jsonrpc":"2.0","method":"event","params":{"type":"x","session_id":"s","seq":"12","payload":{}}}"""
+        assertEquals(null, (JsonRpc.decodeFrames(line).single() as Frame.Event).seq)
+    }
+
+    @Test
+    fun nullErrorWithResultIsSuccess() {
+        val f = JsonRpc.decodeFrames("""{"jsonrpc":"2.0","id":"t1","error":null,"result":{"ok":true}}""").single() as Frame.Response
+        assertEquals(null, f.error)
+        assertEquals("true", f.result!!["ok"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun nullErrorWithoutResultIsAnInvalidResponse() {
+        val f = JsonRpc.decodeFrames("""{"jsonrpc":"2.0","id":"t1","error":null}""").single() as Frame.Response
+        assertEquals("t1", f.id)
+        assertEquals(JsonRpc.INVALID_RESPONSE, f.error!!.code)
+    }
 }

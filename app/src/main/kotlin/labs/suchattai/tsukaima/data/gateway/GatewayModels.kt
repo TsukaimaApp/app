@@ -40,16 +40,6 @@ data class SessionResumed(
     val info: JsonObject = JsonObject(emptyMap()),
 )
 
-@Serializable
-data class SessionSummary(
-    val id: String,
-    val title: String? = null,
-    val preview: String? = null,
-    @SerialName("started_at") val startedAt: Double? = null,
-    @SerialName("message_count") val messageCount: Int = 0,
-    val source: String? = null,
-)
-
 /** `file.attach` result (gateway-contract `FileAttachResult`). */
 @Serializable
 data class FileAttached(
@@ -90,6 +80,3 @@ enum class ApprovalChoice(val wire: String) {
 
 @Serializable
 internal data class HistoryResult(val messages: List<TranscriptMessage>)
-
-@Serializable
-internal data class ListResult(val sessions: List<SessionSummary> = emptyList())

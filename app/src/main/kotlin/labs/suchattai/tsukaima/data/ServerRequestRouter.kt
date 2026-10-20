@@ -4,7 +4,9 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.put
 import labs.suchattai.tsukaima.data.gateway.Frame
 import labs.suchattai.tsukaima.data.gateway.RpcTransport
 import labs.suchattai.tsukaima.domain.chat.ClarifyAnswers
@@ -17,9 +19,13 @@ import labs.suchattai.tsukaima.domain.chat.ClarifyAnswers
  * and notifications answer them); everything else is answered here at once:
  *
  * - `clarify` with no askable question: cancelled with `{}` (no `answers` = cancel all), as the TUI does.
- * - Window-owned bridges (`preview.*`, `terminal.read`, `window.read`, `tour`): declined with
- *   [NOT_SHOWN_CODE], the code by which a client says no window of it shows the session.
- * - Anything else (`vault.save_login`, `vault.code`, unknown methods): a JSON-RPC "method not found" error.
+ * - Window-owned bridges (`preview.*`, `terminal.read`, `window.read`, `tour`) and `vault.save_login`: declined
+ *   with [NOT_SHOWN_CODE], the code by which a client says no window of it shows the session. A decline does not
+ *   settle the request while another attached client (a desktop window) may still answer it; once every client
+ *   declined, Hermes resolves it with a `{"success":false}` refusal, which `vault.save_login` reads as "not saved".
+ * - `vault.code`: answered `{"value": ""}` at once, the "user entered no code" reply. Not [NOT_SHOWN_CODE]: with the
+ *   phone as the only client Hermes would hand the refusal JSON to the browser tool as the one-time code itself.
+ * - Anything else (unknown methods): a JSON-RPC "method not found" error.
  *
  * It also records requests the server withdrew (`request.cancel`, `approval.cancelled`) in [closed], shared
  * by chat and notifications so a withdrawn request replayed later is never shown again. Thread-safe.
@@ -49,6 +55,8 @@ class ServerRequestRouter(
             method in SECRET_METHODS -> return true
             method.startsWith("preview.") || method in WINDOW_OWNED ->
                 transport.respondError(req.id, NOT_SHOWN_CODE, NOT_SHOWN_MESSAGE)
+            method == VAULT_SAVE_LOGIN -> transport.respondError(req.id, NOT_SHOWN_CODE, VAULT_NOT_SHOWN_MESSAGE)
+            method == VAULT_CODE -> transport.respond(req.id, buildJsonObject { put("value", "") })
             else -> transport.respondError(req.id, METHOD_NOT_FOUND, UNSUPPORTED_MESSAGE)
         }
         if (!sent) logger("gateway: answer to '$method' ${req.id} not sent (no live socket)", null)
@@ -78,9 +86,12 @@ class ServerRequestRouter(
 
         const val UNSUPPORTED_MESSAGE = "not supported on mobile"
         const val NOT_SHOWN_MESSAGE = "Tsukaima (mobile) cannot show previews, terminals, windows or tours"
+        const val VAULT_NOT_SHOWN_MESSAGE = "Tsukaima (mobile) cannot save logins to a password manager"
 
         private const val APPROVAL = "approval"
         private const val CLARIFY = "clarify"
+        private const val VAULT_SAVE_LOGIN = "vault.save_login"
+        private const val VAULT_CODE = "vault.code"
         private const val CAPACITY = 64
 
         /** Masked one-string prompts: the reply is `{"value": "<string>"}`, `""` = skipped / declined. */

@@ -47,7 +47,6 @@ class GatewaySessionTest {
         create("/w", "m")
         resume("st")
         history("s")
-        list()
         mostRecent()
         submit("s", "hi")
         interrupt("s")
@@ -65,7 +64,7 @@ class GatewaySessionTest {
     fun rpcParamsIncludeProfileWhenNotDefault() = runBlocking {
         val t = FakeTransport(obj("""{"session_id":"s1","messages":[],"sessions":[]}"""))
         GatewaySession(t) { "research" }.callEveryRpc()
-        assertEquals(15, t.calls.size)
+        assertEquals(14, t.calls.size)
         for ((method, params) in t.calls) {
             assertEquals(method, "research", params["profile"]?.jsonPrimitive?.content)
         }
@@ -76,7 +75,7 @@ class GatewaySessionTest {
         val t = FakeTransport(obj("""{"session_id":"s1","messages":[],"sessions":[]}"""))
         GatewaySession(t) { "default" }.callEveryRpc()
         GatewaySession(t).callEveryRpc()
-        assertEquals(30, t.calls.size)
+        assertEquals(28, t.calls.size)
         for ((method, params) in t.calls) assertFalse(method, params.containsKey("profile"))
     }
 
@@ -146,6 +145,13 @@ class GatewaySessionTest {
     fun mostRecentNullable() = runBlocking {
         val t = FakeTransport(obj("""{"session_id":null}"""))
         assertNull(GatewaySession(t).mostRecent())
+    }
+
+    @Test
+    fun mostRecentNonPrimitiveIdIsNull() = runBlocking {
+        assertNull(GatewaySession(FakeTransport(obj("""{"session_id":{"id":"x"}}"""))).mostRecent())
+        assertNull(GatewaySession(FakeTransport(obj("""{"session_id":["x"]}"""))).mostRecent())
+        assertEquals("st", GatewaySession(FakeTransport(obj("""{"session_id":"st"}"""))).mostRecent())
     }
 
     @Test

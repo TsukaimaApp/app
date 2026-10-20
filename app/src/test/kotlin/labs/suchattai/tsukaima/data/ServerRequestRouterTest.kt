@@ -75,14 +75,26 @@ class ServerRequestRouterTest {
     }
 
     @Test
-    fun otherVaultPromptsAndUnknownMethodsRejected() {
-        assertFalse(router.route(req("srq-l", "vault.save_login")))
-        assertFalse(router.route(req("srq-c", "vault.code")))
+    fun saveLoginDeclinedAsNotShownSoADesktopWindowCanStillAnswer() {
+        assertFalse(router.route(req("srq-l", "vault.save_login", buildJsonObject { put("origin", "https://x"); put("site", "x") })))
+        assertEquals(listOf(Triple("srq-l", 4404, ServerRequestRouter.VAULT_NOT_SHOWN_MESSAGE)), transport.errors)
+        assertTrue(transport.results.isEmpty())
+    }
+
+    @Test
+    fun oneTimeCodeAnsweredAsNoCodeEntered() {
+        // Not 4404: as the only client, Hermes would pass its refusal JSON to the browser tool as the code.
+        assertFalse(router.route(req("srq-c", "vault.code", buildJsonObject { put("site", "x") })))
+        assertEquals(1, transport.results.size)
+        assertEquals("srq-c", transport.results.single().first)
+        assertEquals(buildJsonObject { put("value", "") }, transport.results.single().second)
+        assertTrue(transport.errors.isEmpty())
+    }
+
+    @Test
+    fun unknownMethodsRejected() {
         assertFalse(router.route(req("srq-x", "nope")))
-        assertEquals(
-            listOf("srq-l", "srq-c", "srq-x").map { Triple(it, -32601, "not supported on mobile") },
-            transport.errors,
-        )
+        assertEquals(listOf(Triple("srq-x", -32601, "not supported on mobile")), transport.errors)
         assertTrue(transport.results.isEmpty())
     }
 

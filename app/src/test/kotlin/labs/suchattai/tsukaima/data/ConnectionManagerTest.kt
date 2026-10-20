@@ -317,7 +317,7 @@ class ConnectionManagerTest {
         assertNull("clarify waits for the user", answers["srq-c"])
         assertNull("a secret waits for the masked card", answers["srq-s"])
         assertEquals("4404", answers["srq-p"]!!["error"]!!.jsonObject["code"]!!.jsonPrimitive.content)
-        assertEquals("-32601", answers["srq-v"]!!["error"]!!.jsonObject["code"]!!.jsonPrimitive.content)
+        assertEquals("", answers["srq-v"]!!["result"]!!.jsonObject["value"]!!.jsonPrimitive.content) // no code entered
         assertNull("approvals wait for the user", answers["srq-a"])
     }
 

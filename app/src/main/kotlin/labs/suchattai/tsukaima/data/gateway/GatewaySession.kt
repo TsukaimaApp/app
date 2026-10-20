@@ -6,7 +6,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import labs.suchattai.tsukaima.data.api.HermesJson
 import labs.suchattai.tsukaima.data.api.ModelOptionsDto
@@ -43,12 +42,10 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
     suspend fun history(sessionId: String): List<TranscriptMessage> =
         decode<HistoryResult>("session.history", rpc("session.history", idParams(sessionId))).messages
 
-    suspend fun list(limit: Int = 200): List<SessionSummary> =
-        decode<ListResult>("session.list", rpc("session.list", buildJsonObject { put("limit", limit) })).sessions
-
+    /** The most recent stored session id, or null when there is none or the reply's id is not a string/number. */
     suspend fun mostRecent(): String? {
-        val v = rpc("session.most_recent", JsonObject(emptyMap()))["session_id"]
-        return if (v == null || v is JsonNull) null else v.jsonPrimitive.content
+        val v = rpc("session.most_recent", JsonObject(emptyMap()))["session_id"] as? JsonPrimitive
+        return if (v == null || v is JsonNull) null else v.content
     }
 
     /** Result body (`{status:"streaming",…}`) is intentionally ignored; output arrives as events. */
