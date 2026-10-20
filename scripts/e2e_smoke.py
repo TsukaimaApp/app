@@ -1,6 +1,6 @@
 """Tsukaima e2e smoke: login, REST contract (the app's exact GETs), WS session, one prompt,
-cron create/list/delete, session cleanup."""
-import asyncio, http.cookiejar, json, os, sys, time, urllib.error, urllib.request
+file.attach + /api/files/download round trip, cron create/list/delete, session cleanup."""
+import asyncio, base64, http.cookiejar, json, os, sys, time, urllib.error, urllib.parse, urllib.request
 
 BASE = os.environ["HERMES_TEST_URL"].rstrip("/")
 USER, PASSWORD = os.environ["HERMES_TEST_USER"], os.environ["HERMES_TEST_PASSWORD"]
@@ -86,6 +86,7 @@ async def ws_part(token):
             if "pong" not in text.lower():
                 fail(f"reply lacks 'pong': {text!r}")
             step(f"message.complete: {text.strip()[:60]!r}")
+            await download_part(rpc, sid, token)
         finally:
             if stored:  # session.delete takes the stored id, not the live one
                 try:
@@ -95,6 +96,31 @@ async def ws_part(token):
                 except (Exception, SystemExit) as e:  # noqa: BLE001
                     print(f"warn: session.delete failed: {e!r}", file=sys.stderr)
             rt.cancel()
+
+
+async def download_part(rpc, sid, token):
+    """`MEDIA:` cards download through GET /api/files/download (bearer): upload a tiny file into the session's
+    workspace with file.attach, then fetch it back by the returned path."""
+    name = f"tsukaima-smoke-{int(time.time())}.txt"
+    payload = b"tsukaima smoke\nline 2\n"
+    data_url = "data:text/plain;base64," + base64.b64encode(payload).decode()
+    r = await rpc("file.attach", {"session_id": sid, "data_url": data_url, "name": name})
+    path = r.get("path")
+    if not path:
+        fail(f"file.attach returned no path: {r!r}")
+    url = BASE + "/api/files/download?" + urllib.parse.urlencode({"path": path})
+    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
+    try:
+        with opener.open(req, timeout=30) as resp:
+            body, disposition = resp.read(), resp.headers.get("Content-Disposition", "")
+    except urllib.error.HTTPError as e:
+        fail(f"GET /api/files/download -> HTTP {e.code}: {e.read()[:200]!r}")
+    if body != payload:
+        fail(f"download bytes differ: {body!r}")
+    expected = os.path.basename(path)
+    if f'filename="{expected}"' not in disposition and urllib.parse.quote(expected) not in disposition:
+        fail(f"Content-Disposition lacks {expected!r}: {disposition!r}")
+    step(f"file.attach + GET /api/files/download ({len(body)} B, {disposition})")
 
 
 # Every REST read the app makes, with the app's exact query params (HermesApi.kt). A server-side cap or
