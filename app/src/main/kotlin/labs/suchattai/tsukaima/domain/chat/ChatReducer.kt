@@ -142,7 +142,7 @@ object ChatReducer {
                 val text = p.string("text").orEmpty()
                 val (withItem, current) = ensureStreamingAssistant(s, ev.seq)
                 withItem.copy(
-                    items = withItem.items.replace(current) { current.copy(reasoning = (current.reasoning ?: "") + text) },
+                    items = withItem.items.replace(current) { current.copy(reasoning = (current.reasoning ?: "") + text, reasoningLive = true) },
                     status = AgentStatus.Thinking(flair()),
                 )
             }
@@ -455,8 +455,21 @@ object ChatReducer {
         val carried = stale?.takeIf { it.text.isEmpty() }?.reasoning
         val remaining = if (carried != null) s.items - stale else s.items
         val (counted, id) = nextId(s.copy(items = finalizeStreaming(remaining)), seq, "a")
-        val item = ChatItem.AssistantMessage(id, text = "", streaming = true, reasoning = carried)
-        return counted.copy(items = counted.items + item) to item
+        val item = ChatItem.AssistantMessage(id, text = "", streaming = true, reasoning = carried, reasoningLive = carried != null && stale!!.reasoningLive)
+        // The reasoning moved to a new id: the user's open/closed choice for it moves along.
+        val choice = if (carried != null) s.reasoningOpen[stale!!.id] else null
+        val choices = if (choice != null) counted.reasoningOpen - stale!!.id + (id to choice) else counted.reasoningOpen
+        return counted.copy(items = counted.items + item, reasoningOpen = choices) to item
+    }
+
+    /** Whether [item]'s reasoning shows open: the user's choice, else open while it streamed in this session. */
+    fun reasoningOpen(state: ChatState, item: ChatItem.AssistantMessage): Boolean =
+        state.reasoningOpen[item.id] ?: item.reasoningLive
+
+    /** The user tapped the reasoning header of [id]: flips it from whatever it currently shows. Never auto-closes. */
+    fun toggleReasoning(state: ChatState, id: String): ChatState {
+        val item = state.items.firstOrNull { it.id == id } as? ChatItem.AssistantMessage ?: return state
+        return state.copy(reasoningOpen = state.reasoningOpen + (id to !reasoningOpen(state, item)))
     }
 
     /** Abnormal turn end: close streams, fail running tools, drop approvals, questions and prompts nobody answered. */

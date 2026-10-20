@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ChatItem
+import labs.suchattai.tsukaima.domain.chat.ChatReducer
 import labs.suchattai.tsukaima.domain.chat.ChatState
 import labs.suchattai.tsukaima.domain.chat.ClarifyQuestion
 import labs.suchattai.tsukaima.domain.chat.ToolStatus
@@ -98,6 +99,7 @@ class ChatActions(
     val onRetrySend: (String) -> Unit = {},
     val onDismissFailed: (String) -> Unit = {},
     val onMessageMenu: (String?) -> Unit = {},
+    val onToggleReasoning: (String) -> Unit = {},
     val onCopyMessage: (id: String, reasoning: Boolean) -> Unit = { _, _ -> },
 )
 
@@ -171,6 +173,7 @@ fun ChatScreen(
             onRetrySend = vm::retrySend,
             onDismissFailed = vm::dismissFailed,
             onMessageMenu = vm::showMessageMenu,
+            onToggleReasoning = vm::toggleReasoning,
             onCopyMessage = { id, reasoning ->
                 vm.copyMessage(id, reasoning) { text ->
                     scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Message", text))) }
@@ -272,6 +275,8 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
                     item.reasoning,
                     media = media,
                     onLongPress = { actions.onMessageMenu(item.id) }.takeIf { !item.streaming },
+                    reasoningOpen = ChatReducer.reasoningOpen(state.chat, item),
+                    onToggleReasoning = { actions.onToggleReasoning(item.id) },
                 )
                 is ChatItem.ToolCall -> ToolRow(item)
                 is ChatItem.Subagent -> SubagentRow(item)

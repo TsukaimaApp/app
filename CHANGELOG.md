@@ -3,6 +3,13 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.5.3 — 2026-10-20 (versionCode 9)
+
+### Fixed
+- Reasoning blocks no longer fold on their own. Reasoning streamed in this session shows open until you close
+  it; the open/closed choice lives in the chat state (per message), so list recycling, a new bubble after a
+  tool call, or a reconnect cannot collapse a block you are reading. History still loads with reasoning closed.
+
 ## 0.5.2 — 2026-10-20 (versionCode 8)
 
 ### Changed

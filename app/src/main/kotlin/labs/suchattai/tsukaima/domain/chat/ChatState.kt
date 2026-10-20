@@ -24,6 +24,8 @@ sealed interface ChatItem {
         val text: String,
         val streaming: Boolean,
         val reasoning: String?,
+        /** The reasoning was streamed in this session (shown open unless the user closed it); history loads closed. */
+        val reasoningLive: Boolean = false,
     ) : ChatItem
 
     data class ToolCall(
@@ -161,6 +163,8 @@ data class ChatState(
     val reasoningEffort: String? = null,
     /** `session.resume_progress` text while a deferred resume loads its history. */
     val resumeProgress: String? = null,
+    /** The user's explicit open/closed choice for a message's reasoning, by item id; absent = the item's default. */
+    val reasoningOpen: Map<String, Boolean> = emptyMap(),
 )
 
 /** [ChatState.lastSeq] before any event of the live session was applied; `session.events.since` accepts it. */

@@ -5,6 +5,7 @@ import labs.suchattai.tsukaima.data.api.HermesJson
 import labs.suchattai.tsukaima.data.gateway.Frame
 import labs.suchattai.tsukaima.data.gateway.HistoryResult
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -551,6 +552,41 @@ class ChatReducerTest {
         assertEquals("i-3", s.items.last().id)
         // A blank interim changes nothing but the watermark.
         assertEquals(streamed.copy(lastSeq = 3), streamed.feed(ev("message.interim", """{"text":" ","already_streamed":false}""", 3)))
+    }
+
+    @Test
+    fun streamedReasoningShowsOpenUntilTheUserClosesIt() {
+        val s = live.feed(ev("message.start", seq = 1), ev("reasoning.delta", """{"text":"think"}""", 2))
+        val a = s.items.single() as ChatItem.AssistantMessage
+        assertTrue(a.reasoningLive)
+        assertTrue("live reasoning is readable without a tap", ChatReducer.reasoningOpen(s, a))
+
+        val closed = ChatReducer.toggleReasoning(s, a.id)
+        assertFalse(ChatReducer.reasoningOpen(closed, a))
+        // Streaming on, text arriving and the turn ending never change the user's choice.
+        val done = closed.feed(ev("message.delta", """{"text":"Hi"}""", 3), ev("message.complete", """{"text":"Hi","usage":{}}""", 4))
+        val final = done.items.single() as ChatItem.AssistantMessage
+        assertFalse(ChatReducer.reasoningOpen(done, final))
+        assertTrue(ChatReducer.reasoningOpen(ChatReducer.toggleReasoning(done, final.id), final))
+
+        // History loads closed; a tap opens it.
+        val fromHistory = ChatItem.AssistantMessage("h-1", "Hi", streaming = false, reasoning = "think")
+        assertFalse(ChatReducer.reasoningOpen(ChatState(items = listOf(fromHistory)), fromHistory))
+    }
+
+    @Test
+    fun reasoningCarriedToANewBubbleKeepsItsOpenChoice() {
+        // Reasoning-only bubble, user closes it, then a request blocks it so the next delta opens a new bubble.
+        val s = live.feed(ev("message.start", seq = 1), ev("reasoning.delta", """{"text":"think"}""", 2))
+        val first = s.items.single() as ChatItem.AssistantMessage
+        val closed = ChatReducer.toggleReasoning(s, first.id)
+        val moved = closed.feed(prompt("srq-1", "clarify", """"questions":[{"qid":"q","question":"Which?"}]"""), ev("reasoning.delta", """{"text":" more"}""", 3))
+        val carried = moved.items.filterIsInstance<ChatItem.AssistantMessage>().last()
+        assertNotEquals(first.id, carried.id)
+        assertEquals("think more", carried.reasoning)
+        assertTrue(carried.reasoningLive)
+        assertFalse("the choice followed the reasoning", ChatReducer.reasoningOpen(moved, carried))
+        assertFalse(first.id in moved.reasoningOpen)
     }
 
     @Test

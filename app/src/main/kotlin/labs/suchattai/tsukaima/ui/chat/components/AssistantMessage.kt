@@ -13,10 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
@@ -34,7 +31,9 @@ import labs.suchattai.tsukaima.ui.theme.tsukaima
 
 /**
  * Assistant prose directly on the page: no bubble, 20dp gutters, 640dp max, optional reasoning, and file cards
- * for its `MEDIA:` deliveries ([media]). [onLongPress] opens the message menu (copy).
+ * for its `MEDIA:` deliveries ([media]). [onLongPress] opens the message menu (copy). The reasoning's open state
+ * is the chat's ([reasoningOpen], toggled through [onToggleReasoning]), not the composable's: a list that
+ * recycles or rebuilds its items must not fold a block the reader is in the middle of.
  */
 @Composable
 fun AssistantMessage(
@@ -44,10 +43,12 @@ fun AssistantMessage(
     modifier: Modifier = Modifier,
     media: MediaHost = MediaHost(),
     onLongPress: (() -> Unit)? = null,
+    reasoningOpen: Boolean = false,
+    onToggleReasoning: () -> Unit = {},
 ) {
     val colors = MaterialTheme.tsukaima
     val blocks = remember(text, streaming) { Markdown.parse(text, streaming) }
-    var open by rememberSaveable { mutableStateOf(false) }
+    val open = reasoningOpen
     Column(
         modifier = modifier
             .widthIn(max = 640.dp)
@@ -59,7 +60,7 @@ fun AssistantMessage(
             val rotation by animateFloatAsState(if (open) 180f else 0f, tween(Motion.base, easing = Motion.easing), label = "reasoningChevron")
             Row(
                 modifier = Modifier
-                    .clickable(role = Role.Button, onClickLabel = "Toggle reasoning") { open = !open }
+                    .clickable(role = Role.Button, onClickLabel = "Toggle reasoning", onClick = onToggleReasoning)
                     .heightIn(min = Dimens.hit)
                     .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,

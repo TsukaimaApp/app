@@ -234,6 +234,9 @@ class ChatViewModel(
         launch { submit(live, localId, failed.text, failed.attachments) }
     }
 
+    /** The reasoning header of message [id] was tapped. */
+    fun toggleReasoning(id: String) = setChat { ChatReducer.toggleReasoning(it, id) }
+
     /** A rebuilt transcript holds only what the server stored: the failed bubbles (never sent) are put back at the end. */
     private fun restoreFailedSends() {
         if (failedSends.isEmpty()) return
