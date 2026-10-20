@@ -36,6 +36,16 @@ class MediaDirectiveTest {
     }
 
     @Test
+    fun trailingQuoteResidueAndPunctuationAreNotThePath() {
+        assertEquals("/tmp/a.txt", Markdown.mediaPath("MEDIA:'/tmp/a.txt'"))
+        assertEquals("/tmp/a.txt", Markdown.mediaPath("'MEDIA:/tmp/a.txt'"))
+        assertEquals("/tmp/a.pdf", Markdown.mediaPath("MEDIA:/tmp/a.pdf."))
+        assertEquals("/tmp/a.txt", Markdown.mediaPath("MEDIA:/tmp/a.txt,"))
+        assertEquals("/tmp/a.txt", Markdown.mediaPath("MEDIA:`/tmp/a.txt`."))
+        assertEquals("/tmp/a.b.", Markdown.mediaPath("MEDIA:\"/tmp/a.b.\""))
+    }
+
+    @Test
     fun onlyAnchoredPathsCount() {
         assertNull(Markdown.mediaPath("MEDIA:out/chart.png"))
         assertNull(Markdown.mediaPath("MEDIA:~chart.png"))

@@ -1,5 +1,6 @@
 package labs.suchattai.tsukaima.data.api
 
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import labs.suchattai.tsukaima.data.prefs.Settings
 import mockwebserver3.MockResponse
@@ -10,6 +11,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.util.concurrent.TimeUnit
@@ -360,6 +362,31 @@ class HermesApiTest {
             assertEquals("report.csv", it.name)
             assertEquals("application/octet-stream", it.mime)
         }
+    }
+
+    @Test
+    fun downloadKeepsQuotedFilenamesIntact() = runBlocking {
+        // RFC 6266 quoted-string: `;` and `\"` inside the quotes belong to the name.
+        file("x", "Content-Disposition" to "attachment; filename=\"report;final.pdf\"; size=1")
+        authedApi().download("/tmp/a.pdf").use { assertEquals("report;final.pdf", it.name) }
+        file("x", "Content-Disposition" to "attachment; filename=\"say \\\"hi\\\".txt\"")
+        authedApi().download("/tmp/b.txt").use { assertEquals("say \"hi\".txt", it.name) }
+        file("x", "Content-Disposition" to "attachment; filename=plain.txt")
+        authedApi().download("/tmp/c.txt").use { assertEquals("plain.txt", it.name) }
+    }
+
+    @Test
+    fun downloadCancellationClosesALateResponse() = runBlocking {
+        // The body lands after the caller stopped waiting: the call is cancelled, nothing stays checked out.
+        val api = authedApi()
+        server.enqueue(MockResponse.Builder().code(200).body("slow").headersDelay(500, TimeUnit.MILLISECONDS).build())
+        val job = launch { api.download("/tmp/slow.txt") }
+        kotlinx.coroutines.delay(100)
+        job.cancel()
+        job.join()
+        assertTrue(job.isCancelled)
+        val recorded = server.takeRequest(1, TimeUnit.SECONDS)!!
+        assertEquals("/api/files/download", recorded.url.encodedPath)
     }
 
     @Test

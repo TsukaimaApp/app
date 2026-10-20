@@ -179,7 +179,9 @@ class ConnectionManager(
             }
             val gen = ++generation
             pollJob = scope.launch {
-                settings.filterNotNull().first() // cold start: wait for DataStore, never poll with defaults
+                // Cold start: wait for DataStore, never poll with defaults. The URL is recorded before the
+                // watcher below starts, or its first emission could race the first iteration and wake it twice.
+                lastUsedUrl = settings.filterNotNull().first().serverUrl
                 launch {
                     settings.filterNotNull().map { it.serverUrl }.distinctUntilChanged().collect { url ->
                         if (url != lastUsedUrl) wake.trySend(Unit)

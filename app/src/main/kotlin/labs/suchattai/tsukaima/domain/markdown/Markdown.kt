@@ -87,12 +87,14 @@ object Markdown {
         val q = rest.first()
         val close = if (q in QUOTES) rest.indexOf(q, 1) else -1
         val path = if (close > 1) {
+            // Only a wrapper's closing quote and sentence punctuation may follow the quoted path.
             val tail = rest.substring(close + 1)
-            if (tail.length > 1 || (tail.length == 1 && tail[0] !in QUOTES)) return null
+            if (tail.any { it !in QUOTES && it !in TRAILING_PUNCT }) return null
             rest.substring(1, close)
         } else {
-            // A trailing backtick or double quote is the wrapper's residue (`MEDIA:/a.txt`), not the path.
-            val bare = if (rest.last() == '`' || rest.last() == '"') rest.dropLast(1) else rest
+            // A trailing quote is the wrapper's residue (`MEDIA:/a.txt`), and trailing sentence punctuation is
+            // prose (`MEDIA:/a.pdf.`), not the path; the desktop strips both.
+            val bare = rest.trimEnd { it in QUOTES }.trimEnd { it in TRAILING_PUNCT }
             if (bare.any(Char::isWhitespace) && bare.substringAfterLast('.').lowercase() !in DELIVERY_EXTS) return null
             bare
         }
@@ -102,6 +104,7 @@ object Markdown {
 
     private val MEDIA_LINE = Regex("[`\"']?MEDIA:\\s*(\\S.*)")
     private const val QUOTES = "`\"'"
+    private const val TRAILING_PUNCT = ".,;:!?"
 
     /** Hermes `MEDIA_DELIVERY_EXTS` (gateway/platforms/base.py). */
     private val DELIVERY_EXTS = setOf(

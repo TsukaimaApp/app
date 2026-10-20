@@ -73,15 +73,16 @@ internal class ChatMedia(
     }
     private val loading = mutableMapOf<String, Deferred<ImageBitmap?>>()
 
-    /** Downloads [path] into Downloads and opens it; a re-tap while it downloads is ignored, a failed one retries. */
+    /** Downloads [path] into Downloads and opens it; a re-tap while it downloads or just saved is ignored, a failed one retries. */
     fun open(path: String) {
-        if (state.value.mediaState[path]?.status == MediaStatus.Downloading) return
+        if (state.value.mediaState[path]?.status in BUSY) return
         set(path, MediaState(MediaStatus.Downloading))
         scope.launch {
             try {
                 val download = backend.download(path).getOrThrow()
                 val mime = download.mime
-                val uri = withContext(io) { download.use { backend.fileSaver.save(it.name, it.mime, it.body) } }
+                // `use` first: a cancellation at the dispatcher hop would otherwise discard the download unclosed.
+                val uri = download.use { d -> withContext(io) { backend.fileSaver.save(d.name, d.mime, d.body) } }
                 set(path, MediaState(MediaStatus.Saved))
                 backend.toast("Saved to Downloads")
                 backend.openFile(uri, mime)
@@ -111,8 +112,8 @@ internal class ChatMedia(
     private suspend fun fetchPreview(path: String): ImageBitmap? {
         try {
             val download = backend.download(path).getOrThrow()
-            val bitmap = withContext(io) {
-                download.use { d ->
+            val bitmap = download.use { d ->
+                withContext(io) {
                     val tooBig = (d.size ?: 0) > Media.PREVIEW_MAX_BYTES || d.body.request(Media.PREVIEW_MAX_BYTES + 1)
                     if (tooBig) null else backend.decodePreview(d.body.readByteArray())
                 }
@@ -121,6 +122,10 @@ internal class ChatMedia(
             return bitmap
         } catch (c: CancellationException) {
             throw c
+        } catch (e: OutOfMemoryError) {
+            // A 10 MB read plus its decode on a tight heap: give up on this preview rather than the app.
+            previews[path] = null
+            return null
         } catch (e: Exception) {
             // The server's answer is final (gone, refused, too large); a dropped connection is worth another try.
             if (e is ApiException || e !is IOException) previews[path] = null
@@ -139,5 +144,6 @@ internal class ChatMedia(
 
         /** How long a card shows "Saved" before it is back to idle. */
         const val SAVED_MS = 3_000L
+        val BUSY = setOf(MediaStatus.Downloading, MediaStatus.Saved)
     }
 }

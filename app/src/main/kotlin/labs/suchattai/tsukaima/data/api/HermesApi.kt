@@ -1,6 +1,7 @@
 package labs.suchattai.tsukaima.data.api
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
@@ -13,16 +14,21 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import labs.suchattai.tsukaima.data.prefs.Settings
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import okio.BufferedSource
 import java.io.Closeable
 import java.net.URLDecoder
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * Hermes dashboard REST client. [baseUrl] has no trailing slash. [settings] supplies the active
@@ -228,20 +234,39 @@ class HermesApi(
      * [FileDownload.body] and must close the download. The refusals the server gives (404 gone, 400 not a
      * file, 403 sensitive path, 413 over its 100 MB cap) become an [ApiException] with a user-facing message.
      */
-    suspend fun download(path: String): FileDownload = withContext(Dispatchers.IO) {
+    suspend fun download(path: String): FileDownload {
         val request = Request.Builder().url(url("api/files/download", managed = false, arrayOf("path" to path))).build()
-        val response = downloadClient.newCall(request).execute()
+        val response = downloadClient.newCall(request).await()
         if (!response.isSuccessful) {
             val text = response.use { it.body.string() }
             if (response.code == 401) throw AuthException()
             throw downloadError(response.code, text)
         }
-        FileDownload(
+        return FileDownload(
             name = response.header("Content-Disposition")?.let(::dispositionFilename)
                 ?: path.trimEnd('/').substringAfterLast('/').ifEmpty { "download" },
             mime = response.body.contentType()?.let { "${it.type}/${it.subtype}" } ?: OCTET_STREAM,
             size = response.body.contentLength().takeIf { it >= 0 },
             body = response.body.source(),
+        )
+    }
+
+    /**
+     * Runs the call off the caller's thread; cancelling the coroutine cancels the call, and a response that lands
+     * after cancellation is closed rather than leaked (`withContext` would discard it unclosed).
+     */
+    private suspend fun Call.await(): Response = suspendCancellableCoroutine { cont ->
+        cont.invokeOnCancellation { cancel() }
+        enqueue(
+            object : Callback {
+                override fun onFailure(call: Call, e: java.io.IOException) {
+                    if (cont.isActive) cont.resumeWithException(e)
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    cont.resume(response) { _, _, _ -> response.close() }
+                }
+            },
         )
     }
 
@@ -367,6 +392,8 @@ class HermesApi(
 
     private companion object {
         const val SESSION_COOKIE = "hermes_session_at"
+        val DISPOSITION_PARAM = Regex(""";\s*([^=;\s]+)\s*=\s*(\"((?:[^\"\\]|\\.)*)\"|[^;]*)""")
+        val QUOTED_PAIR = Regex("""\\(.)""")
         val COOKIE_PREFIXES = listOf("", "__Host-", "__Secure-")
         const val DEFAULT_PROFILE = "default"
         /** `le=100` on the server's `limit` query. */
@@ -380,14 +407,16 @@ class HermesApi(
          * (Starlette sends the former for non-ASCII names). Any directory part is dropped; null when absent.
          */
         fun dispositionFilename(header: String): String? {
-            val params = header.split(';').drop(1).associate { p ->
-                p.substringBefore('=').trim().lowercase() to p.substringAfter('=', "").trim()
+            // Quote-aware: a quoted value may hold `;` and `\"` (RFC 6266 quoted-string).
+            val params = DISPOSITION_PARAM.findAll(header).associate { m ->
+                val quoted = m.groups[3]?.value
+                m.groupValues[1].lowercase() to (quoted?.replace(QUOTED_PAIR, "$1") ?: m.groupValues[2].trim())
             }
             val extended = params["filename*"]?.let { v ->
                 val charset = v.substringBefore('\'', "").ifEmpty { "UTF-8" }
                 runCatching { URLDecoder.decode(v.substringAfterLast('\'').replace("+", "%2B"), charset) }.getOrNull()
             }
-            val plain = params["filename"]?.removeSurrounding("\"")
+            val plain = params["filename"]
             return (extended ?: plain)?.substringAfterLast('/')?.substringAfterLast('\\')?.takeIf { it.isNotBlank() }
         }
     }
