@@ -429,7 +429,10 @@ class HermesApi(
         val pair = header.substringBefore(';').trim()
         val name = pair.substringBefore('=')
         if (!pair.contains('=') || COOKIE_PREFIXES.none { name == it + SESSION_COOKIE }) return null
-        return pair.substringAfter('=').takeIf { it.isNotEmpty() }
+        // RFC 6265 allows the value in double quotes (`name="v"`); the quotes are not part of it.
+        val raw = pair.substringAfter('=').trim()
+        val value = if (raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"')) raw.substring(1, raw.length - 1) else raw
+        return value.takeIf { it.isNotEmpty() }
     }
 
     private companion object {

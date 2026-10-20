@@ -481,8 +481,10 @@ class SettingsViewModelTest {
 
         vm.askRevoke(entry)
         vm.revokePairing(entry)
+        vm.revokePairing(entry) // a double tap on the dialog's button
         assertNull(vm.state.value.confirmRevoke)
         vm.await { it.approvedPairing.isEmpty() }
-        assertTrue("POST /api/pairing/revoke" in requests)
+        assertEquals(1, requests.count { it == "POST /api/pairing/revoke" })
+        assertTrue("Revoked alice" in toasts)
     }
 }

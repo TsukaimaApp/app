@@ -74,7 +74,12 @@ fun TsukaimaNavHost(
                 factory = viewModelFactory {
                     initializer {
                         StatusViewModel(
-                            HermesStatusSource(container.repository, container.connection, container.gateway.events.ticks(ServerChanges.PLATFORMS)),
+                            HermesStatusSource(
+                                container.repository,
+                                container.connection,
+                                container.gateway.events.ticks(ServerChanges.PLATFORMS),
+                                configuredUrl = { container.settings.value?.serverUrl.orEmpty() },
+                            ),
                             toast = container.toastState::show,
                         )
                     }

@@ -356,19 +356,42 @@ class SettingsViewModel(
         viewModelScope.launch { settings.update { it.copy(notifications = block(it.notifications)) } }
     }
 
+    /** Pairing approvals/revokes in flight, by entry: a second tap while one runs is ignored. Main thread only. */
+    private val pairingInFlight = mutableSetOf<String>()
+
+    /** Approves [entry] and reloads the list; the outcome is toasted, and a double tap sends one request. */
     fun approvePairing(entry: PairingEntry) {
-        viewModelScope.launch { repo.approvePairing(entry.platform, entry.requestId); reloadPairing() }
+        val key = "approve ${entry.platform} ${entry.requestId}"
+        if (!pairingInFlight.add(key)) return
+        viewModelScope.launch {
+            try {
+                repo.approvePairing(entry.platform, entry.requestId)
+                    .onSuccess { toast("Approved ${entry.who}") }
+                    .onFailure { toast("Couldn’t approve ${entry.who}") }
+                reloadPairing()
+            } finally {
+                pairingInFlight.remove(key)
+            }
+        }
     }
 
     /** Opens (or with null closes) the "Revoke?" confirmation for an approved pairing. */
     fun askRevoke(entry: PairingEntry?) = _state.update { it.copy(confirmRevoke = entry) }
 
-    /** Revokes [entry] (`POST /api/pairing/revoke`) and reloads the list; a refusal is toasted. */
+    /** Revokes [entry] (`POST /api/pairing/revoke`) and reloads the list; the outcome is toasted, once per tap burst. */
     fun revokePairing(entry: PairingEntry) {
         _state.update { it.copy(confirmRevoke = null) }
+        val key = "revoke ${entry.platform} ${entry.userId}"
+        if (!pairingInFlight.add(key)) return
         viewModelScope.launch {
-            repo.revokePairing(entry.platform, entry.userId).onFailure { toast("Couldn’t revoke ${entry.who}") }
-            reloadPairing()
+            try {
+                repo.revokePairing(entry.platform, entry.userId)
+                    .onSuccess { toast("Revoked ${entry.who}") }
+                    .onFailure { toast("Couldn’t revoke ${entry.who}") }
+                reloadPairing()
+            } finally {
+                pairingInFlight.remove(key)
+            }
         }
     }
 

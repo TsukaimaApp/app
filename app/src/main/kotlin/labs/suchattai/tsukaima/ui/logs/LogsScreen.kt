@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -61,6 +63,7 @@ fun LogsScreen(vm: LogsViewModel, onBack: () -> Unit) {
     LogsContent(state, onBack, vm::setFile, vm::setLevel)
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun LogsContent(
     state: LogsUiState,
@@ -100,10 +103,12 @@ internal fun LogsContent(
             IconButton44(IconName.ArrowBack, "Back", onBack)
             Text("Logs", style = TsukaimaType.title, color = colors.ink1)
         }
-        Row(
+        // Wraps on a narrow screen or a large font instead of clipping the level chips.
+        FlowRow(
             Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
         ) {
             listOf("gateway", "agent").forEach { f ->
                 Chip("$f.log", onClick = { onFile(f) }, selected = state.file == f)

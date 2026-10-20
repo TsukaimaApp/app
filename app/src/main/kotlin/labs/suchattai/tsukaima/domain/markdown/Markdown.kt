@@ -48,14 +48,15 @@ object Markdown {
             val line = lines[i]
             val trimmed = line.trim()
             val media = if (streaming && i == lines.lastIndex) null else mediaPath(trimmed)
+            val fence = fenceLength(trimmed)
             when {
-                trimmed.startsWith("```") -> {
+                fence > 0 -> {
                     flushPara(); flushBullets()
-                    val lang = trimmed.removePrefix("```").trimStart('`').trim()
+                    val lang = trimmed.substring(fence).trim()
                         .split(Regex("\\s+")).firstOrNull()?.takeIf { it.isNotEmpty() }
                     val body = mutableListOf<String>()
                     i++
-                    while (i < lines.size && lines[i].trim() != "```") {
+                    while (i < lines.size && !closesFence(lines[i].trim(), fence)) {
                         body += lines[i]; i++
                     }
                     blocks += MdBlock.Code(lang, body.joinToString("\n"))
@@ -75,6 +76,19 @@ object Markdown {
         flushPara(); flushBullets()
         return blocks
     }
+
+    /**
+     * Length of the backtick run opening a code fence on [trimmed] (3 or more), else 0. As in CommonMark, an info
+     * string holding a backtick is no fence: ```` ```ls``` ```` on one line is inline code in a paragraph.
+     */
+    private fun fenceLength(trimmed: String): Int {
+        val run = trimmed.takeWhile { it == '`' }.length
+        return if (run >= 3 && '`' !in trimmed.substring(run)) run else 0
+    }
+
+    /** A closing fence is a line of only backticks, at least as many as opened it (```` ```` ```` closes ```` ```` ````). */
+    private fun closesFence(trimmed: String, open: Int): Boolean =
+        trimmed.length >= open && trimmed.all { it == '`' }
 
     /**
      * The path of a whole-line `MEDIA:` directive (Hermes TUI and desktop `MEDIA_LINE_RE`): the directive may
@@ -127,9 +141,11 @@ object Markdown {
             val c = s[i]
             when {
                 c == '`' -> {
-                    val j = s.indexOf('`', i + 1)
-                    if (j > i + 1) { emit(MdSpan.Code(s.substring(i + 1, j))); i = j + 1 }
-                    else { lit.append(c); i++ }
+                    // A code span opens and closes with backtick runs of the same length (`a`, ``a`b``, ```a```).
+                    val run = backtickRun(s, i)
+                    val j = closingRun(s, i + run, run)
+                    if (j > i + run) { emit(MdSpan.Code(s.substring(i + run, j))); i = j + run }
+                    else { lit.append(s, i, i + run); i += run }
                 }
                 c == '*' && s.startsWith("**", i) -> {
                     val j = s.indexOf("**", i + 2)
@@ -152,5 +168,22 @@ object Markdown {
         }
         if (lit.isNotEmpty()) spans += MdSpan.Text(lit.toString())
         return spans
+    }
+
+    private fun backtickRun(s: String, from: Int): Int {
+        var j = from
+        while (j < s.length && s[j] == '`') j++
+        return j - from
+    }
+
+    /** Start of the next run of exactly [length] backticks at or after [from], or -1. */
+    private fun closingRun(s: String, from: Int, length: Int): Int {
+        var j = s.indexOf('`', from)
+        while (j != -1) {
+            val run = backtickRun(s, j)
+            if (run == length) return j
+            j = s.indexOf('`', j + run)
+        }
+        return -1
     }
 }

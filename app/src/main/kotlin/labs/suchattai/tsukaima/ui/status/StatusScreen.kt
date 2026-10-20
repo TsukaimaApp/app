@@ -167,7 +167,7 @@ internal fun StatusContent(
         ConfirmDialog(
             title = if (stop) "Stop the gateway?" else "Restart the gateway?",
             body = if (stop) {
-                "${platformNames(state)} will stop answering until you start it again."
+                "${state.stoppingPlatforms} will stop answering until you start it again."
             } else {
                 "Platforms reconnect in a few seconds. Running sessions are kept."
             },
@@ -177,11 +177,6 @@ internal fun StatusContent(
             danger = stop,
         )
     }
-}
-
-private fun platformNames(state: StatusUiState): String {
-    val names = state.hermes.status?.gatewayPlatforms?.keys.orEmpty().map { it.replaceFirstChar(Char::titlecase) }
-    return if (names.isEmpty()) "Messaging platforms" else names.joinToString(" and ")
 }
 
 @Composable
@@ -250,7 +245,7 @@ private fun OfflineBody(state: StatusUiState, lastKnownLabel: String, actions: S
             Column(Modifier.padding(4.dp)) { // RaisedCard pads 16; the design's card is 20
                 Text("Can’t reach Hermes", style = TsukaimaType.titleSmall, color = colors.ink1)
                 Text(
-                    "Hermes didn’t answer. Check the tunnel or that the box is awake. Cached sessions still open read-only.",
+                    state.offlineCaption,
                     style = TsukaimaType.caption.copy(fontSize = 13.5.sp),
                     color = colors.ink2,
                     modifier = Modifier.padding(top = 6.dp, bottom = 16.dp),

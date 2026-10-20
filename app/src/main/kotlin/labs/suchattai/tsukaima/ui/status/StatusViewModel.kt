@@ -37,6 +37,9 @@ import java.util.Locale
 interface StatusSource {
     val hermes: StateFlow<HermesState>
 
+    /** The configured server URL (for the offline caption); empty when unknown. */
+    val serverUrl: String get() = ""
+
     /** One tick per gateway `platforms.changed`. */
     val changes: Flow<Unit> get() = emptyFlow()
     suspend fun refreshNow()
@@ -54,8 +57,10 @@ class HermesStatusSource(
     private val repo: HermesRepository,
     private val connection: ConnectionManager,
     override val changes: Flow<Unit> = emptyFlow(),
+    private val configuredUrl: () -> String = { "" },
 ) : StatusSource {
     override val hermes get() = connection.hermes
+    override val serverUrl get() = configuredUrl()
     override suspend fun refreshNow() = connection.refreshNow()
     override suspend fun systemStats() = repo.systemStats()
     override suspend fun sessions(limit: Int) = repo.sessions(limit)
@@ -80,8 +85,25 @@ data class StatusUiState(
     val busy: Boolean = false,
     val refreshing: Boolean = false,
     val confirm: Confirm? = null,
+    /** The configured server URL, for the offline caption. */
+    val serverUrl: String = "",
 ) {
     val offline: Boolean get() = !hermes.reachable
+
+    /** The offline card's caption, naming the host that did not answer (`host[:port]`, no scheme). */
+    val offlineCaption: String
+        get() {
+            val host = serverUrl.substringAfter("://").trimEnd('/').takeIf { it.isNotBlank() }
+            val who = if (host != null) "Hermes at $host" else "Hermes"
+            return "$who didn’t answer. Check the tunnel or that the box is awake. Cached sessions still open read-only."
+        }
+
+    /** Who stops answering when the gateway stops: "Telegram", "Telegram and Discord", "Telegram, Discord and Slack". */
+    val stoppingPlatforms: String
+        get() {
+            val names = hermes.status?.gatewayPlatforms?.keys.orEmpty().map { it.replaceFirstChar(Char::titlecase) }
+            return if (names.isEmpty()) "Messaging platforms" else joinWithAnd(names)
+        }
 
     val running: Boolean get() = hermes.status?.gatewayState == "running"
 
@@ -119,6 +141,10 @@ data class StatusUiState(
     }
 }
 
+/** "a", "a and b", "a, b and c". */
+internal fun joinWithAnd(items: List<String>): String =
+    if (items.size <= 1) items.joinToString() else items.dropLast(1).joinToString(", ") + " and " + items.last()
+
 private fun memoryTitle(memory: JsonObject?): String {
     fun num(key: String) = (memory?.get(key) as? JsonPrimitive)?.doubleOrNull
     val total = num("total") ?: return "Memory"
@@ -143,7 +169,7 @@ class StatusViewModel(
     private val toast: (String) -> Unit = {},
     private val changeDebounceMs: Long = 1_000,
 ) : ViewModel() {
-    private val _state = MutableStateFlow(StatusUiState(hermes = source.hermes.value))
+    private val _state = MutableStateFlow(StatusUiState(hermes = source.hermes.value, serverUrl = source.serverUrl))
     val state: StateFlow<StatusUiState> = _state.asStateFlow()
 
     private var actionJob: Job? = null
@@ -151,7 +177,7 @@ class StatusViewModel(
     private val visible = MutableStateFlow(false)
 
     init {
-        viewModelScope.launch { source.hermes.collect { h -> _state.update { it.copy(hermes = h) } } }
+        viewModelScope.launch { source.hermes.collect { h -> _state.update { it.copy(hermes = h, serverUrl = source.serverUrl) } } }
         viewModelScope.launch {
             visible.flatMapLatest { shown -> if (shown) source.changes.debounce(changeDebounceMs) else emptyFlow() }.collect { refresh() }
         }
@@ -249,12 +275,32 @@ class StatusViewModel(
         return job
     }
 
-    fun approvePairing(entry: PairingEntry) {
-        viewModelScope.launch { source.approvePairing(entry.platform, entry.requestId); reloadPairing() }
+    /** Pairing approvals/revokes in flight, by entry: a second tap while one runs is ignored. Main thread only. */
+    private val pairingInFlight = mutableSetOf<String>()
+
+    /** Approves [entry] and reloads the card; the outcome is toasted, and a double tap sends one request. */
+    fun approvePairing(entry: PairingEntry) = pairingAction("approve ${entry.platform} ${entry.requestId}") {
+        source.approvePairing(entry.platform, entry.requestId)
+            .onSuccess { toast("Approved ${entry.who}") }
+            .onFailure { toast("Couldn’t approve ${entry.who}") }
     }
 
-    fun revokePairing(entry: PairingEntry) {
-        viewModelScope.launch { source.revokePairing(entry.platform, entry.userId); reloadPairing() }
+    fun revokePairing(entry: PairingEntry) = pairingAction("revoke ${entry.platform} ${entry.userId}") {
+        source.revokePairing(entry.platform, entry.userId)
+            .onSuccess { toast("Revoked ${entry.who}") }
+            .onFailure { toast("Couldn’t revoke ${entry.who}") }
+    }
+
+    private fun pairingAction(key: String, action: suspend () -> Unit) {
+        if (!pairingInFlight.add(key)) return
+        viewModelScope.launch {
+            try {
+                action()
+                reloadPairing()
+            } finally {
+                pairingInFlight.remove(key)
+            }
+        }
     }
 
     private suspend fun reloadPairing() {

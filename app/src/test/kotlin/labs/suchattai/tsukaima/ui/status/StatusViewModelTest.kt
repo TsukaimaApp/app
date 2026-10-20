@@ -74,7 +74,9 @@ class StatusViewModelTest {
         override suspend fun systemStats() = stats?.let { Result.success(it) } ?: Result.failure(IllegalStateException())
         override suspend fun sessions(limit: Int) = Result.success(sessions)
         override suspend fun pairing() = Result.success(pairing)
-        override suspend fun approvePairing(platform: String, requestId: String) = Result.success(Unit).also { actions += "approve $platform $requestId" }
+        var pairingResult: Result<Unit> = Result.success(Unit)
+        override var serverUrl = ""
+        override suspend fun approvePairing(platform: String, requestId: String) = pairingResult.also { actions += "approve $platform $requestId" }
         override suspend fun revokePairing(platform: String, userId: String) = Result.success(Unit).also { actions += "revoke $platform $userId" }
         var actionResult: Result<Unit> = Result.success(Unit)
         override suspend fun gatewayStart() = actionResult.also { actions += "start" }
@@ -238,5 +240,51 @@ class StatusViewModelTest {
         src.changes.emit(Unit)
         advanceUntilIdle()
         assertEquals(initial + 1, src.statusCalls)
+    }
+
+    @Test
+    fun pairingApproveIsToastedAndADoubleTapSendsOnce() = runTest {
+        val src = FakeSource(HermesState(status = running(), lastSeenAt = 0L))
+        val vm = vm(src)
+        advanceUntilIdle()
+        val entry = labs.suchattai.tsukaima.ui.settings.PairingEntry("telegram", "alice", "req-1", "42")
+        vm.approvePairing(entry)
+        vm.approvePairing(entry) // the second tap of a double tap
+        advanceUntilIdle()
+        assertEquals(listOf("approve telegram req-1"), src.actions)
+        assertEquals(listOf("Approved alice"), toasts)
+
+        src.pairingResult = Result.failure(java.io.IOException("boom"))
+        vm.approvePairing(entry) // the guard is released once the first call finished
+        advanceUntilIdle()
+        assertEquals(2, src.actions.size)
+        assertEquals("Couldn’t approve alice", toasts.last())
+
+        vm.revokePairing(entry)
+        vm.revokePairing(entry)
+        advanceUntilIdle()
+        assertEquals("revoke telegram 42", src.actions.last())
+        assertEquals(3, src.actions.size)
+        assertEquals("Revoked alice", toasts.last())
+    }
+
+    @Test
+    fun offlineCaptionNamesTheHost() = runTest {
+        val src = FakeSource(HermesState(reachable = false)).apply { serverUrl = "http://100.64.1.2:9119" }
+        val vm = vm(src)
+        advanceUntilIdle()
+        assertTrue(vm.state.value.offlineCaption, vm.state.value.offlineCaption.startsWith("Hermes at 100.64.1.2:9119 didn’t answer."))
+        assertTrue(StatusUiState().offlineCaption.startsWith("Hermes didn’t answer."))
+    }
+
+    @Test
+    fun stoppingPlatformsJoinWithCommasAndAnd() {
+        fun with(vararg names: String) = StatusUiState(
+            hermes = HermesState(status = running().copy(gatewayPlatforms = names.associateWith { JsonPrimitive("connected") })),
+        ).stoppingPlatforms
+        assertEquals("Messaging platforms", with())
+        assertEquals("Telegram", with("telegram"))
+        assertEquals("Telegram and Discord", with("telegram", "discord"))
+        assertEquals("Telegram, Discord and Slack", with("telegram", "discord", "slack"))
     }
 }

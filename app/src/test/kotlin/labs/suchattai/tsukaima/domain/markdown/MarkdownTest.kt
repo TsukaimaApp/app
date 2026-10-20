@@ -134,4 +134,37 @@ class MarkdownTest {
             Markdown.parse(s)
         }
     }
+
+    @Test
+    fun oneLineTripleBacktickIsInlineCodeAndDoesNotSwallowTheRest() {
+        val blocks = Markdown.parse("```ls -la```\nthen this\n\nand this")
+        assertEquals(
+            listOf(
+                MdBlock.Paragraph(listOf(MdSpan.Code("ls -la"), MdSpan.Text("\nthen this"))),
+                MdBlock.Paragraph(listOf(MdSpan.Text("and this"))),
+            ),
+            blocks,
+        )
+    }
+
+    @Test
+    fun fourBacktickFenceClosesAndKeepsInnerTripleFence() {
+        val blocks = Markdown.parse("````md\n```kotlin\nval x = 1\n```\n````\nafter")
+        assertEquals(
+            listOf(
+                MdBlock.Code("md", "```kotlin\nval x = 1\n```"),
+                MdBlock.Paragraph(listOf(MdSpan.Text("after"))),
+            ),
+            blocks,
+        )
+    }
+
+    @Test
+    fun codeSpanNeedsAMatchingRun() {
+        assertEquals(
+            listOf(MdBlock.Paragraph(listOf(MdSpan.Text("a "), MdSpan.Code("b`c"), MdSpan.Text(" d")))),
+            Markdown.parse("a ``b`c`` d"),
+        )
+        assertEquals(listOf(MdBlock.Paragraph(listOf(MdSpan.Text("x `` y")))), Markdown.parse("x `` y"))
+    }
 }

@@ -181,6 +181,17 @@ class CronViewModelTest {
     }
 
     @Test
+    fun scheduleFieldsMustBeCronTokens() {
+        assertEquals(SCHEDULE_FIELD_ERROR, cronScheduleError("+5 * * * *"))
+        assertEquals(SCHEDULE_FIELD_ERROR, cronScheduleError("0 9 * * mon;rm"))
+        assertEquals(SCHEDULE_ERROR, cronScheduleError("+5 * * *"))
+        assertEquals(SCHEDULE_ERROR, cronScheduleError("0 0 9 * * *")) // six fields (seconds) stay out
+        for (ok in listOf("*/5 * * * *", "0 9 * * 1-5", "0 9 1,15 * MON-FRI", "0 0 L * ?", "0 9 * JAN 1#2")) {
+            assertNull(ok, cronScheduleError(ok))
+        }
+    }
+
+    @Test
     fun failedSaveKeepsEditorOpenAndToasts() = runTest {
         val src = FakeSource()
         val vm = vm(src)

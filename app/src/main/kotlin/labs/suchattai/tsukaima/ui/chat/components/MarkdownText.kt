@@ -17,6 +17,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.AnnotatedString
@@ -63,6 +64,11 @@ private fun inline(spans: List<MdSpan>, colors: TsukaimaColors, caret: Boolean):
         if (caret) appendInlineContent(CaretId, "|")
     }
 
+/** [inline], rebuilt only when its input changes (not on every caret blink or parent recomposition). */
+@Composable
+private fun rememberInline(spans: List<MdSpan>, colors: TsukaimaColors, caret: Boolean): AnnotatedString =
+    remember(spans, colors, caret) { inline(spans, colors, caret) }
+
 /**
  * Renders parsed markdown blocks; `MEDIA:` blocks become [MediaCard]s served by [media]. With [streaming], a
  * blinking accent caret is appended inline to the last text run (so it follows wrapping); after a trailing
@@ -71,8 +77,8 @@ private fun inline(spans: List<MdSpan>, colors: TsukaimaColors, caret: Boolean):
 @Composable
 fun MarkdownText(
     blocks: List<MdBlock>,
-    streaming: Boolean = false,
     modifier: Modifier = Modifier,
+    streaming: Boolean = false,
     media: MediaHost = MediaHost(),
 ) {
     val colors = MaterialTheme.tsukaima
@@ -84,7 +90,7 @@ fun MarkdownText(
             val caret = caretInline && index == blocks.lastIndex
             when (block) {
                 is MdBlock.Paragraph -> Text(
-                    text = inline(block.spans, colors, caret),
+                    text = rememberInline(block.spans, colors, caret),
                     style = TsukaimaType.body,
                     color = colors.ink1,
                     inlineContent = caretContent,
@@ -96,7 +102,7 @@ fun MarkdownText(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("•", style = TsukaimaType.body, color = colors.ink2)
                             Text(
-                                text = inline(item, colors, caret && i == block.items.lastIndex),
+                                text = rememberInline(item, colors, caret && i == block.items.lastIndex),
                                 style = TsukaimaType.body,
                                 color = colors.ink1,
                                 inlineContent = caretContent,
@@ -122,12 +128,14 @@ fun MarkdownText(
 private fun caretInlineContent(): Map<String, InlineTextContent> {
     val density = LocalDensity.current
     val lineHeight = TsukaimaType.body.lineHeight
-    val width = with(density) { 4.dp.toSp() }
-    return mapOf(
-        CaretId to InlineTextContent(
-            Placeholder(width, lineHeight, PlaceholderVerticalAlign.TextCenter),
-        ) { Caret() },
-    )
+    return remember(density, lineHeight) {
+        val width = with(density) { 4.dp.toSp() }
+        mapOf(
+            CaretId to InlineTextContent(
+                Placeholder(width, lineHeight, PlaceholderVerticalAlign.TextCenter),
+            ) { Caret() },
+        )
+    }
 }
 
 @Composable

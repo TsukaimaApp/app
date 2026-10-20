@@ -45,6 +45,20 @@ class HermesCronSource(private val repo: HermesRepository) : CronSource {
 
 const val LOCAL_TARGET = "local"
 const val SCHEDULE_ERROR = "Use 5 fields: minute hour day month weekday"
+const val SCHEDULE_FIELD_ERROR = "Each field is numbers or names with * , - / (e.g. */5 or 1-5)"
+
+/** One cron field: starts with a digit, a name (MON, JAN), `*` or `?`; then only cron punctuation (croniter's `L W #` too). */
+private val CRON_FIELD = Regex("[0-9A-Za-z*?][0-9A-Za-z*?/,#-]*")
+
+/** Null when [expr] is a plausible 5-field cron expression, else what is wrong with it. */
+fun cronScheduleError(expr: String): String? {
+    val fields = expr.trim().split(Regex("\\s+"))
+    return when {
+        fields.size != 5 -> SCHEDULE_ERROR
+        fields.any { !CRON_FIELD.matches(it) } -> SCHEDULE_FIELD_ERROR
+        else -> null
+    }
+}
 
 /** Hermes marks a paused job with `state == "paused"` or `enabled == false`. */
 val CronJobDto.isPaused: Boolean get() = state == "paused" || enabled == false
@@ -77,7 +91,7 @@ data class CronUiState(
     val scheduleEditable: Boolean get() = editing == null || editing.schedule?.kind.let { it == null || it == "cron" }
 
     val scheduleError: String?
-        get() = if (!scheduleEditable || draft.schedule.trim().split(Regex("\\s+")).size == 5) null else SCHEDULE_ERROR
+        get() = if (!scheduleEditable) null else cronScheduleError(draft.schedule)
 
     val canSave: Boolean
         get() = draft.name.isNotBlank() && draft.prompt.isNotBlank() && scheduleError == null && !saving

@@ -77,6 +77,30 @@ class HermesApiTest {
     }
 
     @Test
+    fun loginUnquotesAQuotedCookieValue() = runBlocking {
+        server.enqueue(
+            MockResponse.Builder()
+                .code(200)
+                .addHeader("Set-Cookie", "hermes_session_at=\"abc.def\"; Path=/; HttpOnly")
+                .body("""{"ok":true,"next":"/"}""")
+                .build(),
+        )
+        assertEquals("abc.def", api().login("u", "p"))
+    }
+
+    @Test
+    fun loginRejectsAnEmptyQuotedCookieValue() {
+        server.enqueue(
+            MockResponse.Builder()
+                .code(200)
+                .addHeader("Set-Cookie", "hermes_session_at=\"\"; Path=/")
+                .body("""{"ok":true,"next":"/"}""")
+                .build(),
+        )
+        assertThrows(ApiException::class.java) { runBlocking { api().login("u", "p") } }
+    }
+
+    @Test
     fun loginRejectsLookalikeCookieNames() {
         server.enqueue(
             MockResponse.Builder()
