@@ -38,6 +38,9 @@ import labs.suchattai.tsukaima.di.AppContainer
 import labs.suchattai.tsukaima.ui.onboarding.OnboardingScreen
 import labs.suchattai.tsukaima.ui.settings.SettingsScreen
 import labs.suchattai.tsukaima.ui.settings.SettingsViewModel
+import labs.suchattai.tsukaima.ui.status.HermesStatusSource
+import labs.suchattai.tsukaima.ui.status.StatusScreen
+import labs.suchattai.tsukaima.ui.status.StatusViewModel
 import labs.suchattai.tsukaima.ui.theme.Motion
 import labs.suchattai.tsukaima.ui.theme.TsukaimaTheme
 import labs.suchattai.tsukaima.ui.theme.TsukaimaType
@@ -71,7 +74,21 @@ fun TsukaimaNavHost(
             OnboardingScreen(onConnect = { navController.navigate(Route.Settings.path) })
         }
         composable(Route.Status.path) {
-            PlaceholderScreen("Status", menu = showMenu, onMenu = onMenu)
+            val vm: StatusViewModel = viewModel(
+                factory = viewModelFactory {
+                    initializer { StatusViewModel(HermesStatusSource(container.repository, container.connection)) }
+                },
+            )
+            StatusScreen(
+                vm = vm,
+                onMenu = onMenu,
+                showMenu = showMenu,
+                onSettings = { navController.navigate(Route.Settings.path) },
+                onNewChat = { navController.navigateTop(Route.Chat.create()) },
+                onCron = { navController.navigateTop(Route.Cron.path) },
+                onContinue = { navController.navigateTop(Route.Chat.create(it)) },
+                onOpenCached = { navController.navigateTop(Route.Chat.create(it)) },
+            )
         }
         composable(
             Route.Chat.path,

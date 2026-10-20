@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -128,9 +129,17 @@ private fun PillButton(
                 onClick = onClick,
             ),
         contentAlignment = Alignment.Center,
+        // Pass the wrapper's min width on to the pill: a caller's weight/fillMaxWidth/width (fixed width, so
+        // min == max) makes the pill fill the wrapper, while a wrap-content wrapper has min 0 and hugs the label.
+        propagateMinConstraints = true,
     ) {
         Row(
             modifier = Modifier
+                // ...but only the width: the 44dp touch-target min height must not stretch a 36dp (sm) pill.
+                .layout { measurable, constraints ->
+                    val placeable = measurable.measure(constraints.copy(minHeight = 0))
+                    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+                }
                 .defaultMinSize(minHeight = if (sm) 36.dp else 44.dp)
                 .clip(shape)
                 .background(fill)

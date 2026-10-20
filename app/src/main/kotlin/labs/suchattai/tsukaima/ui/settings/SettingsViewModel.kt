@@ -295,7 +295,7 @@ class SettingsViewModel(
     }
 }
 
-private fun pairingEntry(o: JsonObject): PairingEntry? {
+internal fun pairingEntry(o: JsonObject): PairingEntry? {
     fun str(vararg keys: String) = keys.firstNotNullOfOrNull { (o[it] as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank) }
     val platform = str("platform") ?: return null
     val userId = str("user_id", "id").orEmpty()
