@@ -9,13 +9,17 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -54,9 +58,11 @@ class GatewayClient(
     private val heartbeatMs: Long = 15_000,
     private val deadlineMs: Long = 45_000,
     private val backoffMs: List<Long> = listOf(1_000L, 2_000L, 5_000L, 10_000L),
+    private val ticketTimeoutMs: Long = 15_000,
+    private val logger: (String, Throwable?) -> Unit = { _, _ -> },
 ) : RpcTransport {
     init {
-        require(heartbeatMs > 0 && deadlineMs > 0) { "heartbeatMs and deadlineMs must be positive" }
+        require(heartbeatMs > 0 && deadlineMs > 0 && ticketTimeoutMs > 0) { "intervals must be positive" }
         require(backoffMs.isNotEmpty()) { "backoffMs must not be empty" }
     }
 
@@ -68,10 +74,13 @@ class GatewayClient(
     )
     val events: SharedFlow<Frame.Event> = _events.asSharedFlow()
 
-    private val _serverRequests = MutableSharedFlow<Frame.ServerRequest>(
-        replay = 0, extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
-    val serverRequests: SharedFlow<Frame.ServerRequest> = _serverRequests.asSharedFlow()
+    private val serverRequestChannel = Channel<Frame.ServerRequest>(Channel.UNLIMITED)
+
+    /**
+     * Server→client requests (approval, clarify), buffered until collected so none is lost while no screen
+     * is listening. Single-consumer: there must be exactly one collector (each request goes to one of them).
+     */
+    val serverRequests: Flow<Frame.ServerRequest> = serverRequestChannel.receiveAsFlow()
 
     /** Caller request ids, `t<n>`. */
     private val requestIds = AtomicLong()
@@ -110,10 +119,24 @@ class GatewayClient(
     }
 
     init {
-        val actor = scope.launch { for (input in inbox) handle(input) }
+        val actor = scope.launch {
+            for (input in inbox) {
+                try {
+                    handle(input)
+                } catch (c: CancellationException) {
+                    throw c
+                } catch (t: Throwable) {
+                    // Never let one bad input kill the actor: abandon the current socket and let reconnect take over.
+                    logger("gateway: ${input::class.simpleName} handler failed; dropping connection", t)
+                    socket?.cancel()
+                    drop()
+                }
+            }
+        }
         // Runs after the actor has finished (or never started), so the confined state is safe to touch here.
         actor.invokeOnCompletion {
             inbox.close()
+            serverRequestChannel.close()
             while (true) {
                 val leftover = inbox.tryReceive().getOrNull() ?: break
                 (leftover as? Input.Send)?.reply?.completeExceptionally(GatewayClosedException())
@@ -218,10 +241,11 @@ class GatewayClient(
         _state.value = s
         ticketJob = scope.launch {
             val result = try {
-                Input.TicketReady(e, ticket())
-            } catch (c: CancellationException) {
-                throw c
+                Input.TicketReady(e, withTimeout(ticketTimeoutMs) { ticket() })
             } catch (t: Throwable) {
+                // Our own cancellation (teardown/scope) propagates; anything else, including the ticket
+                // timeout or a CancellationException leaked by the supplier, is a failed attempt.
+                if (!isActive) throw t
                 Input.TicketFailed(e, t)
             }
             post(result)
@@ -272,7 +296,7 @@ class GatewayClient(
                     }
                     _events.tryEmit(frame)
                 }
-                is Frame.ServerRequest -> _serverRequests.tryEmit(frame)
+                is Frame.ServerRequest -> serverRequestChannel.trySend(frame)
                 is Frame.Unknown -> Unit
             }
         }

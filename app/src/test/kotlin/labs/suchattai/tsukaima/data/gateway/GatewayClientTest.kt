@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -100,15 +101,20 @@ class GatewayClientTest {
         deadlineMs: Long = 45_000,
         backoffMs: List<Long> = listOf(20L),
         ticket: suspend () -> String = { "tk-${ticketCounter.incrementAndGet()}" },
+        baseUrl: () -> String = { serverUrl() },
+        ticketTimeoutMs: Long = 15_000,
     ) = GatewayClient(
         client = okHttp,
-        baseUrl = { server.url("/").toString().trimEnd('/') },
+        baseUrl = baseUrl,
         ticket = ticket,
+        ticketTimeoutMs = ticketTimeoutMs,
         scope = scope,
         heartbeatMs = heartbeatMs,
         deadlineMs = deadlineMs,
         backoffMs = backoffMs,
     ).also { gateways += it }
+
+    private fun serverUrl() = server.url("/").toString().trimEnd('/')
 
     private suspend fun GatewayClient.awaitState(s: ConnectionState) =
         withTimeout(TIMEOUT_S * 1000) { state.first { it == s } }
@@ -328,6 +334,54 @@ class GatewayClientTest {
         gw.awaitState(ConnectionState.Connected)
         assertEquals(2, calls.get())
         assertEquals("tk-ok", server.takeRequest().url.queryParameter("ticket"))
+    }
+
+    // ---- Fix round 1: robustness ----
+
+    @Test
+    fun serverRequestBufferedUntilCollected() = runBlocking {
+        val fake = FakeServer()
+        upgrade(fake)
+        val gw = gateway()
+        gw.connect()
+        gw.awaitState(ConnectionState.Connected)
+        val ws = fake.socket()
+        fake.next("client.capabilities")
+        ws.send("""{"jsonrpc":"2.0","id":"srq-early","method":"approval","params":{"command":"rm -rf build"}}""")
+        // Round-trip a request so the approval is known to have been processed before anyone collects.
+        val reply = async(Dispatchers.Default) { gw.request("gateway.ping") }
+        ws.send("""{"jsonrpc":"2.0","id":"${fake.next("gateway.ping")["id"]!!.jsonPrimitive.content}","result":{}}""")
+        withTimeout(TIMEOUT_S * 1000) { reply.await() }
+
+        val req = withTimeout(TIMEOUT_S * 1000) { gw.serverRequests.first() }
+        assertEquals("srq-early", req.id)
+        assertEquals("approval", req.method)
+    }
+
+    @Test
+    fun handlerExceptionDropsAndReconnects() = runBlocking {
+        upgrade(FakeServer())
+        val urlCalls = AtomicInteger()
+        val gw = gateway(baseUrl = {
+            if (urlCalls.incrementAndGet() == 1) throw IllegalStateException("settings not loaded") else serverUrl()
+        })
+        gw.connect()
+        gw.awaitState(ConnectionState.Connected)
+        assertEquals(2, urlCalls.get())
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun hungTicketTimesOutAndRetries() = runBlocking {
+        upgrade(FakeServer())
+        val calls = AtomicInteger()
+        val gw = gateway(ticketTimeoutMs = 100, ticket = {
+            if (calls.incrementAndGet() == 1) awaitCancellation() else "tk-second"
+        })
+        gw.connect()
+        gw.awaitState(ConnectionState.Connected)
+        assertEquals(2, calls.get())
+        assertEquals("tk-second", server.takeRequest().url.queryParameter("ticket"))
     }
 
     private companion object {
