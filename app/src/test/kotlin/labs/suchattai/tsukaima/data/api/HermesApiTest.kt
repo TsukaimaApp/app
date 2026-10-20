@@ -198,7 +198,7 @@ class HermesApiTest {
 
     @Test
     fun rateLimitedReloginThrowsAuthException() {
-        val creds = labs.suchattai.tsukaima.data.prefs.InMemoryCredentialStore().apply { save("pw", "old") }
+        val creds = labs.suchattai.tsukaima.data.prefs.InMemoryCredentialStore().apply { save("pw", "old", server.url("/").toString().trimEnd('/')) }
         settings = Settings(serverUrl = server.url("/").toString().trimEnd('/'), username = "u")
         lateinit var api: HermesApi
         val client = OkHttpClient.Builder()

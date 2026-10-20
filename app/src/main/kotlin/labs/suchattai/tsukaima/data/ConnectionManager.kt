@@ -11,7 +11,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -60,12 +61,13 @@ fun HermesState.gatewayStatus(): AgentStatus? = when {
  * and no auth failure is pending. A server URL change reconnects the gateway to the new server.
  *
  * [settings] is the same synchronous snapshot the REST stack reads, so when it emits a new URL the API
- * already targets that URL.
+ * already targets that URL. It is null until DataStore has loaded; polling waits for it, so a cold start
+ * never polls (or reports offline) against default settings.
  */
 class ConnectionManager(
     private val api: HermesApi,
     private val gateway: GatewayClient,
-    private val settings: StateFlow<Settings>,
+    private val settings: StateFlow<Settings?>,
     private val creds: CredentialStore,
     private val scope: CoroutineScope,
     private val pollMs: Long = 20_000,
@@ -74,10 +76,20 @@ class ConnectionManager(
 ) {
     private data class Poll(val reachable: Boolean = true, val status: StatusDto? = null, val lastSeenAt: Long? = null)
 
-    /** Guards [poll], [pollJob] and the derive-and-set in [publish]. */
+    /** Guards [poll], [pollJob], [generation] and the derive-and-set in [publish]. */
     private val lock = Any()
     private var poll = Poll()
     private var pollJob: Job? = null
+
+    /**
+     * Bumped by every [start] that launches a loop and by every [stop]. A loop iteration only touches the
+     * gateway while its own generation is current, so an iteration in flight when [stop] runs cannot
+     * reconnect afterwards.
+     */
+    private var generation = 0L
+
+    /** Server URL the poll loop last worked against; a different URL in [settings] wakes the loop. */
+    @Volatile private var lastUsedUrl: String? = null
 
     private val _hermes = MutableStateFlow(HermesState(connection = gateway.state.value))
     val hermes: StateFlow<HermesState> = _hermes.asStateFlow()
@@ -104,8 +116,8 @@ class ConnectionManager(
     /** Wakes the poll loop early (URL change, auth cleared). */
     private val wake = Channel<Unit>(Channel.CONFLATED)
 
-    /** URL the gateway was last asked to connect to; null when we last asked it to disconnect. Poll-loop/stop only. */
-    @Volatile private var connectedUrl: String? = null
+    /** URL the gateway was last asked to connect to; null when we last asked it to disconnect. Guarded by [lock]. */
+    private var connectedUrl: String? = null
 
     init {
         scope.launch { gateway.state.collect { publish() } }
@@ -122,14 +134,19 @@ class ConnectionManager(
         }
         synchronized(lock) {
             if (pollJob?.isActive == true) return
+            val gen = ++generation
             pollJob = scope.launch {
+                settings.filterNotNull().first() // cold start: wait for DataStore, never poll with defaults
                 launch {
-                    settings.map { it.serverUrl }.distinctUntilChanged().drop(1).collect { wake.trySend(Unit) }
+                    settings.filterNotNull().map { it.serverUrl }.distinctUntilChanged().collect { url ->
+                        if (url != lastUsedUrl) wake.trySend(Unit)
+                    }
                 }
                 while (true) {
                     try {
+                        lastUsedUrl = settings.value?.serverUrl
                         refreshNow()
-                        syncGateway()
+                        syncGateway(gen)
                     } catch (c: CancellationException) {
                         throw c
                     } catch (e: Exception) {
@@ -144,17 +161,18 @@ class ConnectionManager(
     /** Stops polling and disconnects the gateway. [serverRequests] stays wired for the next [start]. */
     fun stop() {
         synchronized(lock) {
+            generation++
             pollJob?.cancel()
             pollJob = null
+            connectedUrl = null
+            gateway.disconnect() // after cancelling, under the lock syncGateway checks: nothing can follow it
         }
-        connectedUrl = null
-        gateway.disconnect()
     }
 
     /** Polls `/api/status` now and publishes the result before returning. Never throws (except cancellation). */
     suspend fun refreshNow() {
         refreshMutex.withLock {
-            val outcome: Result<StatusDto>? = if (settings.value.serverUrl.isEmpty()) {
+            val outcome: Result<StatusDto>? = if (settings.value?.serverUrl.isNullOrEmpty()) {
                 null
             } else {
                 try {
@@ -168,7 +186,7 @@ class ConnectionManager(
             synchronized(lock) {
                 val prev = poll
                 poll = when {
-                    outcome == null -> Poll(reachable = false)
+                    outcome == null -> Poll() // no server configured: nothing to be offline from
                     outcome.isSuccess -> Poll(true, outcome.getOrThrow(), now())
                     // The server answered; the credentials are the problem.
                     outcome.exceptionOrNull() is AuthException -> prev.copy(reachable = true, lastSeenAt = now())
@@ -193,9 +211,21 @@ class ConnectionManager(
         wake.trySend(Unit)
     }
 
-    private fun syncGateway() {
-        val url = settings.value.serverUrl
+    /**
+     * Connects or disconnects the gateway for the current settings, if [gen] is still the live loop.
+     * Credentials are read outside [lock] (the store can be slow); the decision and the gateway call happen
+     * under it, so they are atomic with respect to [stop].
+     */
+    private fun syncGateway(gen: Long) {
+        val url = settings.value?.serverUrl.orEmpty()
         val configured = url.isNotEmpty() && creds.password() != null
+        synchronized(lock) {
+            if (gen != generation) return
+            applyGateway(url, configured)
+        }
+    }
+
+    private fun applyGateway(url: String, configured: Boolean) {
         when {
             !configured -> if (connectedUrl != null) {
                 connectedUrl = null

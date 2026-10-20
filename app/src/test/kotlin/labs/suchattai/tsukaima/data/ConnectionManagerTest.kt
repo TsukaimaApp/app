@@ -15,6 +15,7 @@ import labs.suchattai.tsukaima.data.api.HermesApi
 import labs.suchattai.tsukaima.data.api.HermesJson
 import labs.suchattai.tsukaima.data.gateway.ConnectionState
 import labs.suchattai.tsukaima.data.gateway.GatewayClient
+import labs.suchattai.tsukaima.data.prefs.CredentialStore
 import labs.suchattai.tsukaima.data.prefs.InMemoryCredentialStore
 import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
@@ -33,14 +34,18 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 class ConnectionManagerTest {
     private lateinit var server: MockWebServer
     private lateinit var scope: CoroutineScope
     private val okHttp = OkHttpClient()
     private val creds = InMemoryCredentialStore()
-    private lateinit var settings: MutableStateFlow<Settings>
+    private lateinit var settings: MutableStateFlow<Settings?>
     private val managers = mutableListOf<ConnectionManager>()
     private val wsUpgrades = AtomicInteger()
 
@@ -68,7 +73,7 @@ class ConnectionManagerTest {
         }
         server.start()
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        settings = MutableStateFlow(Settings(serverUrl = serverUrl(), username = "u"))
+        settings = MutableStateFlow<Settings?>(Settings(serverUrl = serverUrl(), username = "u"))
     }
 
     @After
@@ -80,31 +85,110 @@ class ConnectionManagerTest {
 
     private fun serverUrl() = server.url("/").toString().trimEnd('/')
 
-    private fun manager(pollMs: Long = 20_000): ConnectionManager {
-        val api = HermesApi(okHttp, { settings.value.serverUrl }, { settings.value })
+    private val clock = AtomicLong(1_000)
+
+    private fun manager(pollMs: Long = 20_000, credStore: CredentialStore = creds): ConnectionManager {
+        val api = HermesApi(okHttp, { settings.value?.serverUrl.orEmpty() }, { settings.value ?: Settings() })
         val gateway = GatewayClient(
             client = okHttp,
-            baseUrl = { settings.value.serverUrl },
+            baseUrl = { settings.value?.serverUrl.orEmpty() },
             ticket = { "tk" },
             scope = scope,
             backoffMs = listOf(20L),
         )
-        return ConnectionManager(api, gateway, settings, creds, scope, pollMs).also { managers += it }
+        return ConnectionManager(api, gateway, settings, credStore, scope, pollMs, now = { clock.incrementAndGet() })
+            .also { managers += it }
     }
 
     private suspend fun <T> await(block: suspend () -> T): T = withTimeout(TIMEOUT_MS) { block() }
 
     @Test
     fun pollMarksUnreachableOnIoError() = runBlocking<Unit> {
-        val cm = manager(pollMs = 50)
-        cm.start()
-        val seen = await { cm.hermes.first { it.reachable && it.lastSeenAt != null } }
+        val cm = manager()
+        cm.refreshNow()
+        val seen = cm.hermes.value
+        assertTrue(seen.reachable)
         val lastSeen = seen.lastSeenAt
+        assertNotNull(lastSeen)
 
         server.close()
-        val down = await { cm.hermes.first { !it.reachable } }
+        cm.refreshNow()
+        val down = cm.hermes.value
+        assertFalse(down.reachable)
         assertEquals(lastSeen, down.lastSeenAt)
+        assertEquals("1.0", down.status?.version) // last known status kept
         assertEquals(AgentStatus.Offline, down.gatewayStatus())
+    }
+
+    @Test
+    fun coldStartDoesNotPublishOfflineBeforeSettingsLoad() = runBlocking<Unit> {
+        settings.value = null // DataStore not loaded yet
+        val cm = manager() // 20 s poll: only the load itself can trigger the first poll in time
+        cm.start()
+        delay(200)
+        assertTrue("no offline flash before settings load", cm.hermes.value.reachable)
+        assertNull(cm.hermes.value.gatewayStatus())
+        assertEquals("no poll against default settings", 0, server.requestCount)
+
+        settings.value = Settings(serverUrl = serverUrl(), username = "u")
+        val loaded = await { cm.hermes.first { it.status != null } }
+        assertTrue(loaded.reachable)
+    }
+
+    @Test
+    fun emptyServerUrlLeavesReachableDefault() = runBlocking<Unit> {
+        settings.value = Settings()
+        val cm = manager()
+        cm.refreshNow()
+        assertTrue(cm.hermes.value.reachable)
+        assertNull(cm.hermes.value.gatewayStatus())
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun urlChangeWakesPollLoop() = runBlocking<Unit> {
+        val other = MockWebServer().apply {
+            enqueue(
+                MockResponse.Builder().addHeader("Content-Type", "application/json")
+                    .body("""{"version":"other","gateway_state":"running"}""").build(),
+            )
+            start()
+        }
+        try {
+            val cm = manager() // 20 s poll: only the URL change can trigger the second poll in time
+            cm.start()
+            await { cm.hermes.first { it.status?.version == "1.0" } }
+            settings.value = Settings(serverUrl = other.url("/").toString().trimEnd('/'))
+            await { cm.hermes.first { it.status?.version == "other" } }
+        } finally {
+            other.close()
+        }
+    }
+
+    @Test
+    fun stopIsNotUndoneByInFlightPoll() = runBlocking<Unit> {
+        wsListener = object : WebSocketListener() {}
+        val inSync = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        // password() is first read by syncGateway, after refreshNow: block there to hold an iteration in flight.
+        val blocking = object : CredentialStore by InMemoryCredentialStore() {
+            private val first = AtomicBoolean(true)
+            override fun password(): String {
+                if (first.getAndSet(false)) {
+                    inSync.countDown()
+                    release.await(5, TimeUnit.SECONDS)
+                }
+                return "pw"
+            }
+        }
+        val cm = manager(credStore = blocking)
+        cm.start()
+        assertTrue(inSync.await(5, TimeUnit.SECONDS))
+        cm.stop()
+        release.countDown()
+        delay(300)
+        assertEquals(ConnectionState.Disconnected, cm.hermes.value.connection)
+        assertEquals("gateway must not connect after stop()", 0, wsUpgrades.get())
     }
 
     @Test
@@ -175,7 +259,7 @@ class ConnectionManagerTest {
                 }
             }
         }
-        creds.save("pw", "tok")
+        creds.save("pw", "tok", serverUrl())
         val cm = manager()
         cm.start()
         cm.start() // idempotent: still exactly one collector of the gateway's single-consumer flow

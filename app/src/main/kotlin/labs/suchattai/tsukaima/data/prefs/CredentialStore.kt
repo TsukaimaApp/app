@@ -10,7 +10,12 @@ import androidx.security.crypto.MasterKey
 interface CredentialStore {
     fun password(): String?
     fun accessToken(): String?
-    fun save(password: String?, accessToken: String?)
+
+    /** Normalized server URL (`scheme://host[:port]`) the password and token belong to. */
+    fun origin(): String?
+
+    /** Stores credentials bound to [origin]; they are only ever sent to that origin. */
+    fun save(password: String?, accessToken: String?, origin: String?)
     fun clear()
 }
 
@@ -28,10 +33,13 @@ class EncryptedCredentialStore(context: Context) : CredentialStore {
 
     override fun accessToken(): String? = prefs.getString(ACCESS_TOKEN, null)
 
-    override fun save(password: String?, accessToken: String?) {
+    override fun origin(): String? = prefs.getString(ORIGIN, null)
+
+    override fun save(password: String?, accessToken: String?, origin: String?) {
         prefs.edit()
             .putOrRemove(PASSWORD, password)
             .putOrRemove(ACCESS_TOKEN, accessToken)
+            .putOrRemove(ORIGIN, origin)
             .apply()
     }
 
@@ -45,6 +53,7 @@ class EncryptedCredentialStore(context: Context) : CredentialStore {
     private companion object {
         const val PASSWORD = "password"
         const val ACCESS_TOKEN = "access_token"
+        const val ORIGIN = "origin"
     }
 }
 
@@ -52,6 +61,7 @@ class EncryptedCredentialStore(context: Context) : CredentialStore {
 class InMemoryCredentialStore : CredentialStore {
     private var password: String? = null
     private var accessToken: String? = null
+    private var origin: String? = null
 
     @Synchronized
     override fun password(): String? = password
@@ -60,15 +70,20 @@ class InMemoryCredentialStore : CredentialStore {
     override fun accessToken(): String? = accessToken
 
     @Synchronized
-    override fun save(password: String?, accessToken: String?) {
+    override fun origin(): String? = origin
+
+    @Synchronized
+    override fun save(password: String?, accessToken: String?, origin: String?) {
         this.password = password
         this.accessToken = accessToken
+        this.origin = origin
     }
 
     @Synchronized
     override fun clear() {
         password = null
         accessToken = null
+        origin = null
     }
 }
 
@@ -98,7 +113,10 @@ class LazyCredentialStore(
 
     override fun accessToken(): String? = delegate.accessToken()
 
-    override fun save(password: String?, accessToken: String?) = delegate.save(password, accessToken)
+    override fun origin(): String? = delegate.origin()
+
+    override fun save(password: String?, accessToken: String?, origin: String?) =
+        delegate.save(password, accessToken, origin)
 
     override fun clear() = delegate.clear()
 }

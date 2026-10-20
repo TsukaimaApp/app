@@ -26,6 +26,8 @@ class AuthInterceptorTest {
     private val loginCalls = AtomicInteger()
     private var expectedPassword = "pw"
     private var loginResult: () -> String = { "new-token" }
+    private var configuredUrl: (() -> String)? = null
+    private var cleartextAllowed = true
 
     @Before
     fun setUp() {
@@ -40,8 +42,8 @@ class AuthInterceptorTest {
     private fun baseUrl() = server.url("/").toString().trimEnd('/')
 
     private fun client(): OkHttpClient {
-        val settings = { Settings(serverUrl = baseUrl(), username = "u") }
-        val interceptor = AuthInterceptor(creds, settings) { url, user, password ->
+        val settings = { Settings(serverUrl = (configuredUrl ?: ::baseUrl)(), username = "u") }
+        val interceptor = AuthInterceptor(creds, settings, { cleartextAllowed }) { url, user, password ->
             loginCalls.incrementAndGet()
             assertEquals(baseUrl(), url)
             assertEquals("u", user)
@@ -61,7 +63,7 @@ class AuthInterceptorTest {
 
     @Test
     fun addsBearerHeader() {
-        creds.save("pw", "tok")
+        creds.save("pw", "tok", baseUrl())
         server.enqueue(ok())
         assertEquals(200, get(client()))
         assertEquals("Bearer tok", server.takeRequest(1, TimeUnit.SECONDS)!!.headers["Authorization"])
@@ -76,7 +78,7 @@ class AuthInterceptorTest {
 
     @Test
     fun reloginStoresNewTokenAndRetries() {
-        creds.save("pw", "old")
+        creds.save("pw", "old", baseUrl())
         server.enqueue(ok(401))
         server.enqueue(ok())
         assertEquals(200, get(client()))
@@ -91,7 +93,7 @@ class AuthInterceptorTest {
     @Test
     fun reloginsOnceOn401() {
         // The login lambda performs a real HTTP request (NoAuth-tagged): 401, login, retry = 3 requests.
-        creds.save("pw", "old")
+        creds.save("pw", "old", baseUrl())
         val settings = { Settings(serverUrl = baseUrl(), username = "u") }
         lateinit var client: OkHttpClient
         val interceptor = AuthInterceptor(creds, settings) { url, user, password ->
@@ -116,7 +118,7 @@ class AuthInterceptorTest {
 
     @Test
     fun secondFailureThrowsAuthException() {
-        creds.save("pw", "old")
+        creds.save("pw", "old", baseUrl())
         loginResult = { throw AuthException() }
         server.enqueue(ok(401))
         assertThrows(AuthException::class.java) { get(client()) }
@@ -125,7 +127,7 @@ class AuthInterceptorTest {
 
     @Test
     fun retryStill401ThrowsAuthException() {
-        creds.save("pw", "old")
+        creds.save("pw", "old", baseUrl())
         server.enqueue(ok(401))
         server.enqueue(ok(401))
         assertThrows(AuthException::class.java) { get(client()) }
@@ -135,7 +137,7 @@ class AuthInterceptorTest {
 
     @Test
     fun noPasswordThrowsAuthExceptionWithoutLogin() {
-        creds.save(null, "old")
+        creds.save(null, "old", baseUrl())
         server.enqueue(ok(401))
         assertThrows(AuthException::class.java) { get(client()) }
         assertEquals(0, loginCalls.get())
@@ -144,7 +146,7 @@ class AuthInterceptorTest {
 
     @Test
     fun noAuthTaggedRequestsSkipBearerAndRetry() {
-        creds.save("pw", "tok")
+        creds.save("pw", "tok", baseUrl())
         server.enqueue(ok(401))
         assertEquals(401, get(client(), "/api/status", tagged = true))
         assertEquals(0, loginCalls.get())
@@ -154,7 +156,7 @@ class AuthInterceptorTest {
 
     @Test
     fun concurrentRequestsShareOneRelogin() {
-        creds.save("pw", "old")
+        creds.save("pw", "old", baseUrl())
         val bothArrived = CountDownLatch(2)
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
@@ -186,7 +188,7 @@ class AuthInterceptorTest {
 
     @Test
     fun failedReloginIsNotRetriedByWaiters() {
-        creds.save("pw", "old")
+        creds.save("pw", "old", baseUrl())
         loginResult = { throw AuthException() }
         val arrived = CountDownLatch(3)
         server.dispatcher = object : Dispatcher() {
@@ -218,7 +220,7 @@ class AuthInterceptorTest {
 
     @Test
     fun newPasswordClearsFailureLatch() {
-        creds.save("pw", "old")
+        creds.save("pw", "old", baseUrl())
         loginResult = { throw AuthException() }
         server.enqueue(ok(401))
         val client = client()
@@ -226,17 +228,60 @@ class AuthInterceptorTest {
         assertEquals(1, loginCalls.get())
 
         loginResult = { "fresh" }
-        creds.save("pw", "old") // identical credentials: still latched
+        creds.save("pw", "old", baseUrl()) // identical credentials: still latched
         server.enqueue(ok(401))
         assertThrows(AuthException::class.java) { get(client) }
         assertEquals(1, loginCalls.get())
 
         expectedPassword = "pw2"
-        creds.save("pw2", "old")
+        creds.save("pw2", "old", baseUrl())
         server.enqueue(ok(401))
         server.enqueue(ok())
         assertEquals(200, get(client))
         assertEquals(2, loginCalls.get())
         assertEquals("fresh", creds.accessToken())
+    }
+    @Test
+    fun bearerNotSentToDifferentOrigin() {
+        creds.save("pw", "tok", "http://hermes.example:9119")
+        server.enqueue(ok())
+        assertEquals(200, get(client()))
+        assertNull(server.takeRequest(1, TimeUnit.SECONDS)!!.headers["Authorization"])
+    }
+
+    @Test
+    fun noReloginAgainstDifferentOrigin() {
+        creds.save("pw", "tok", "http://hermes.example:9119")
+        server.enqueue(ok(401))
+        assertEquals(401, get(client()))
+        assertEquals(0, loginCalls.get())
+        assertEquals("tok", creds.accessToken())
+    }
+
+    @Test
+    fun noReloginWhileConfiguredServerIsAnotherOrigin() {
+        creds.save("pw", "old", baseUrl())
+        configuredUrl = { "http://hermes.example:9119" } // settings already point elsewhere (mid-switch)
+        server.enqueue(ok(401))
+        assertEquals(401, get(client()))
+        assertEquals(0, loginCalls.get())
+    }
+
+    @Test
+    fun noBearerWhenNoOriginStored() {
+        creds.save("pw", "tok", null)
+        server.enqueue(ok())
+        get(client())
+        assertNull(server.takeRequest(1, TimeUnit.SECONDS)!!.headers["Authorization"])
+    }
+
+    @Test
+    fun cleartextReplayDeniedForUntrustedHost() {
+        creds.save("pw", "old", baseUrl())
+        cleartextAllowed = false
+        server.enqueue(ok(401))
+        val e = assertThrows(AuthException::class.java) { get(client()) }
+        assertEquals("Sign in again — automatic login is disabled over unencrypted http", e.message)
+        assertEquals(0, loginCalls.get())
     }
 }

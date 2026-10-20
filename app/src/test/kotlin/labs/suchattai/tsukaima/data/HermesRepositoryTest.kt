@@ -88,6 +88,7 @@ class HermesRepositoryTest {
         assertTrue(s.onboarded)
         assertEquals("pw", creds.password())
         assertEquals("tok1", creds.accessToken())
+        assertEquals("credentials bound to the signed-in origin", serverUrl(), creds.origin())
         assertFalse(connection.authRequired.value)
         assertTrue(withTimeout(5_000) { repo.isConfigured.first { it } })
 

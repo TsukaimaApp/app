@@ -39,7 +39,7 @@ private val Context.settingsDataStore: DataStore<Preferences> by preferencesData
  *
  * The auth cycle (the interceptor re-logs in through the API, the API's client carries the interceptor) is
  * broken with two clients: [plainClient] (no interceptor) serves login, and [httpClient] is derived from it
- * with the [AuthInterceptor] added. [loginApi] on the plain client does the re-login.
+ * with the [AuthInterceptor] added. [loginApi] on the plain client does the re-login and sign-in.
  */
 class AppContainer(context: Context) {
     private val appContext = context.applicationContext
@@ -51,16 +51,19 @@ class AppContainer(context: Context) {
 
     val settingsStore = SettingsStore(appContext.settingsDataStore)
 
-    /** Synchronous snapshot for the OkHttp stack, which cannot suspend. Starts as defaults until DataStore loads. */
-    val settings: StateFlow<Settings> = settingsStore.settings.stateIn(appScope, SharingStarted.Eagerly, Settings())
+    /**
+     * Synchronous snapshot for the OkHttp stack, which cannot suspend. Null until DataStore has loaded
+     * (readers that need a value use defaults meanwhile; ConnectionManager waits for it).
+     */
+    val settings: StateFlow<Settings?> = settingsStore.settings.stateIn(appScope, SharingStarted.Eagerly, null)
 
     val credentials: CredentialStore = LazyCredentialStore(
         create = { EncryptedCredentialStore(appContext) },
         onFallback = { Log.e(TAG, "Encrypted credential store unavailable; credentials will not persist", it) },
     )
 
-    private val baseUrl: () -> String = { settings.value.serverUrl }
-    private val settingsSnapshot: () -> Settings = { settings.value }
+    private val settingsSnapshot: () -> Settings = { settings.value ?: Settings() }
+    private val baseUrl: () -> String = { settingsSnapshot().serverUrl }
 
     /** No interceptor: password login and the WebSocket upgrade (which authenticates with its ticket). */
     private val plainClient: OkHttpClient = OkHttpClient.Builder()
@@ -68,13 +71,17 @@ class AppContainer(context: Context) {
         .pingInterval(0, TimeUnit.SECONDS)
         .build()
 
-    private val loginApi = HermesApi(plainClient, baseUrl, settingsSnapshot)
+    /** Login client bound to an explicit origin; never to the mutable settings URL. */
+    private fun loginApi(origin: String) = HermesApi(plainClient, { origin }, settingsSnapshot)
 
-    /** REST client: bearer token plus single-flight re-login on 401. */
+    /**
+     * REST client: bearer token plus single-flight re-login on 401. The interceptor passes the origin the
+     * credentials are bound to, and the re-login goes there (never to a URL that is mid-switch).
+     */
     val httpClient: OkHttpClient = plainClient.newBuilder()
         .addInterceptor(
-            AuthInterceptor(credentials, settingsSnapshot) { _, username, password ->
-                loginApi.loginBlocking(username, password)
+            AuthInterceptor(credentials, settingsSnapshot) { origin, username, password ->
+                loginApi(origin).loginBlocking(username, password)
             },
         )
         .build()
@@ -123,7 +130,7 @@ class AppContainer(context: Context) {
         settings = settingsStore,
         creds = credentials,
         connection = connection,
-        loginApi = { url -> HermesApi(plainClient, { url }, settingsSnapshot) },
+        loginApi = ::loginApi,
     )
 
     val toastState = ToastState()

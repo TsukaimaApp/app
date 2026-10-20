@@ -64,7 +64,7 @@ class HermesRepository(
     suspend fun signIn(url: String, username: String, password: String): Result<Unit> = attempt {
         val base = ServerUrl.normalize(url) ?: throw IllegalArgumentException("Invalid server URL: '$url'")
         val token = loginApi(base).login(username, password)
-        withContext(io) { creds.save(password, token) }
+        withContext(io) { creds.save(password, token, base) }
         credsVersion.value++
         settings.update { it.copy(serverUrl = base, username = username, onboarded = true) }
         connection.clearAuthRequired()
