@@ -112,6 +112,22 @@ class SettingsViewModelTest {
     private suspend fun SettingsViewModel.await(cond: (SettingsUiState) -> Boolean) =
         withTimeout(STORE_TIMEOUT_MS) { state.first(cond) }
 
+    /**
+     * Polls the store with a fresh read each time instead of one long-lived `data` collector: a collector
+     * opened from the test thread right after a ViewModel write has been seen to never get the new value on
+     * the GitHub runner. On timeout the message tells whether the write itself landed.
+     */
+    private suspend fun awaitStore(cond: (Settings) -> Boolean): Settings {
+        val deadline = System.currentTimeMillis() + STORE_TIMEOUT_MS
+        var last: Settings? = null
+        while (System.currentTimeMillis() < deadline) {
+            last = store.settings.first()
+            if (cond(last)) return last
+            kotlinx.coroutines.delay(25)
+        }
+        throw AssertionError("store never matched; last=$last")
+    }
+
     @Test
     fun signInNormalizesUrlAndPersists() = runBlocking<Unit> {
         routes["/auth/password-login"] = ::loginOk
@@ -169,7 +185,7 @@ class SettingsViewModelTest {
         val vm = vm()
         vm.await { it.username == "alice" } // the screen has its settings before the user can tap, see [seeded]
         vm.setProfile("research")
-        assertEquals("research", withTimeout(STORE_TIMEOUT_MS) { store.settings.first { it.profile == "research" } }.profile)
+        assertEquals("research", awaitStore { it.profile == "research" }.profile)
         assertEquals("research", vm.await { it.profile == "research" }.profile)
     }
 
@@ -318,7 +334,7 @@ class SettingsViewModelTest {
         val vm = vm()
         vm.await { it.model == "old" }
         vm.setModel("openrouter", "hermes-4-70b")
-        val s = withTimeout(STORE_TIMEOUT_MS) { store.settings.first { it.model == "hermes-4-70b" } }
+        val s = awaitStore { it.model == "hermes-4-70b" }
         assertEquals("openrouter", s.modelProvider)
         assertEquals("hermes-4-70b", vm.await { it.model == "hermes-4-70b" }.model)
     }
