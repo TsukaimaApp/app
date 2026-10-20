@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
@@ -48,12 +49,15 @@ class VoiceControllerTest {
         output: FakeSpeechOutput = FakeSpeechOutput(),
         history: List<ChatItem> = listOf(ChatItem.UserMessage("u0", "earlier")),
         sendResult: Boolean = true,
+        unconfined: Boolean = false,
     ): Rig {
         val chat = MutableStateFlow(ChatState(items = history))
         val sent = mutableListOf<String>()
         val approvals = intArrayOf(0)
         // Not backgroundScope: TestScope.advanceUntilIdle does not run background work, so the jobs get their own scope.
-        val scope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()).also { scopes += it }
+        // unconfined: collectors resume inline inside the chat update, as on the app's Main.immediate.
+        val dispatcher = if (unconfined) UnconfinedTestDispatcher(testScheduler) else StandardTestDispatcher(testScheduler)
+        val scope = CoroutineScope(dispatcher + SupervisorJob()).also { scopes += it }
         val c = VoiceController(input, output, scope, chat, { sent += it; sendResult }, mode, { approvals[0]++ }, { testScheduler.currentTime })
         c.start()
         advanceUntilIdle()
@@ -471,5 +475,35 @@ class VoiceControllerTest {
                 voicePhase(mode, false, listening, speaking, AgentStatus.Compacting),
             )
         }
+    }
+
+    @Test fun rebasedStopsARebuiltReplyTheCollectorAlreadyStartedSpeaking() = runTest {
+        val r = rig(unconfined = true)
+        say(r, "which kernel")
+        r.add(ChatItem.UserMessage("u-l1", "which kernel"))
+        r.add(reply("a1", "Version 6.17.", streaming = false), AgentStatus.Idle)
+        r.output.finishSpeaking()
+        advanceUntilIdle()
+        assertEquals(listOf("Version 6.17."), r.output.spoken)
+        assertTrue(r.input.active)
+        val before = r.chat.value.items
+        val stops = r.output.stopped
+
+        // The collector resumes inline inside the update: it sees the new ids and hands a sentence to TTS at once.
+        r.chat.update {
+            it.copy(items = listOf(ChatItem.UserMessage("h-1", "which kernel"), reply("h-2", "Version 6.17. Yes.", streaming = false)))
+        }
+        assertTrue("reproduces the ordering", r.output.speaking)
+        r.controller.rebased(before) // right after the update, as ChatReconnector.onRebuilt does
+        advanceUntilIdle()
+
+        assertTrue("the replayed sentence is cut off", r.output.stopped > stops)
+        assertFalse(r.output.speaking)
+        r.output.finishSpeaking()
+        advanceUntilIdle()
+        assertEquals("nothing more of the rebuilt reply", listOf("Version 6.17.", "Version 6.17."), r.output.spoken)
+        assertEquals("Version 6.17. Yes.".length, r.state.revealed["h-2"])
+        assertEquals(VoicePhase.Listening, r.state.phase)
+        assertTrue(r.input.active)
     }
 }

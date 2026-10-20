@@ -133,9 +133,11 @@ class VoiceController(
 
     /**
      * The chat's transcript was replaced (a reconnect rebuilt it from stored history, so every item has a new id);
-     * [itemsBeforeRebuild] is the transcript just before. Call it before the chat's collector runs again (the
-     * reconnector's `onRebuilt`, same thread). Every reply present now counts as heard: revealed in full, also while
-     * it keeps streaming, and never spoken. The voice transcript keeps as many trailing items as it showed before.
+     * [itemsBeforeRebuild] is the transcript just before. Call it right after the rebuild (the reconnector's
+     * `onRebuilt`, same thread). Every reply present now counts as heard: revealed in full, also while it keeps
+     * streaming, and never spoken. On an immediate dispatcher the chat's collector may already have seen the rebuilt
+     * items inside the update and handed one of their sentences to TTS: that is stopped, and its queued rest dropped.
+     * The voice transcript keeps as many trailing items as it showed before.
      */
     fun rebased(itemsBeforeRebuild: List<ChatItem>) {
         if (!started) return
@@ -144,6 +146,13 @@ class VoiceController(
         val replies = items.filterIsInstance<ChatItem.AssistantMessage>()
         val ids = replies.mapTo(HashSet()) { it.id }
         queue.removeAll { it.id in ids } // queued from the rebuilt transcript before this call: never spoken
+        if (current?.id in ids) {
+            output.stop()
+            speakJob?.cancel()
+            speakJob = null
+            current = null
+            drainQueue() // what is left belongs to replies from before the rebuild
+        }
         chunkers.keys.removeAll(ids)
         finished += ids
         silenced += ids
@@ -222,13 +231,19 @@ class VoiceController(
     private fun enqueue(u: Utterance) {
         if (u.text == null && current == null && queue.isEmpty()) return u.id?.let { reveal(it, u.end) } ?: Unit
         queue.addLast(u)
-        if (speakJob?.isActive == true) return
+        drainQueue()
+    }
+
+    /** Starts speaking the queue unless that already runs or there is nothing to say. */
+    private fun drainQueue() {
+        if (queue.isEmpty() || speakJob?.isActive == true) return
         val job = scope.launch(start = CoroutineStart.LAZY) { drain() }
         speakJob = job
         job.start()
     }
 
     private suspend fun drain() {
+        val self = currentCoroutineContext().job
         try {
             while (true) {
                 val u = queue.removeFirstOrNull() ?: break
@@ -238,9 +253,10 @@ class VoiceController(
                 u.then?.invoke()
             }
         } finally {
-            current = null
+            // A cancelled run may finish after a newer one started (stop, barge-in and rebase reset these themselves).
+            if (speakJob === self) current = null
         }
-        if (speakJob === currentCoroutineContext().job) speakJob = null
+        if (speakJob === self) speakJob = null
         refresh()
     }
 
