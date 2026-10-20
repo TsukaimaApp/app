@@ -21,8 +21,8 @@ android {
         applicationId = "labs.suchattai.tsukaima"
         minSdk = 29
         targetSdk = 36
-        versionCode = 15
-        versionName = "0.6.2"
+        versionCode = 16
+        versionName = "0.7.0"
     }
 
     signingConfigs {

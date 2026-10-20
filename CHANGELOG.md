@@ -3,6 +3,14 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.7.0 — 2026-10-20 (versionCode 16)
+
+### Added
+- Settings → Voice → Speech recognition: On this phone (default) or On Hermes — the phone records one utterance
+  (local end-of-speech detection), uploads it as WAV and Hermes transcribes it with its configured STT (Whisper);
+  the voice language picker then applies to phone recognition and speech only. The voice status line shows
+  “Transcribing…” while Hermes works on the utterance.
+
 ## 0.6.2 — 2026-10-20 (versionCode 15)
 
 ### Fixed
