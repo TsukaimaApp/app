@@ -21,9 +21,11 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import labs.suchattai.tsukaima.BuildConfig
 import labs.suchattai.tsukaima.data.ServerChanges
 import labs.suchattai.tsukaima.data.ticks
 import labs.suchattai.tsukaima.di.AppContainer
+import labs.suchattai.tsukaima.diagnostics.Diagnostics
 import labs.suchattai.tsukaima.ui.chat.ChatScreen
 import labs.suchattai.tsukaima.ui.chat.ChatViewModel
 import labs.suchattai.tsukaima.ui.chat.ContainerChatBackend
@@ -144,6 +146,7 @@ fun TsukaimaNavHost(
         }
         composable(Route.Settings.path) {
             val context = LocalContext.current
+            val appContext = context.applicationContext
             val vm: SettingsViewModel = viewModel(
                 factory = viewModelFactory {
                     initializer {
@@ -152,6 +155,13 @@ fun TsukaimaNavHost(
                             onSignedOut = container::signedOut,
                             toast = container.toastState::show,
                             voiceLanguages = { includeEngine -> container.voiceLanguages(includeEngine) },
+                            buildReport = {
+                                Diagnostics.buildReport(
+                                    appContext, container.settings.value, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE,
+                                )
+                            },
+                            lastCrash = { Diagnostics.lastCrash(appContext) },
+                            clearCrash = { Diagnostics.clearCrash(appContext) },
                         )
                     }
                 },

@@ -5,6 +5,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import labs.suchattai.tsukaima.di.AppContainer
+import labs.suchattai.tsukaima.diagnostics.Diagnostics
 import labs.suchattai.tsukaima.notifications.Channels
 
 class TsukaimaApp : Application() {
@@ -13,6 +14,7 @@ class TsukaimaApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        Diagnostics.install(this) // first: a crash anywhere below is recorded for the next launch
         container = AppContainer(this)
         Channels.register(this)
         container.notifications.start()

@@ -29,6 +29,7 @@ import labs.suchattai.tsukaima.data.prefs.SettingsStore
 import labs.suchattai.tsukaima.data.prefs.ThemeMode
 import labs.suchattai.tsukaima.data.prefs.VoiceRecognition
 import labs.suchattai.tsukaima.domain.voice.VoiceLanguage
+import labs.suchattai.tsukaima.diagnostics.CrashRecord
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -136,6 +137,48 @@ class SettingsViewModelTest {
             kotlinx.coroutines.delay(25)
         }
         throw AssertionError("store never matched; last=$last")
+    }
+
+    private val crash = CrashRecord(1L, "main", "0.8.0 (18)", "Android 15 (SDK 35)", "Google Pixel 8", "java.lang.IllegalStateException: x\n")
+
+    @Test
+    fun crashBannerShowsAndDismissForgetsTheCrash() = runBlocking<Unit> {
+        val cleared = java.util.concurrent.atomic.AtomicInteger()
+        val vm = SettingsViewModel(
+            repo, store, creds, connection, lastCrash = { crash }, clearCrash = { cleared.incrementAndGet() },
+        ).also { vms += it }
+        assertEquals(crash, vm.await { it.lastCrash != null }.lastCrash)
+        vm.dismissCrash()
+        assertNull(vm.state.value.lastCrash)
+        withTimeout(STORE_TIMEOUT_MS) { while (cleared.get() == 0) kotlinx.coroutines.delay(10) }
+    }
+
+    @Test
+    fun reportProblemEmitsTheReportAndAFailureToasts() = runBlocking<Unit> {
+        var fail = false
+        val cleared = java.util.concurrent.atomic.AtomicInteger()
+        val vm = SettingsViewModel(
+            repo, store, creds, connection,
+            toast = { toasts += it },
+            buildReport = { if (fail) throw IllegalStateException("x") else "REPORT" },
+            lastCrash = { crash },
+            clearCrash = { cleared.incrementAndGet() },
+        ).also { vms += it }
+        vm.await { it.lastCrash != null }
+
+        vm.reportProblem()
+        assertEquals("REPORT", withTimeout(STORE_TIMEOUT_MS) { vm.reports.first() })
+        vm.await { !it.reporting }
+        assertEquals(crash, vm.state.value.lastCrash) // the plain row keeps the banner
+
+        vm.reportProblem(fromCrash = true)
+        assertEquals("REPORT", withTimeout(STORE_TIMEOUT_MS) { vm.reports.first() })
+        vm.await { it.lastCrash == null && !it.reporting }
+
+        fail = true
+        vm.reportProblem()
+        vm.await { !it.reporting }
+        withTimeout(STORE_TIMEOUT_MS) { while ("Couldn’t build the report" !in toasts) kotlinx.coroutines.delay(10) }
     }
 
     @Test

@@ -22,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -46,6 +47,8 @@ import labs.suchattai.tsukaima.data.api.ToolsetDto
 import labs.suchattai.tsukaima.data.prefs.NotificationPrefs
 import labs.suchattai.tsukaima.data.prefs.ThemeMode
 import labs.suchattai.tsukaima.data.prefs.VoiceRecognition
+import labs.suchattai.tsukaima.diagnostics.CrashRecord
+import labs.suchattai.tsukaima.diagnostics.shareReport
 import labs.suchattai.tsukaima.domain.voice.VoiceLanguages
 import labs.suchattai.tsukaima.ui.chat.components.PairingCard
 import labs.suchattai.tsukaima.ui.components.ButtonSize
@@ -98,6 +101,12 @@ class SettingsActions(
     val onTheme: (ThemeMode) -> Unit = {},
     val onMaterialYou: (Boolean) -> Unit = {},
     val onSimulateOffline: (Boolean) -> Unit = {},
+    /** "Report a problem": build the report and share it. */
+    val onReportProblem: () -> Unit = {},
+    /** The crash banner's "Report": share a report, then forget the crash. */
+    val onReportCrash: () -> Unit = {},
+    /** The crash banner's "Dismiss". */
+    val onDismissCrash: () -> Unit = {},
     val onAskSignOut: (Boolean) -> Unit = {},
     val onSignOut: () -> Unit = {},
 )
@@ -120,6 +129,19 @@ fun SettingsScreen(
     }
     // ROLE_ASSISTANT cannot be requested through the role dialog: the system's own picker is the way.
     val onAssistant: () -> Unit = { openAssistantSettings(context, vm::assistantSettingsUnavailable) }
+    LaunchedEffect(vm, context) {
+        vm.reports.collect { report ->
+            try {
+                shareReport(context, report)
+            } catch (_: ActivityNotFoundException) {
+                vm.reportShareFailed()
+            } catch (_: IllegalArgumentException) { // FileProvider refused the path
+                vm.reportShareFailed()
+            } catch (_: java.io.IOException) {
+                vm.reportShareFailed()
+            }
+        }
+    }
     SettingsContent(
         state = state,
         actions = SettingsActions(
@@ -147,6 +169,9 @@ fun SettingsScreen(
             onTheme = vm::setTheme,
             onMaterialYou = vm::setMaterialYou,
             onSimulateOffline = vm::setSimulateOffline,
+            onReportProblem = { vm.reportProblem() },
+            onReportCrash = { vm.reportProblem(fromCrash = true) },
+            onDismissCrash = vm::dismissCrash,
             onAskSignOut = vm::askSignOut,
             onSignOut = vm::signOut,
         ),
@@ -408,6 +433,13 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                 }
             }
 
+            Section("Support") {
+                Column(Modifier.bleed(12.dp)) {
+                    state.lastCrash?.let { CrashBanner(it, actions) }
+                    ReportProblemRow(state.reporting, actions.onReportProblem)
+                }
+            }
+
             Section("Theme") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(ThemeMode.Warm to "Warm", ThemeMode.Dark to "Dark", ThemeMode.System to "System").forEach { (mode, label) ->
@@ -455,6 +487,47 @@ private fun SignOutDialog(state: SettingsUiState, actions: SettingsActions) {
         onDismiss = { actions.onAskSignOut(false) },
         danger = true,
     )
+}
+
+/** "Report a problem": shares a text report with logs and the last crash. */
+@Composable
+private fun ReportProblemRow(reporting: Boolean, onClick: () -> Unit) {
+    TsukaimaRow(
+        title = "Report a problem",
+        subtitle = if (reporting) "Collecting logs…" else "Share logs and the last crash",
+        leading = IconName.Help,
+        trailing = { Chevron() },
+        onClick = onClick.takeUnless { reporting },
+    )
+}
+
+/** Shown while a crash from an earlier run is recorded: share it ("Report") or forget it ("Dismiss"). */
+@Composable
+private fun CrashBanner(crash: CrashRecord, actions: SettingsActions) {
+    Column {
+        TsukaimaRow(
+            title = "The app crashed last time",
+            subtitle = crashSummary(crash),
+            leading = IconName.Warning,
+        )
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+        ) {
+            GhostButton("Dismiss", actions.onDismissCrash, size = ButtonSize.Sm)
+            SecondaryButton("Report", actions.onReportCrash, size = ButtonSize.Sm)
+        }
+    }
+}
+
+/** "IllegalStateException · version 0.8.0 (18)": the exception's class only, never its message. */
+internal fun crashSummary(crash: CrashRecord): String {
+    val exception = crash.stack.lineSequence().firstOrNull().orEmpty()
+        .substringBefore(':').trim().substringAfterLast('.')
+        .ifEmpty { "Unknown error" }
+    return if (crash.appVersion.isEmpty()) exception else "$exception · version ${crash.appVersion}"
 }
 
 @Composable
@@ -532,6 +605,7 @@ private fun previewState() = SettingsUiState(
     pendingPairing = listOf(PairingEntry("Telegram", "@mario", "req-1", "4F2-91K")),
     approvedPairing = listOf(PairingEntry("Telegram", "@mario", "", "1"), PairingEntry("Discord", "mario#0420", "", "2")),
     usage = "1.2M tokens · 318 sessions · \$4.50",
+    lastCrash = previewCrash,
 )
 
 @Preview(name = "Settings light", widthDp = 390, heightDp = 1900)
@@ -543,6 +617,34 @@ private fun SettingsLightPreview() = TsukaimaTheme(darkTheme = false) { Settings
 private fun SettingsDarkPreview() = TsukaimaTheme(darkTheme = true) {
     SettingsContent(previewState().copy(serverUrl = "http://new.example:9119", signInError = "Invalid username or password (401)"), SettingsActions())
 }
+
+private val previewCrash = CrashRecord(
+    at = 1_760_000_000_000L,
+    thread = "main",
+    appVersion = "0.8.0 (18)",
+    android = "Android 15 (SDK 35)",
+    device = "Google Pixel 8",
+    stack = "java.lang.IllegalStateException: preview\n\tat labs.suchattai.tsukaima.MainActivity.onCreate(MainActivity.kt:1)\n",
+)
+
+@Composable
+private fun SupportPreviewContent() = Column(
+    Modifier
+        .background(MaterialTheme.tsukaima.surfacePage)
+        .padding(8.dp),
+) {
+    CrashBanner(previewCrash, SettingsActions())
+    ReportProblemRow(reporting = false) {}
+    ReportProblemRow(reporting = true) {}
+}
+
+@Preview(name = "Support light", widthDp = 390)
+@Composable
+private fun SupportLightPreview() = TsukaimaTheme(darkTheme = false) { SupportPreviewContent() }
+
+@Preview(name = "Support dark", widthDp = 390)
+@Composable
+private fun SupportDarkPreview() = TsukaimaTheme(darkTheme = true) { SupportPreviewContent() }
 
 /** The speech recognition option for the phone's own recogniser. */
 private const val PHONE_RECOGNITION = "On this phone"

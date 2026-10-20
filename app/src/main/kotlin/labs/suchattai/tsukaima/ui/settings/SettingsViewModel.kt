@@ -36,6 +36,7 @@ import labs.suchattai.tsukaima.data.prefs.ServerUrl
 import labs.suchattai.tsukaima.data.prefs.SettingsStore
 import labs.suchattai.tsukaima.data.prefs.ThemeMode
 import labs.suchattai.tsukaima.data.prefs.VoiceRecognition
+import labs.suchattai.tsukaima.diagnostics.CrashRecord
 import labs.suchattai.tsukaima.domain.voice.VoiceLanguage
 import java.util.Locale
 
@@ -98,6 +99,10 @@ data class SettingsUiState(
     val voiceRecognition: VoiceRecognition = VoiceRecognition.Phone,
     /** The server's speech-to-text model (`/api/audio/voice-config`), once probed; null = unknown or none. */
     val sttModel: String? = null,
+    /** The crash recorded on an earlier run: Settings shows "The app crashed last time" while set. */
+    val lastCrash: CrashRecord? = null,
+    /** A problem report is being built (logcat runs for up to a few seconds). */
+    val reporting: Boolean = false,
 ) {
     /** The URL field was edited to a different server than the one signed in to, and not yet signed in again. */
     val urlChangedWithoutSignIn: Boolean
@@ -120,6 +125,12 @@ class SettingsViewModel(
      * languages (`false`, cheap) at start for the row's label, with them (`true`) when the sheet opens.
      */
     private val voiceLanguages: (includeEngine: Boolean) -> List<VoiceLanguage> = { emptyList() },
+    /** Builds the problem report (`Diagnostics.buildReport`); blocking, run on [io]. */
+    private val buildReport: () -> String = { "" },
+    /** The crash recorded on an earlier run (`Diagnostics.lastCrash`); blocking, run on [io]. */
+    private val lastCrash: () -> CrashRecord? = { null },
+    /** Forgets the recorded crash (`Diagnostics.clearCrash`); blocking, run on [io]. */
+    private val clearCrash: () -> Unit = {},
 ) : ViewModel() {
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
@@ -136,7 +147,16 @@ class SettingsViewModel(
     /** One event per [signOut]; the app routes to Onboarding. */
     val signedOut: Flow<Unit> = _signedOut.receiveAsFlow()
 
+    private val _reports = Channel<String>(Channel.BUFFERED)
+
+    /** One finished problem report per [reportProblem]; the screen opens the share sheet with it. */
+    val reports: Flow<String> = _reports.receiveAsFlow()
+
     init {
+        viewModelScope.launch {
+            val crash = withContext(io) { runCatching(lastCrash).getOrNull() }
+            _state.update { it.copy(lastCrash = crash) }
+        }
         viewModelScope.launch {
             val options = withContext(io) { voiceLanguages(false) }
             _state.update { if (it.voiceLanguages.isEmpty()) it.copy(voiceLanguages = options) else it } // the sheet's list wins
@@ -264,6 +284,7 @@ class SettingsViewModel(
                     serverUrl = it.serverUrl, username = it.username, storedUrl = it.storedUrl, profile = it.profile,
                     theme = it.theme, materialYou = it.materialYou, simulateOffline = it.simulateOffline,
                     notifications = it.notifications, voiceLanguage = it.voiceLanguage, voiceLanguages = it.voiceLanguages,
+                    lastCrash = it.lastCrash,
                 )
             }
             _signedOut.trySend(Unit)
@@ -469,6 +490,35 @@ class SettingsViewModel(
 
     /** No settings screen for the default assistant could be opened: say where it is. */
     fun assistantSettingsUnavailable() = toast("Open Settings → Default apps → Digital assistant app")
+
+    // ---- support -------------------------------------------------------------------------
+
+    /**
+     * "Report a problem": builds the report off the main thread and emits it on [reports]. With [fromCrash] (the
+     * crash banner's "Report") the recorded crash is forgotten once the report carries it. A tap while one is being
+     * built is ignored.
+     */
+    fun reportProblem(fromCrash: Boolean = false) {
+        if (_state.value.reporting) return
+        _state.update { it.copy(reporting = true) }
+        viewModelScope.launch {
+            val text = withContext(io) { runCatching(buildReport) }
+            text.onSuccess { report ->
+                _reports.send(report)
+                if (fromCrash) dismissCrash()
+            }.onFailure { toast("Couldn’t build the report") }
+            _state.update { it.copy(reporting = false) }
+        }
+    }
+
+    /** The crash banner's "Dismiss": hides it and forgets the recorded crash. */
+    fun dismissCrash() {
+        _state.update { it.copy(lastCrash = null) }
+        viewModelScope.launch { withContext(io) { runCatching(clearCrash) } }
+    }
+
+    /** The share sheet could not be opened for a finished report. */
+    fun reportShareFailed() = toast("Couldn’t open the share sheet")
 
     fun setSimulateOffline(on: Boolean) {
         connection.simulateOffline.value = on
