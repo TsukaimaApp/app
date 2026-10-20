@@ -306,13 +306,20 @@ class HermesApi(
             if (profile != DEFAULT_PROFILE) put("profile", profile)
         }
 
+    /**
+     * Behind HTTPS the dashboard prefixes its cookies (`__Host-hermes_session_at`, see Hermes
+     * `dashboard_auth/cookies.py`), so the name is matched with and without the RFC 6265bis prefixes.
+     */
     private fun parseSessionCookie(header: String): String? {
         val pair = header.substringBefore(';').trim()
-        return if (pair.startsWith("$SESSION_COOKIE=")) pair.substringAfter('=').takeIf { it.isNotEmpty() } else null
+        val name = pair.substringBefore('=')
+        if (!pair.contains('=') || COOKIE_PREFIXES.none { name == it + SESSION_COOKIE }) return null
+        return pair.substringAfter('=').takeIf { it.isNotEmpty() }
     }
 
     private companion object {
         const val SESSION_COOKIE = "hermes_session_at"
+        val COOKIE_PREFIXES = listOf("", "__Host-", "__Secure-")
         const val DEFAULT_PROFILE = "default"
         /** `le=100` on the server's `limit` query. */
         const val MAX_SESSIONS = 100

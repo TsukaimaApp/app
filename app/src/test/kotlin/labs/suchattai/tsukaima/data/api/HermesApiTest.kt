@@ -60,6 +60,34 @@ class HermesApiTest {
     }
 
     @Test
+    fun loginAcceptsHostPrefixedCookieBehindHttps() = runBlocking {
+        // Tailscale Serve / any TLS front: the dashboard names its cookies `__Host-…; Secure`.
+        server.enqueue(
+            MockResponse.Builder()
+                .code(200)
+                .addHeader("Set-Cookie", "__Host-hermes_session_rt=zzz; Path=/; Secure; HttpOnly")
+                .addHeader("Set-Cookie", "__Host-hermes_session_at=abc; Path=/; Secure; HttpOnly")
+                .addHeader("Set-Cookie", "__Host-hermes_session_provider=basic; Path=/; Secure")
+                .body("""{"ok":true,"next":"/"}""")
+                .build(),
+        )
+        assertEquals("abc", api().login("u", "p"))
+    }
+
+    @Test
+    fun loginRejectsLookalikeCookieNames() {
+        server.enqueue(
+            MockResponse.Builder()
+                .code(200)
+                .addHeader("Set-Cookie", "xhermes_session_at=abc; Path=/")
+                .addHeader("Set-Cookie", "hermes_session_at_old=abc; Path=/")
+                .body("""{"ok":true,"next":"/"}""")
+                .build(),
+        )
+        assertThrows(ApiException::class.java) { runBlocking { api().login("u", "p") } }
+    }
+
+    @Test
     fun loginBadCredentialsThrowsAuthException() {
         server.enqueue(MockResponse.Builder().code(401).body("""{"detail":"bad"}""").build())
         assertThrows(AuthException::class.java) { runBlocking { api().login("u", "p") } }
