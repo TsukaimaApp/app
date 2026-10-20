@@ -21,7 +21,10 @@ auth provider. The full JSON-RPC contract is `gateway-contract.openrpc.json` nex
 - The `hermes_session_at` cookie value is a bearer token: send `Authorization: Bearer <token>` on
   every gated request **and** it is accepted on every route (RFC 8252 native path in
   `dashboard_auth/middleware.py`). Basic provider tokens are HMAC-signed, TTL **12 h**
-  (`HERMES_DASHBOARD_BASIC_AUTH_TTL_SECONDS`). On `401` the app re-runs the password login.
+  (`HERMES_DASHBOARD_BASIC_AUTH_TTL_SECONDS`). On `401` the app re-runs the password login (single-flight) —
+  but only over `https://` or to a trusted `http://` host (loopback, RFC 1918, Tailscale 100.64/10, `*.ts.net`,
+  single-label names; `TrustedHost`). Any other `http://` host gets an auth error and a manual sign-in instead, so
+  the stored password is never replayed in clear text to an untrusted network.
 - `GET /api/auth/me` → `{"user_id":"tsukaima","provider":"basic","expires_at":<unix>}` (verifies a token).
 - `POST /api/auth/ws-ticket` (bearer) → `{"ticket":"<43 chars>","ttl_seconds":30}` — single use.
 
@@ -48,24 +51,31 @@ Heartbeat: send `gateway.ping` every **15 s**; treat **45 s** with no inbound fr
 
 ### Methods the app uses (params → result; `*` = required)
 
+Every params object also accepts `profile` (the Hermes profile to act in); the app adds it to every RPC while a
+profile other than `default` is active.
+
 | Method | Params | Result |
 |---|---|---|
 | `client.capabilities` | `server_requests:bool` | `server_requests:[…]` |
 | `gateway.ping` | – | `{}` |
 | `session.create` | `source`, `cwd`, `model`, `provider`, `close_on_disconnect:bool` | `session_id*` (live id, 8 hex), `stored_session_id*` (`YYYYMMDD_HHMMSS_xxxxxx`), `messages*`, `info*` |
-| `session.resume` | `session_id*` (stored id), `source`, `lazy`, `defer_history` | same + `resumed`, `running`, `pending_approval`, `open_requests` |
+| `session.resume` | `session_id*` (stored id), `source`, `lazy`, `defer_history` | same + `resumed`, `running`, `status`, `pending_approval`, `open_requests`, `inflight` (see below) |
 | `session.history` | `session_id*` | `count*`, `messages*` (TranscriptMessage[]) |
 | `session.list` | `limit`, `include_hidden` | `sessions*` (`id`, `title`, `preview`, `started_at`, `message_count`, `source`) |
 | `session.most_recent` | – | `session_id` (nullable) |
 | `prompt.submit` | `session_id*`, `text*` | `status` (`"streaming"`), `user_row_id` |
-| `session.interrupt` | `session_id*` | `status` (`interrupted`/`not_interrupted`) |
+| `session.interrupt` | `session_id*` | `status` (`interrupted`/`not_interrupted`); the turn then ends with `message.complete {text:"", status:"interrupted"}`. Verified: an idle session also answers `interrupted`; `not_interrupted` is only a hosted-task mismatch. |
 | `session.cwd.set` | `session_id*`, `cwd*` | session info |
 | `session.title` | `session_id*`, `title` | – |
 | `session.archive` | `session_id`, `archived:bool` | `archived*` |
 | `session.delete` | `session_id*` | `deleted*` |
 | `session.close` | `session_id*` | `closed*` |
 | `model.options` | `session_id` | `providers*` (`slug`, `name`, `models[]`, `is_current`, `authenticated`), `model`, `provider` |
-| `session.events.since` | `session_id*`, `last_seen` | `events*`, `latest_seq*`, `truncated*`, `open_requests*` |
+| `session.events.since` | `session_id*`, `last_seen` | `events*`, `latest_seq*`, `truncated*`, `open_requests*` (events with `seq > last_seen`; the app starts its watermark at -1, seq numbering starts at 1) |
+| `file.attach` | `session_id*`, `data_url*`, `name` | `ref_text` (`@file:…`, goes into the prompt), `path`, `attached` |
+| `image.attach_bytes` | `session_id*`, `content_base64*`, `filename` | `attached`, `path`, `name`, `width`, `height` (queued for the next turn) |
+| `image.detach` | `session_id*`, `path*` | – |
+| `approval.respond` | `session_id*`, `choice`, `request_id` | – (RPC fallback for a resume's `pending_approval`, which has no `srq-…` id) |
 
 Note: the REST `/api/sessions` list and `session.list` return the **stored** id. Live sessions have a
 separate short `session_id`; events carry the **live** id. Keep both.
@@ -80,17 +90,38 @@ Observed in a real turn, in order:
 `session.usage {usage}` → `message.delta {text}` (visible reply chunks) → `reasoning.available {text}` →
 `message.complete {text, usage}` → `session.info` → `sessions.changed {}` (global, `session_id:""`).
 
-Also: `turn.error {message,…}`, `message.interim {text, already_streamed}`, `approval.cancelled`,
+Also: `turn.error {message,…}`, `message.interim {text, already_streamed}` (commentary beside tool calls; when
+`already_streamed` is false the text never came as `message.delta`, so the app shows it as its own completed
+reply; when true it is ignored), `approval.cancelled`,
 `request.cancel {id, method, reason}`, `platforms.changed {}`, `gateway.ready {heartbeat:true}` (server-side pong).
 
 `message.delta`, `reasoning.delta`, `thinking.delta` are coalesced server-side (~30 fps).
 
 ### Server → client requests
 
-- `approval` params: `session_id`, `request_id`, `command`, `choices`, `tool_name`, … (extra keys allowed).
+- `approval` params: `session_id`, `request_id`, `command`, `choices`, `allow_session`, `allow_permanent`,
+  `smart_denied`, `tool_name`, … (extra keys allowed). The server always fills `choices` (`once`, then `session`
+  unless smart-denied or `allow_session` is false, then `always` unless `allow_permanent` is false, then `deny`).
   Reply result: `{"choice":"once"|"session"|"always"|"deny","all":bool?}`.
-  The REST fallback `approval.respond {session_id*, choice, request_id}` exists for stale sids.
-- `clarify` params: `session_id`, `questions[]` (`ClarifyQuestion`). Reply `{"answers":{id:text}}` or `{"answers":null}`.
+  The RPC (not REST) `approval.respond {session_id*, choice, request_id}` answers one by `request_id` (stale sids,
+  a resume's `pending_approval`).
+- `clarify` params: `session_id`, `questions[]` (`ClarifyQuestion`). Reply `{"answers":{qid: text|null}}`
+  (`null` = that question skipped), or `{}` (no `answers` key) to cancel all. `{"answers": null}` is **not** a
+  cancel: the server records it as submitted-empty.
+- Masked one-string prompts — reply `{"value": "<string>"}` (`ValueResult`), where `""` means skipped / declined:
+  - `sudo {command}` — the terminal tool's sudo password (`command` redacted server-side; 120 s). Only asked when
+    no `SUDO_PASSWORD` is configured, none is cached, and `sudo -n true` fails on the backend (NOPASSWD sudoers
+    never prompt — the test instance's user has passwordless sudo, so no live `sudo` request was observed).
+  - `secret {env_var, prompt, metadata?}` — a value for a named env var (skills / setup flows); a non-empty value
+    is saved to the profile's `.env`.
+  - `vault.unlock_prompt {backend, display_name}` — master password for an external password manager.
+  - `vault.save_login` / `vault.code` exist too; the app answers them "method not found".
+- `session.resume` while a turn runs (`running: true`, `status: "working"`) returns `messages` up to the running
+  turn's user row only; the partial reply is `inflight {assistant, streaming, user, …}`, where `assistant` is every
+  `message.delta` of the turn so far (`tui_gateway/session_history.py` `_append_inflight_delta`). Verified live
+  2026-10-20: dropped the socket mid-reply, resumed within the grace window (same live id): `inflight.assistant`
+  held 1396 chars of the partial reply while `messages` held only the user row; `session.events.since(0)` was
+  `truncated` (the 512-event ring was mostly `reasoning.delta`s) and carried only part of the deltas.
 
 TranscriptMessage (history): `role` (`user`|`assistant`|`tool`), `text`, `reasoning`, `name`, `context`,
 `args`, `tool_call_id`, `timestamp`, `row_id`, `display_kind`.
@@ -104,7 +135,7 @@ All need the bearer header unless marked public. Management endpoints accept `?p
 | `GET /api/status` | public. Keys: `version`, `gateway_running`, `gateway_state` (`running`/`stopped`/null), `gateway_platforms{}`, `active_sessions`, `active_agents`, `profiles[]`, `memory{}`, `disk{total_mb,free_mb,used_percent}`, `overall`, `auth_required`, `auth_providers[]`. |
 | `GET /api/system/stats` | `hostname`, `os`, `hermes_version`, `cpu_count`, `memory{total,available,…}`, … |
 | `POST /api/gateway/start` / `stop` / `restart` | `{"ok":true,"pid":…,"name":"gateway-start"}`; state flips within ~5 s. |
-| `GET /api/sessions?limit=N` | `{"sessions":[{id,title,preview,source,started_at,ended_at,message_count,model,archived,profile,…}]}` |
+| `GET /api/sessions?limit=N&archived=…&exclude_sources=…` | `{"sessions":[{id,title,preview,source,started_at,ended_at,message_count,model,archived,profile,…}]}`. `limit` must be `0..100` (422 otherwise; the app clamps). `archived` = `exclude` (default) / `only` / `include`; `exclude_sources` is a comma list (the drawer sends `archived=include&exclude_sources=cron`). |
 | `GET /api/sessions/search?q=` | FTS search. |
 | `PATCH /api/sessions/{id}` | `{"title":"…"}` → `{"ok":true,"title":"…"}` (also `{"archived":true}`). |
 | `DELETE /api/sessions/{id}` | |
