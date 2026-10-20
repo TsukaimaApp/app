@@ -44,6 +44,9 @@ import labs.suchattai.tsukaima.ui.cron.CronEditScreen
 import labs.suchattai.tsukaima.ui.cron.CronScreen
 import labs.suchattai.tsukaima.ui.cron.CronViewModel
 import labs.suchattai.tsukaima.ui.cron.HermesCronSource
+import labs.suchattai.tsukaima.ui.logs.HermesLogsSource
+import labs.suchattai.tsukaima.ui.logs.LogsScreen
+import labs.suchattai.tsukaima.ui.logs.LogsViewModel
 import labs.suchattai.tsukaima.ui.onboarding.OnboardingScreen
 import labs.suchattai.tsukaima.ui.settings.SettingsScreen
 import labs.suchattai.tsukaima.ui.settings.SettingsViewModel
@@ -178,7 +181,12 @@ fun TsukaimaNavHost(
                 },
             )
         }
-        composable(Route.Logs.path) { PlaceholderScreen("Logs", onBack = back) }
+        composable(Route.Logs.path) {
+            val vm: LogsViewModel = viewModel(
+                factory = viewModelFactory { initializer { LogsViewModel(HermesLogsSource(container.repository)) } },
+            )
+            LogsScreen(vm = vm, onBack = back)
+        }
     }
 }
 
