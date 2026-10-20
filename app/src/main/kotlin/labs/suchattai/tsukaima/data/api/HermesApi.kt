@@ -8,6 +8,7 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -55,7 +56,7 @@ class HermesApi(
     suspend fun me(): AuthMeDto = get("api/auth/me", AuthMeDto.serializer(), managed = false)
 
     suspend fun wsTicket(): String =
-        send("POST", "api/auth/ws-ticket", JsonObject.serializer(), managed = false)["ticket"]!!.jsonPrimitive.content
+        send("POST", "api/auth/ws-ticket", JsonObject.serializer(), managed = false).requireString("ticket", "ws-ticket")
 
     /** Blocking password login (used by the auth interceptor on the OkHttp thread). Returns the session token. */
     fun loginBlocking(username: String, password: String): String {
@@ -202,7 +203,7 @@ class HermesApi(
     suspend fun profiles(): ProfilesDto = get("api/profiles", ProfilesDto.serializer(), managed = false)
 
     suspend fun activeProfile(): String =
-        get("api/profiles/active", JsonObject.serializer(), managed = false)["active"]!!.jsonPrimitive.content
+        get("api/profiles/active", JsonObject.serializer(), managed = false).requireString("active", "profiles/active")
 
     // ---- logs / usage / gateway ----------------------------------------------------------
 
@@ -378,6 +379,14 @@ class HermesApi(
             val profile = settings().profile
             if (profile != DEFAULT_PROFILE) put("profile", profile)
         }
+
+    /**
+     * The string at [key] of a 2xx reply; a missing, null or non-string value is an [ApiException] (code 200,
+     * "[what]: [key] missing in response"), never an NPE.
+     */
+    private fun JsonObject.requireString(key: String, what: String): String =
+        (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
+            ?: throw ApiException(200, "$what: $key missing in response")
 
     /**
      * Behind HTTPS the dashboard prefixes its cookies (`__Host-hermes_session_at`, see Hermes

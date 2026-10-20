@@ -406,4 +406,19 @@ class HermesApiTest {
 
     private fun MockWebServer.takeRequests(): List<String> =
         generateSequence { takeRequest(100, TimeUnit.MILLISECONDS) }.map { it.target }.toList()
+
+    @Test
+    fun malformedTicketAndActiveProfileAreApiExceptions() = runBlocking<Unit> {
+        val api = api()
+        for (body in listOf("""{"ttl_seconds":30}""", """{"ticket":null}""", """{"ticket":{"x":1}}""")) {
+            json(body)
+            val e = runCatching { api.wsTicket() }.exceptionOrNull()
+            assertTrue("$body -> $e", e is ApiException)
+            assertEquals("ws-ticket: ticket missing in response", e!!.message)
+        }
+        json("""{}""")
+        val e = runCatching { api.activeProfile() }.exceptionOrNull()
+        assertTrue("$e", e is ApiException)
+        assertEquals("profiles/active: active missing in response", e!!.message)
+    }
 }
