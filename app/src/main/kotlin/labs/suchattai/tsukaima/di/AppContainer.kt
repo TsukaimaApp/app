@@ -48,7 +48,11 @@ import labs.suchattai.tsukaima.notifications.BackgroundPolicy
 import labs.suchattai.tsukaima.notifications.GatewayService
 import labs.suchattai.tsukaima.notifications.NotificationHub
 import labs.suchattai.tsukaima.notifications.OpenScreen
+import labs.suchattai.tsukaima.domain.voice.SpeechInput
+import labs.suchattai.tsukaima.domain.voice.SpeechOutput
 import labs.suchattai.tsukaima.ui.components.ToastState
+import labs.suchattai.tsukaima.voice.AndroidSpeechInput
+import labs.suchattai.tsukaima.voice.AndroidSpeechOutput
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -165,6 +169,12 @@ class AppContainer(context: Context) {
 
     /** Delivered (`MEDIA:`) files land in the public Downloads collection. */
     val fileSaver: FileSaver = MediaStoreFileSaver(appContext.contentResolver)
+
+    /** A fresh recogniser adapter; each listening run owns its own platform recogniser. */
+    fun speechInput(): SpeechInput = AndroidSpeechInput(appContext)
+
+    /** One TTS engine per process, created on first use. */
+    val speechOutput: SpeechOutput by lazy { AndroidSpeechOutput(appContext) }
 
     fun openFile(uri: String, mime: String): Boolean = viewFile(appContext, uri, mime)
 
