@@ -20,6 +20,12 @@ class CronHumanTest {
         assertEquals("0 25 * * *", CronHuman.describe("0 25 * * *"))
     }
 
+    @Test
+    fun cronOnlySubtitleWhenDescribeIsRaw() {
+        assertEquals("every 60m", CronHuman.subtitle("every 60m"))
+        assertEquals("Every day at 09:00 · 0 9 * * *", CronHuman.subtitle("0 9 * * *"))
+    }
+
     // now = 2026-10-20 07:00 at +02:00
     private val now = Instant.parse("2026-10-20T05:00:00Z")
 

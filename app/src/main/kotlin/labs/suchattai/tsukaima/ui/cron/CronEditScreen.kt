@@ -1,6 +1,7 @@
 package labs.suchattai.tsukaima.ui.cron
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -28,6 +29,7 @@ import labs.suchattai.tsukaima.ui.components.IconButton44
 import labs.suchattai.tsukaima.ui.components.IconName
 import labs.suchattai.tsukaima.ui.components.PrimaryButton
 import labs.suchattai.tsukaima.ui.components.TsukaimaTextField
+import labs.suchattai.tsukaima.ui.theme.TsukaimaShapes
 import labs.suchattai.tsukaima.ui.theme.TsukaimaTheme
 import labs.suchattai.tsukaima.ui.theme.TsukaimaType
 import labs.suchattai.tsukaima.ui.theme.tsukaima
@@ -98,13 +100,30 @@ internal fun CronEditContent(
                 singleLine = false,
                 minLines = 5,
             )
-            TsukaimaTextField(
-                d.schedule, onSchedule,
-                label = "Schedule",
-                mono = true,
-                helper = "Cron expression, server time. Example: 0 9 * * 1-5",
-                error = state.scheduleError,
-            )
+            if (state.scheduleEditable) {
+                TsukaimaTextField(
+                    d.schedule, onSchedule,
+                    label = "Schedule",
+                    mono = true,
+                    helper = "Cron expression, server time. Example: 0 9 * * 1-5",
+                    error = state.scheduleError,
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("SCHEDULE", style = TsukaimaType.label, color = colors.ink3)
+                    Text(
+                        d.schedule,
+                        style = TsukaimaType.mono,
+                        color = colors.ink2,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(colors.surfaceSunken, TsukaimaShapes.input)
+                            .border(1.dp, colors.hairline, TsukaimaShapes.input)
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                    )
+                    Text("Interval schedule — change it in the dashboard", style = TsukaimaType.caption, color = colors.ink3)
+                }
+            }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("DELIVER TO", style = TsukaimaType.label, color = colors.ink3)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

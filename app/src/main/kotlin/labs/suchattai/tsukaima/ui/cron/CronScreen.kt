@@ -95,7 +95,7 @@ internal fun CronContent(
                 val paused = job.isPaused
                 TsukaimaRow(
                     title = job.title,
-                    subtitle = job.expr.let { "${CronHuman.describe(it)} · $it" },
+                    subtitle = CronHuman.subtitle(job.expr),
                     leading = if (paused) IconName.PauseCircle else IconName.Schedule,
                     trailing = {
                         val meta = if (paused) "paused" else CronHuman.nextRunLabel(job.nextRunAt, now)

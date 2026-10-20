@@ -50,13 +50,13 @@ fun TsukaimaTextField(
     label: String? = null,
     placeholder: String? = null,
     helper: String? = null,
-    error: String? = null,
     mono: Boolean = false,
     singleLine: Boolean = true,
     minLines: Int = 1,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     visualTransformation: VisualTransformation = VisualTransformation.None,
     modifier: Modifier = Modifier,
+    error: String? = null,
 ) {
     val colors = MaterialTheme.tsukaima
     val source = remember { MutableInteractionSource() }

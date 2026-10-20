@@ -44,6 +44,12 @@ object CronHuman {
         }
     }
 
+    /** List subtitle: "<human> · <expr>", or just [expr] when it has no plain-English form (no duplicate). */
+    fun subtitle(expr: String): String {
+        val human = describe(expr)
+        return if (human == expr) expr else "$human · $expr"
+    }
+
     /**
      * Relative label for an ISO-8601 timestamp with offset: "in 12m", "in 2h", "tomorrow 09:00", "in 3d",
      * "due" for the past, "" when [iso] is null or unparseable. Paused jobs are labelled "paused" by the caller.

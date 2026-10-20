@@ -69,9 +69,15 @@ data class CronUiState(
     val isNew: Boolean = false,
     val editorOpen: Boolean = false,
     val draft: CronDraft = CronDraft(),
+    /** The draft as loaded, to send only what changed. */
+    val baseline: CronDraft = CronDraft(),
     val saving: Boolean = false,
 ) {
-    val scheduleError: String? get() = if (draft.schedule.trim().split(Regex("\\s+")).size == 5) null else SCHEDULE_ERROR
+    /** Interval and once jobs carry a display string, not a cron expression; the dashboard edits those. */
+    val scheduleEditable: Boolean get() = editing == null || editing.schedule?.kind.let { it == null || it == "cron" }
+
+    val scheduleError: String?
+        get() = if (!scheduleEditable || draft.schedule.trim().split(Regex("\\s+")).size == 5) null else SCHEDULE_ERROR
 
     val canSave: Boolean
         get() = draft.name.isNotBlank() && draft.prompt.isNotBlank() && scheduleError == null && !saving
@@ -143,23 +149,18 @@ class CronViewModel(
 
     /** Opens the editor on [job], or on a blank draft when null. */
     fun startEdit(job: CronJobDto?) {
-        _state.update {
-            it.copy(
-                editorOpen = true,
-                editing = job,
-                isNew = job == null,
-                saving = false,
-                draft = if (job == null) {
-                    CronDraft()
-                } else {
-                    CronDraft(
-                        name = job.name.orEmpty(),
-                        prompt = job.prompt.orEmpty(),
-                        schedule = job.expr,
-                        deliver = (job.deliver as? JsonPrimitive)?.contentOrNull ?: LOCAL_TARGET,
-                    )
-                },
+        val draft = if (job == null) {
+            CronDraft()
+        } else {
+            CronDraft(
+                name = job.name.orEmpty(),
+                prompt = job.prompt.orEmpty(),
+                schedule = job.expr,
+                deliver = (job.deliver as? JsonPrimitive)?.contentOrNull ?: LOCAL_TARGET,
             )
+        }
+        _state.update {
+            it.copy(editorOpen = true, editing = job, isNew = job == null, saving = false, draft = draft, baseline = draft)
         }
     }
 
@@ -190,17 +191,14 @@ class CronViewModel(
             val result = if (editing == null) {
                 source.create(d.name, d.schedule, d.prompt, d.deliver).map { }
             } else {
-                source.update(
-                    editing.id,
-                    JsonObject(
-                        mapOf(
-                            "name" to JsonPrimitive(d.name),
-                            "schedule" to JsonPrimitive(d.schedule),
-                            "prompt" to JsonPrimitive(d.prompt),
-                            "deliver" to JsonPrimitive(d.deliver),
-                        ),
-                    ),
-                )
+                val base = s.baseline
+                val changed = buildMap<String, JsonPrimitive> {
+                    if (d.name != base.name) put("name", JsonPrimitive(d.name))
+                    if (d.prompt != base.prompt) put("prompt", JsonPrimitive(d.prompt))
+                    if (s.scheduleEditable && d.schedule != base.schedule) put("schedule", JsonPrimitive(d.schedule))
+                    if (d.deliver != base.deliver) put("deliver", JsonPrimitive(d.deliver))
+                }
+                if (changed.isEmpty()) Result.success(Unit) else source.update(editing.id, JsonObject(changed))
             }
             result
                 .onSuccess {

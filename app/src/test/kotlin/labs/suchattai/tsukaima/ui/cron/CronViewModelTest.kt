@@ -3,7 +3,9 @@ package labs.suchattai.tsukaima.ui.cron
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -64,7 +66,7 @@ class CronViewModelTest {
 
     @After
     fun tearDown() {
-        created.forEach { it.viewModelScope.cancel() }
+        runBlocking { created.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() } }
         Dispatchers.resetMain()
     }
 
@@ -127,11 +129,37 @@ class CronViewModelTest {
         advanceUntilIdle()
         assertTrue(src.calls.contains("update a"))
         val u = src.updates!!
-        assertEquals(setOf("name", "schedule", "prompt", "deliver"), u.keys)
+        assertEquals(setOf("name", "schedule"), u.keys)
         assertEquals(JsonPrimitive("Renamed"), u["name"])
         assertEquals(JsonPrimitive("*/5 * * * *"), u["schedule"])
-        assertEquals(JsonPrimitive("do a"), u["prompt"])
-        assertEquals(JsonPrimitive("local"), u["deliver"])
+        assertFalse(vm.state.value.editorOpen)
+    }
+
+    @Test
+    fun intervalJobEditableWithoutTouchingSchedule() = runTest {
+        val interval = job("i").copy(schedule = CronScheduleDto(kind = "interval", expr = null, display = "every 60m"), deliver = null)
+        val src = FakeSource().apply { jobs = listOf(interval) }
+        val vm = vm(src)
+        advanceUntilIdle()
+        vm.startEdit(interval)
+        assertFalse(vm.state.value.scheduleEditable)
+        assertNull(vm.state.value.scheduleError)
+        assertTrue(vm.state.value.canSave)
+        vm.updateDraft(name = "Renamed")
+        vm.save()
+        advanceUntilIdle()
+        assertEquals(JsonObject(mapOf("name" to JsonPrimitive("Renamed"))), src.updates)
+    }
+
+    @Test
+    fun unchangedSaveSendsNothing() = runTest {
+        val src = FakeSource().apply { jobs = listOf(job("a")) }
+        val vm = vm(src)
+        advanceUntilIdle()
+        vm.startEdit(src.jobs[0])
+        vm.save()
+        advanceUntilIdle()
+        assertTrue(src.calls.none { it.startsWith("update") })
         assertFalse(vm.state.value.editorOpen)
     }
 
