@@ -74,7 +74,8 @@ class StatusViewModelTest {
         override suspend fun pairing() = Result.success(pairing)
         override suspend fun approvePairing(platform: String, requestId: String) = Result.success(Unit).also { actions += "approve $platform $requestId" }
         override suspend fun revokePairing(platform: String, userId: String) = Result.success(Unit).also { actions += "revoke $platform $userId" }
-        override suspend fun gatewayStart() = Result.success(Unit).also { actions += "start" }
+        var actionResult: Result<Unit> = Result.success(Unit)
+        override suspend fun gatewayStart() = actionResult.also { actions += "start" }
         override suspend fun gatewayStop() = Result.success(Unit).also { actions += "stop" }
         override suspend fun gatewayRestart() = Result.success(Unit).also { actions += "restart" }
     }
@@ -89,8 +90,10 @@ class StatusViewModelTest {
         Dispatchers.resetMain()
     }
 
+    private val toasts = mutableListOf<String>()
+
     private fun vm(src: StatusSource, now: Long = 0L) =
-        StatusViewModel(src, clock = { now }, pollMs = 1_000).also { created += it }
+        StatusViewModel(src, clock = { now }, pollMs = 1_000, toast = { toasts += it }).also { created += it }
 
     @Test
     fun factsShowDangerWhenStopped() = runTest {
@@ -112,6 +115,23 @@ class StatusViewModelTest {
         assertEquals("3 active sessions", facts[3].title)
         assertEquals("Memory 1.2 / 8.0 GB", facts[4].title)
         assertEquals("Disk 10% used", facts[4].subtitle)
+    }
+
+    @Test
+    fun gatewayActionFailureToastsDetail() = runTest {
+        val src = FakeSource(HermesState(status = stopped(), lastSeenAt = 0L)).apply {
+            actionResult = Result.failure(
+                labs.suchattai.tsukaima.data.api.ApiException.fromResponse(409, """{"detail":"Gateway is already starting"}"""),
+            )
+        }
+        val vm = vm(src)
+        advanceUntilIdle()
+        val polls = src.statusCalls
+        vm.startGateway()
+        advanceUntilIdle()
+        assertEquals(listOf("Couldn’t start the gateway: Gateway is already starting"), toasts)
+        assertEquals("no polling after a refused action", polls, src.statusCalls)
+        assertFalse(vm.state.value.busy)
     }
 
     @Test

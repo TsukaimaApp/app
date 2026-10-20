@@ -48,6 +48,19 @@ class LogsViewModelTest {
     private fun vm(src: LogsSource) = LogsViewModel(src).also { created += it }
 
     @Test
+    fun logsErrorShowsDetail() = runTest {
+        val src = FakeSource().apply { result = Result.failure(ApiException.fromResponse(400, """{"detail":"Unknown log file: 'x'"}""")) }
+        val vm = vm(src)
+        advanceUntilIdle()
+        assertEquals("Couldn't load logs: Unknown log file: 'x'", vm.state.value.error)
+
+        src.result = Result.failure(ApiException.fromResponse(502, "Bad Gateway"))
+        vm.setLevel(LEVEL_WARN)
+        advanceUntilIdle()
+        assertEquals("Couldn't load logs: HTTP 502: Bad Gateway", vm.state.value.error)
+    }
+
+    @Test
     fun switchingFileRefetches() = runTest {
         val src = FakeSource()
         val vm = vm(src)

@@ -164,6 +164,34 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun profileWriteSurvivesCancelledLoad() = runBlocking<Unit> {
+        // Main does not run until advanced, so the reload that a sign-in starts cancels setProfile's load
+        // before it ever ran; the profile write must not be part of that cancellable job.
+        val main = kotlinx.coroutines.test.StandardTestDispatcher()
+        Dispatchers.setMain(main)
+        routes["/auth/password-login"] = ::loginOk
+        val vm = SettingsViewModel(repo, store, creds, connection) // not in [vms]: cleaned up below, on [main]
+        try {
+            vm.setServerUrl(hostPort())
+            vm.setUsername("alice")
+            vm.setPassword("pw")
+            vm.setProfile("research")
+            assertTrue(vm.signIn().isSuccess)
+            val saved = withTimeout(3_000) {
+                while (store.settings.first().profile != "research") {
+                    main.scheduler.advanceUntilIdle()
+                    kotlinx.coroutines.delay(10)
+                }
+                store.settings.first()
+            }
+            assertEquals("research", saved.profile)
+        } finally {
+            vm.viewModelScope.coroutineContext[Job]?.cancel()
+            main.scheduler.advanceUntilIdle()
+        }
+    }
+
+    @Test
     fun editedUrlWithoutSignInShowsHint() = runBlocking<Unit> {
         store.update { it.copy(serverUrl = "http://old.example:9119", username = "alice", onboarded = true) }
         val vm = vm()

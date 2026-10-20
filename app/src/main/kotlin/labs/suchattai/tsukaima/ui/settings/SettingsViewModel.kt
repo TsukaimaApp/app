@@ -246,12 +246,23 @@ class SettingsViewModel(
                 pairing = null, pendingPairing = emptyList(), approvedPairing = emptyList(), usage = null,
             )
         }
+        // The API reads the profile from settings, so the load waits for the write; but the write is its own
+        // job, chained after any earlier one, so a reload that cancels the load cannot lose it.
+        val previous = profileWrite
+        val write = viewModelScope.launch {
+            previous?.join()
+            settings.update { it.copy(profile = name, model = null) }
+        }
+        profileWrite = write
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
-            settings.update { it.copy(profile = name, model = null) } // the API reads the profile from settings
+            write.join()
             loadRemote()
         }
     }
+
+    /** The latest profile write; never cancelled with [loadJob]. */
+    private var profileWrite: Job? = null
 
     fun setModel(@Suppress("UNUSED_PARAMETER") provider: String, model: String) {
         _state.update { it.copy(model = model) }

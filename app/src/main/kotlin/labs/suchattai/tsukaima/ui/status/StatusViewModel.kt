@@ -18,6 +18,7 @@ import kotlinx.serialization.json.doubleOrNull
 import labs.suchattai.tsukaima.data.ConnectionManager
 import labs.suchattai.tsukaima.data.HermesRepository
 import labs.suchattai.tsukaima.data.HermesState
+import labs.suchattai.tsukaima.data.api.userMessage
 import labs.suchattai.tsukaima.data.api.PairingDto
 import labs.suchattai.tsukaima.data.api.SessionDto
 import labs.suchattai.tsukaima.data.api.SystemStatsDto
@@ -122,6 +123,8 @@ class StatusViewModel(
     private val clock: () -> Long = System::currentTimeMillis,
     private val pollMs: Long = 1_000,
     private val maxPolls: Int = 10,
+    /** Shows a transient message (the app's toast). */
+    private val toast: (String) -> Unit = {},
 ) : ViewModel() {
     private val _state = MutableStateFlow(StatusUiState(hermes = source.hermes.value))
     val state: StateFlow<StatusUiState> = _state.asStateFlow()
@@ -181,18 +184,28 @@ class StatusViewModel(
         }
     }
 
-    fun startGateway(): Job = gatewayAction("running") { source.gatewayStart() }
-    fun restartGateway(): Job = gatewayAction("running", requireNewUpdatedAt = true) { source.gatewayRestart() }
-    fun stopGateway(): Job = gatewayAction("stopped") { source.gatewayStop() }
+    fun startGateway(): Job = gatewayAction("start", "running") { source.gatewayStart() }
+    fun restartGateway(): Job = gatewayAction("restart", "running", requireNewUpdatedAt = true) { source.gatewayRestart() }
+    fun stopGateway(): Job = gatewayAction("stop", "stopped") { source.gatewayStop() }
 
-    private fun gatewayAction(target: String, requireNewUpdatedAt: Boolean = false, call: suspend () -> Result<Unit>): Job {
+    /** A refused action is reported with the server's `detail` ([toast]); nothing is polled then. */
+    private fun gatewayAction(
+        verb: String,
+        target: String,
+        requireNewUpdatedAt: Boolean = false,
+        call: suspend () -> Result<Unit>,
+    ): Job {
         actionJob?.takeIf { it.isActive }?.let { return it }
         _state.update { it.copy(busy = true) }
         // A restart reads "running" before and after, so it is only done once gateway_updated_at moves.
         val before = source.hermes.value.status?.gatewayUpdatedAt
         val job = viewModelScope.launch {
             try {
-                if (call().isSuccess) {
+                val result = call()
+                result.exceptionOrNull()?.let { e ->
+                    toast("Couldn’t $verb the gateway" + (e.userMessage()?.let { ": $it" } ?: ""))
+                }
+                if (result.isSuccess) {
                     var polls = 0
                     while (polls < maxPolls) {
                         delay(pollMs)

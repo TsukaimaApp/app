@@ -11,6 +11,7 @@ import kotlinx.coroutines.launch
 import labs.suchattai.tsukaima.data.HermesRepository
 import labs.suchattai.tsukaima.data.api.ApiException
 import labs.suchattai.tsukaima.data.api.LogsDto
+import labs.suchattai.tsukaima.data.api.userMessage
 
 /** The slice of [HermesRepository] the Logs screen needs; a seam for tests. Never throws. */
 interface LogsSource {
@@ -89,8 +90,9 @@ class LogsViewModel(private val source: LogsSource) : ViewModel() {
         }
     }
 
+    /** The server's `detail` from a JSON error body when it gave one, else the HTTP message. */
     private fun describe(e: Throwable): String {
-        val detail = (e as? ApiException)?.message?.takeIf { it.isNotBlank() }
+        val detail = (e as? ApiException)?.userMessage()
         return if (detail != null) "Couldn't load logs: $detail" else "Couldn't load logs"
     }
 }

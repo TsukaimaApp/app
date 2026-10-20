@@ -88,7 +88,9 @@ fun TsukaimaNavHost(
         composable(Route.Status.path) {
             val vm: StatusViewModel = viewModel(
                 factory = viewModelFactory {
-                    initializer { StatusViewModel(HermesStatusSource(container.repository, container.connection)) }
+                    initializer {
+                        StatusViewModel(HermesStatusSource(container.repository, container.connection), toast = container.toastState::show)
+                    }
                 },
             )
             StatusScreen(
@@ -124,6 +126,7 @@ fun TsukaimaNavHost(
                 showMenu = showMenu,
                 onStatus = { navController.navigateTop(Route.Status.path) },
                 onDeleted = { navController.navigateTop(Route.Chat.create()) },
+                visibleSession = container.visibleLiveSessionId,
             )
         }
         composable(Route.Cron.path) {

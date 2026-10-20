@@ -17,13 +17,18 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.withFrameNanos
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
@@ -36,6 +41,9 @@ import labs.suchattai.tsukaima.ui.theme.TsukaimaType
 import labs.suchattai.tsukaima.ui.theme.tsukaima
 
 private const val REFRESH_MS = 5_000L
+
+/** About one log line: closer than this to the bottom still counts as following the tail. */
+private val FOLLOW_SLACK = 24.dp
 
 /** Read-only log tail. Auto-refreshes every 5 s while the screen is resumed. */
 @Composable
@@ -63,9 +71,24 @@ internal fun LogsContent(
     val colors = MaterialTheme.tsukaima
     val scroll = rememberScrollState()
     val text = state.text
+    // Follow the tail only while the reader is at it (within about a line of the bottom), so a refresh never
+    // yanks someone reading older lines; a new file or level starts at the bottom again.
+    val slack = with(LocalDensity.current) { FOLLOW_SLACK.roundToPx() }
+    var pinned by remember { mutableStateOf(true) }
+    var shownFilter by remember { mutableStateOf(state.file to state.level) }
+    LaunchedEffect(scroll) {
+        snapshotFlow { scroll.isScrollInProgress }.collect { scrolling ->
+            if (!scrolling) pinned = scroll.value >= scroll.maxValue - slack
+        }
+    }
     LaunchedEffect(text) {
         withFrameNanos { }
-        scroll.scrollTo(scroll.maxValue)
+        val filter = state.file to state.level
+        if (pinned || filter != shownFilter) {
+            shownFilter = filter
+            scroll.scrollTo(scroll.maxValue)
+            pinned = true
+        }
     }
 
     Column(Modifier.fillMaxSize().background(colors.surfacePage)) {
