@@ -55,7 +55,8 @@ import labs.suchattai.tsukaima.ui.voice.AssistOverlay
  * asked before voice starts. A second assistant gesture while the sheet is open ([onNewIntent]) listens again. Back, a
  * tap on the scrim, a swipe down and leaving it (`noHistory`) close it; "Continue in Tsukaima", the Open and Keyboard
  * icons and any approval the turn needs open the app on the chat. Never shown over the lock screen: a launch while
- * the keyguard is locked finishes at once (no keyguard dismissal is asked for).
+ * the keyguard is locked (first launch or [onNewIntent]) finishes at once, no keyguard dismissal is asked for, and
+ * the sheet finishes whenever it stops (a screen lock included), except across a configuration change.
  */
 class AssistActivity : ComponentActivity() {
     private lateinit var container: AppContainer
@@ -72,7 +73,7 @@ class AssistActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        if (getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true) {
+        if (keyguardLocked()) {
             finish() // nothing on the lock screen
             return
         }
@@ -91,11 +92,23 @@ class AssistActivity : ComponentActivity() {
     /** The assistant gesture again while the sheet is open (`singleTask`): a trusted one listens again. */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (keyguardLocked()) {
+            finish() // nothing on the lock screen, whatever the launch carries
+            return
+        }
         if (!AssistNonce.consume(intent.getStringExtra(AssistNonce.EXTRA))) return
         trusted = true // a sheet still at rest creates its chat now, trusted
         val vm = chat ?: return
         if (vm.state.value.voice?.phase == VoicePhase.Idle) vm.tapVoiceIndicator()
     }
+
+    /** The sheet never outlives leaving it, a screen lock included (`noHistory` does too; this makes it explicit). */
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) finish()
+    }
+
+    private fun keyguardLocked() = getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)

@@ -98,8 +98,10 @@ class AndroidSpeechInput(private val context: Context) : SpeechInput {
             }
 
             override fun onError(error: Int) {
-                val language = error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
-                    error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
+                val language = when (error) {
+                    SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED, SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> true
+                    else -> false
+                }
                 val retry = when {
                     // No language pack for the on-device recogniser: fall back to the default one from now on.
                     language && onDevice -> true.also { preferOnDevice = false }
