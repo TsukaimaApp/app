@@ -26,7 +26,9 @@ import labs.suchattai.tsukaima.data.api.SkillDto
 import labs.suchattai.tsukaima.data.api.StatusDto
 import labs.suchattai.tsukaima.data.api.SystemStatsDto
 import labs.suchattai.tsukaima.data.api.ToolsetDto
+import labs.suchattai.tsukaima.data.api.TranscriptionDto
 import labs.suchattai.tsukaima.data.api.UsageDto
+import labs.suchattai.tsukaima.data.api.VoiceConfigDto
 import labs.suchattai.tsukaima.data.api.WorkspacesDto
 import labs.suchattai.tsukaima.data.prefs.CredentialStore
 import labs.suchattai.tsukaima.data.prefs.ServerUrl
@@ -147,6 +149,10 @@ class HermesRepository(
 
     /** A file the agent delivered (`MEDIA:`), streaming; the caller closes it. */
     suspend fun download(path: String): Result<FileDownload> = call { api.download(path) }
+
+    /** One utterance (WAV) through the server's speech-to-text relay. */
+    suspend fun transcribe(wav: ByteArray): Result<TranscriptionDto> = call { api.transcribe(wav) }
+    suspend fun voiceConfig(): Result<VoiceConfigDto> = call { api.voiceConfig() }
 
     // ---- plumbing ------------------------------------------------------------------------
 

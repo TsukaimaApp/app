@@ -7,6 +7,12 @@ sealed interface SpeechEvent {
     /** The words recognised so far (shown live, not sent). */
     data class Partial(val text: String) : SpeechEvent
 
+    /**
+     * The utterance was recorded and is being recognised elsewhere (server recognition); a [Final] or [Error]
+     * follows.
+     */
+    data object Transcribing : SpeechEvent
+
     /** The utterance is complete; the run ends. */
     data class Final(val text: String) : SpeechEvent
 

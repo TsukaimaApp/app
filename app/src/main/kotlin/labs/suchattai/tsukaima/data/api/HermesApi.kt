@@ -31,6 +31,7 @@ import okhttp3.Response
 import okio.BufferedSource
 import java.io.Closeable
 import java.net.URLDecoder
+import java.util.Base64
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -334,6 +335,30 @@ class HermesApi(
         return ApiException(code, message)
     }
 
+    // ---- audio ---------------------------------------------------------------------------
+
+    /**
+     * `POST /api/audio/transcribe`: one recorded utterance, sent as a base64 `data:` URL; Hermes relays it to its
+     * configured STT provider (the request carries no language: the server's setting or auto-detection applies).
+     * 400 (bad payload, provider error, STT not configured) and 413 (over 25 MB) keep the server's `detail` on the
+     * [ApiException]. Uses [transcribeClient]: a long utterance on a slow uplink outlasts the shared call timeout.
+     */
+    suspend fun transcribe(wav: ByteArray, mime: String = "audio/wav"): TranscriptionDto {
+        val body = buildJsonObject {
+            put("data_url", "data:$mime;base64," + Base64.getEncoder().encodeToString(wav))
+            put("mime_type", mime)
+        }
+        val request = newRequest("POST", "api/audio/transcribe", body, true, false, emptyArray())
+        return call(request, transcribeClient) { HermesJson.decodeFromString(TranscriptionDto.serializer(), it) }
+    }
+
+    /** `GET /api/audio/voice-config`, the speech-to-text part only (see [SttConfigDto]). */
+    suspend fun voiceConfig(): VoiceConfigDto = get("api/audio/voice-config", VoiceConfigDto.serializer(), managed = false)
+
+    private val transcribeClient: OkHttpClient by lazy {
+        client.newBuilder().callTimeout(TRANSCRIBE_TIMEOUT_S, TimeUnit.SECONDS).build()
+    }
+
     // ---- plumbing ------------------------------------------------------------------------
 
     private suspend fun <T> get(
@@ -369,9 +394,9 @@ class HermesApi(
         call(newRequest(method, path, effectiveBody, true, true, emptyArray(), segments)) { }
     }
 
-    private suspend fun <T> call(request: Request, decode: (String) -> T): T =
+    private suspend fun <T> call(request: Request, via: OkHttpClient = client, decode: (String) -> T): T =
         withContext(Dispatchers.IO) {
-            client.newCall(request).execute().use { response ->
+            via.newCall(request).execute().use { response ->
                 val text = response.body.string()
                 if (response.code == 401) throw AuthException()
                 if (!response.isSuccessful) throw ApiException.fromResponse(response.code, text)
@@ -457,6 +482,8 @@ class HermesApi(
         val JSON = "application/json; charset=utf-8".toMediaType()
         val EMPTY_BODY = JsonObject(emptyMap())
         const val OCTET_STREAM = "application/octet-stream"
+        /** Upload plus server-side recognition of up to 30 s of audio. */
+        const val TRANSCRIBE_TIMEOUT_S = 60L
 
         /**
          * The filename of a `Content-Disposition` header: RFC 5987 `filename*=UTF-8''…` wins over `filename="…"`

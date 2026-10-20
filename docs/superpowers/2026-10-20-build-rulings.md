@@ -240,3 +240,8 @@ Decisions taken on the user's behalf while implementing `design/handoff_voice/RE
 ## v0.6.2
 
 - Ruling: on-device recognition and the offline preference only for the device’s own language; an explicitly picked other language uses the default recogniser online — on-device packs exist for the device language only, and the language-unavailable error codes do not exist before Android 13 — cost if wrong: network recognition for a language that does have an on-device pack.
+
+## v0.7.0
+
+- Ruling: server recognition uses the dashboard's `/api/audio/transcribe` relay with one WAV per utterance and phone-side VAD — Hermes' `voice.record` and `wake.*` RPCs capture on the gateway host's own microphone, so they cannot serve a phone; the relay carries no language, so the server's STT language setting (auto-detect) wins — cost if wrong: ~300 kB of upload per 10 s utterance, no live partials.
+- Ruling: the end-of-speech detector is energy-based (noise floor from the first 300 ms, speech above 2.5 × floor and at least RMS 400, 300 ms minimum speech, 1.2 s trailing silence, 8 s no-speech timeout, 30 s cap) with 300 ms of lead-in kept; the upload gets its own 60 s call timeout instead of the shared 20 s — cost if wrong: clipped or late utterance ends in loud rooms.

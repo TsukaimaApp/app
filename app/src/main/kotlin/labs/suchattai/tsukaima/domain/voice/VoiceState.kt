@@ -14,6 +14,8 @@ enum class VoiceMode { InApp, Assist }
  * [heard]: partial recognition shown as a live user bubble; cleared on Final.
  * [revealed]: assistant item id → chars of its text spoken so far (the transcript reveal cursor).
  * [startIndex]: chat items before this index are not shown in voice mode.
+ * [transcribing]: the recorded utterance is being recognised on the server; cleared by the run's result or when the
+ * mic closes.
  * [error]: why voice cannot listen ("Speech recognition isn’t available on this device", a recogniser failure).
  */
 data class VoiceState(
@@ -23,6 +25,7 @@ data class VoiceState(
     val revealed: Map<String, Int> = emptyMap(),
     val startIndex: Int = 0,
     val error: String? = null,
+    val transcribing: Boolean = false,
 )
 
 /**

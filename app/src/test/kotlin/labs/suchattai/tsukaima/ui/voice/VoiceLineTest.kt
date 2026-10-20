@@ -18,4 +18,6 @@ class VoiceLineTest {
     @Test fun idleInAppSaysTapToSpeak() = assertEquals(VoiceLine("Tap to speak", StatusTone.Grey, false), voiceLine(VoicePhase.Idle, AgentStatus.Idle, VoiceMode.InApp))
     @Test fun offlineStaysRed() = assertEquals(StatusTone.Red, voiceLine(VoicePhase.Idle, AgentStatus.Offline, VoiceMode.InApp).tone)
     @Test fun stoppedKeepsLabelInAssist() = assertEquals(VoiceLine("Gateway stopped", StatusTone.Red, false), voiceLine(VoicePhase.Idle, AgentStatus.Stopped, VoiceMode.Assist))
+    @Test fun transcribingPulsesAccentWhileListening() = assertEquals(VoiceLine("Transcribing…", StatusTone.Accent, true), voiceLine(VoicePhase.Listening, AgentStatus.Idle, VoiceMode.InApp, transcribing = true))
+    @Test fun transcribingIsIgnoredOutsideListening() = assertEquals("Muted", voiceLine(VoicePhase.Muted, AgentStatus.Idle, VoiceMode.InApp, transcribing = true).label)
 }

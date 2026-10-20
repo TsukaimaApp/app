@@ -31,6 +31,7 @@ import labs.suchattai.tsukaima.data.api.ApiException
 import labs.suchattai.tsukaima.data.api.FileDownload
 import labs.suchattai.tsukaima.data.api.HermesJson
 import labs.suchattai.tsukaima.data.api.ModelOptionsDto
+import labs.suchattai.tsukaima.data.api.TranscriptionDto
 import labs.suchattai.tsukaima.data.api.WorkspacesDto
 import labs.suchattai.tsukaima.data.files.FileSaver
 import labs.suchattai.tsukaima.data.gateway.ApprovalChoice
@@ -179,6 +180,11 @@ class ChatViewModelTest {
         override fun toast(text: String) {
             toasts += text
         }
+
+        /** Sizes of the WAVs sent to [transcribe]. */
+        val transcribed = mutableListOf<Int>()
+        var transcribeResult: Result<TranscriptionDto> = Result.success(TranscriptionDto(ok = true, transcript = "hello"))
+        override suspend fun transcribe(wav: ByteArray): Result<TranscriptionDto> = transcribeResult.also { transcribed += wav.size }
 
         val speech = FakeSpeechInput()
         override fun speechInput() = speech

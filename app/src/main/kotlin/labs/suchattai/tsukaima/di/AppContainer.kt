@@ -40,6 +40,7 @@ import labs.suchattai.tsukaima.data.prefs.LazyCredentialStore
 import labs.suchattai.tsukaima.data.prefs.NotificationPrefs
 import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.data.prefs.SettingsStore
+import labs.suchattai.tsukaima.data.prefs.VoiceRecognition
 import labs.suchattai.tsukaima.data.gateway.ConnectionState
 import labs.suchattai.tsukaima.notifications.AndroidNotificationPoster
 import labs.suchattai.tsukaima.notifications.AnsweredRequestIds
@@ -56,6 +57,7 @@ import labs.suchattai.tsukaima.domain.voice.VoiceLanguages
 import labs.suchattai.tsukaima.ui.components.ToastState
 import labs.suchattai.tsukaima.voice.AndroidSpeechInput
 import labs.suchattai.tsukaima.voice.AndroidSpeechOutput
+import labs.suchattai.tsukaima.voice.ServerSpeechInput
 import okhttp3.OkHttpClient
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -174,8 +176,14 @@ class AppContainer(context: Context) {
     /** Delivered (`MEDIA:`) files land in the public Downloads collection. */
     val fileSaver: FileSaver = MediaStoreFileSaver(appContext.contentResolver)
 
-    /** A fresh recogniser adapter; each listening run owns its own platform recogniser and reads the voice language. */
-    fun speechInput(): SpeechInput = AndroidSpeechInput(appContext) { settings.value?.voiceLanguage }
+    /**
+     * A fresh recogniser adapter for one voice session, per the speech recognition setting now: the phone's (each run
+     * owns its own platform recogniser and reads the voice language) or Hermes' transcription relay.
+     */
+    fun speechInput(): SpeechInput = when (settings.value?.voiceRecognition) {
+        VoiceRecognition.Server -> ServerSpeechInput(appContext, transcribe = { repository.transcribe(it) })
+        else -> AndroidSpeechInput(appContext) { settings.value?.voiceLanguage }
+    }
 
     /** One TTS engine per process, created on first use; speaks in the voice language when the engine has it. */
     val speechOutput: SpeechOutput by lazy {

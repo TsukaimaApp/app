@@ -97,4 +97,14 @@ class SettingsStoreTest {
         store.update { it.copy(voiceLanguage = null) }
         assertNull(store.settings.first().voiceLanguage)
     }
+
+    @Test
+    fun voiceRecognitionDefaultsToPhoneAndRoundTrips() = runTest {
+        val store = store()
+        assertEquals(VoiceRecognition.Phone, store.settings.first().voiceRecognition)
+        store.update { it.copy(voiceRecognition = VoiceRecognition.Server) }
+        assertEquals(VoiceRecognition.Server, store.settings.first().voiceRecognition)
+        store.update { it.copy(voiceRecognition = VoiceRecognition.Phone) }
+        assertEquals(VoiceRecognition.Phone, store.settings.first().voiceRecognition)
+    }
 }

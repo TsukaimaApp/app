@@ -27,6 +27,7 @@ import labs.suchattai.tsukaima.data.prefs.InMemoryCredentialStore
 import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.data.prefs.SettingsStore
 import labs.suchattai.tsukaima.data.prefs.ThemeMode
+import labs.suchattai.tsukaima.data.prefs.VoiceRecognition
 import labs.suchattai.tsukaima.domain.voice.VoiceLanguage
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
@@ -160,6 +161,35 @@ class SettingsViewModelTest {
         vm.setVoiceLanguage(null)
         assertNull(awaitStore { it.voiceLanguage == null }.voiceLanguage)
         vm.await { it.voiceLanguage == null }
+    }
+
+    @Test
+    fun setVoiceRecognitionPersists() = runBlocking<Unit> {
+        store.update { it.copy(voiceLanguage = "pl-PL") }
+        val vm = vm()
+        vm.await { it.voiceLanguage == "pl-PL" } // seeded from the store
+        assertEquals(VoiceRecognition.Phone, vm.state.value.voiceRecognition)
+        vm.setVoiceRecognition(VoiceRecognition.Server)
+        assertEquals(VoiceRecognition.Server, awaitStore { it.voiceRecognition == VoiceRecognition.Server }.voiceRecognition)
+        vm.await { it.voiceRecognition == VoiceRecognition.Server }
+        vm.setVoiceRecognition(VoiceRecognition.Phone)
+        awaitStore { it.voiceRecognition == VoiceRecognition.Phone }
+        assertEquals("pl-PL", store.settings.first().voiceLanguage) // the language is kept for phone recognition
+    }
+
+    @Test
+    fun sttModelProbeNamesTheServerModelOnlyWhenThereIsOne() = runBlocking<Unit> {
+        snapshot.value = Settings(serverUrl = "http://${hostPort()}")
+        var body = """{"ok":true,"stt":{"mode":"relay","provider":"openai","model":"faster-whisper-large-v3","streaming":false}}"""
+        routes["/api/audio/voice-config"] = { json(body) }
+        val vm = vm()
+        vm.loadSttModel()
+        assertEquals("faster-whisper-large-v3", vm.await { it.sttModel != null }.sttModel)
+        assertEquals("On Hermes (faster-whisper-large-v3)", serverRecognitionLabel(vm.state.value.sttModel))
+        body = """{"ok":true,"stt":{"mode":"relay","provider":"none","model":"x"}}"""
+        vm.loadSttModel()
+        assertNull(vm.await { it.sttModel == null }.sttModel)
+        assertEquals("On Hermes (Whisper)", serverRecognitionLabel(null))
     }
 
     @Test

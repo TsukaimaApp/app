@@ -163,7 +163,7 @@ fun AssistOverlay(
             ) {
                 VoiceIndicator(voice.phase, 72.dp, onTap = onTap)
                 Column(Modifier.weight(1f)) {
-                    VoiceStatusLine(voiceLine(voice.phase, state.status, VoiceMode.Assist), fontSize = 14.sp, centred = false)
+                    VoiceStatusLine(voiceLine(voice.phase, state.status, VoiceMode.Assist, voice.transcribing), fontSize = 14.sp, centred = false)
                     if (utterance.isNotBlank()) {
                         Text(utterance, style = TsukaimaType.body, color = colors.ink1, modifier = Modifier.padding(top = 4.dp))
                     }

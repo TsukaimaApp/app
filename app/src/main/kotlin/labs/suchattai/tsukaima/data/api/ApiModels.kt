@@ -170,5 +170,31 @@ data class AuthMeDto(
     @SerialName("expires_at") val expiresAt: Long = 0L,
 )
 
+/**
+ * `POST /api/audio/transcribe`: [transcript] is empty when the server heard nothing (silence, or a Whisper
+ * hallucination it filtered); [provider] is the STT backend that answered.
+ */
+@Serializable
+data class TranscriptionDto(
+    val ok: Boolean,
+    val transcript: String = "",
+    val provider: String? = null,
+)
+
+/**
+ * The speech-to-text part of `GET /api/audio/voice-config`. Only these fields are read: in direct mode the server
+ * also sends the provider's `api_key`, which is deliberately not modelled, so it is dropped at parse time.
+ */
+@Serializable
+data class SttConfigDto(
+    val provider: String? = null,
+    val model: String? = null,
+    val streaming: Boolean = false,
+)
+
+/** `GET /api/audio/voice-config`, reduced to its [stt] part (a missing part means no server STT). */
+@Serializable
+data class VoiceConfigDto(val stt: SttConfigDto? = null)
+
 /** `SessionDto.source` of a cron job's run. */
 const val CRON_SOURCE = "cron"

@@ -45,6 +45,7 @@ import labs.suchattai.tsukaima.data.api.SkillDto
 import labs.suchattai.tsukaima.data.api.ToolsetDto
 import labs.suchattai.tsukaima.data.prefs.NotificationPrefs
 import labs.suchattai.tsukaima.data.prefs.ThemeMode
+import labs.suchattai.tsukaima.data.prefs.VoiceRecognition
 import labs.suchattai.tsukaima.domain.voice.VoiceLanguages
 import labs.suchattai.tsukaima.ui.chat.components.PairingCard
 import labs.suchattai.tsukaima.ui.components.ButtonSize
@@ -53,6 +54,7 @@ import labs.suchattai.tsukaima.ui.components.ConfirmDialog
 import labs.suchattai.tsukaima.ui.components.GhostButton
 import labs.suchattai.tsukaima.ui.components.IconButton44
 import labs.suchattai.tsukaima.ui.components.IconName
+import labs.suchattai.tsukaima.ui.components.MenuItem
 import labs.suchattai.tsukaima.ui.components.MenuSheet
 import labs.suchattai.tsukaima.ui.components.PrimaryButton
 import labs.suchattai.tsukaima.ui.components.SecondaryButton
@@ -87,6 +89,10 @@ class SettingsActions(
     val onVoiceLanguage: (String?) -> Unit = {},
     /** The Language sheet opens: (re)load its options. */
     val onVoiceLanguagesOpen: () -> Unit = {},
+    /** Speech recognition picked: on this phone or on Hermes. */
+    val onVoiceRecognition: (VoiceRecognition) -> Unit = {},
+    /** The speech recognition sheet opens: probe the server's STT model for its label. */
+    val onVoiceRecognitionOpen: () -> Unit = {},
     /** "Use as device assistant": opens the system's assistant settings. */
     val onAssistant: () -> Unit = {},
     val onTheme: (ThemeMode) -> Unit = {},
@@ -135,6 +141,8 @@ fun SettingsScreen(
             onNotifications = vm::setNotifications,
             onVoiceLanguage = vm::setVoiceLanguage,
             onVoiceLanguagesOpen = vm::loadVoiceLanguages,
+            onVoiceRecognition = vm::setVoiceRecognition,
+            onVoiceRecognitionOpen = vm::loadSttModel,
             onAssistant = onAssistant,
             onTheme = vm::setTheme,
             onMaterialYou = vm::setMaterialYou,
@@ -157,6 +165,19 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
         visible = showVoiceLanguages,
         onDismiss = { showVoiceLanguages = false },
         items = voiceLanguageItems(state.voiceLanguages, state.voiceLanguage, actions.onVoiceLanguage),
+    )
+    var showVoiceRecognition by rememberSaveable { mutableStateOf(false) }
+    MenuSheet(
+        visible = showVoiceRecognition,
+        onDismiss = { showVoiceRecognition = false },
+        items = listOf(
+            MenuItem(PHONE_RECOGNITION, null, checked = state.voiceRecognition == VoiceRecognition.Phone) {
+                actions.onVoiceRecognition(VoiceRecognition.Phone)
+            },
+            MenuItem(serverRecognitionLabel(state.sttModel), null, checked = state.voiceRecognition == VoiceRecognition.Server) {
+                actions.onVoiceRecognition(VoiceRecognition.Server)
+            },
+        ),
     )
     Column(
         modifier
@@ -322,8 +343,21 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
 
             Section("Voice") {
                 TsukaimaRow(
+                    title = "Speech recognition",
+                    subtitle = if (state.voiceRecognition == VoiceRecognition.Server) serverRecognitionLabel(null) else PHONE_RECOGNITION,
+                    leading = IconName.GraphicEq,
+                    trailing = { Chevron() },
+                    onClick = {
+                        actions.onVoiceRecognitionOpen()
+                        showVoiceRecognition = true
+                    },
+                    modifier = Modifier.bleed(12.dp),
+                )
+                val language = VoiceLanguages.label(state.voiceLanguage, state.voiceLanguages)
+                TsukaimaRow(
                     title = "Language",
-                    subtitle = VoiceLanguages.label(state.voiceLanguage, state.voiceLanguages),
+                    // Hermes' relay carries no language: its own STT setting (auto-detection) decides there.
+                    subtitle = if (state.voiceRecognition == VoiceRecognition.Server) "$language · phone recognition and speech only" else language,
                     leading = IconName.Translate,
                     trailing = { Chevron() },
                     onClick = {
@@ -509,3 +543,6 @@ private fun SettingsLightPreview() = TsukaimaTheme(darkTheme = false) { Settings
 private fun SettingsDarkPreview() = TsukaimaTheme(darkTheme = true) {
     SettingsContent(previewState().copy(serverUrl = "http://new.example:9119", signInError = "Invalid username or password (401)"), SettingsActions())
 }
+
+/** The speech recognition option for the phone's own recogniser. */
+private const val PHONE_RECOGNITION = "On this phone"

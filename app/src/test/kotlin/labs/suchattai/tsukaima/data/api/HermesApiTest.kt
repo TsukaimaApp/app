@@ -2,6 +2,8 @@ package labs.suchattai.tsukaima.data.api
 
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import labs.suchattai.tsukaima.data.prefs.Settings
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -498,5 +500,51 @@ class HermesApiTest {
         assertEquals("/api/tools/toolsets/todo", r.url.encodedPath)
         assertEquals("ops", r.url.queryParameter("profile"))
         assertEquals("""{"enabled":false}""", r.body!!.utf8())
+    }
+
+    @Test
+    fun transcribePostsTheWavAsADataUrlWithTheBearer() = runBlocking {
+        json("""{"ok":true,"transcript":"Dzień dobry","provider":"openai"}""")
+        val wav = byteArrayOf(82, 73, 70, 70, 0, -1)
+        val result = authedApi().transcribe(wav)
+        assertEquals(TranscriptionDto(ok = true, transcript = "Dzień dobry", provider = "openai"), result)
+        val r = server.takeRequest(1, TimeUnit.SECONDS)!!
+        assertEquals("POST", r.method)
+        assertEquals("/api/audio/transcribe", r.url.encodedPath)
+        assertNull(r.url.queryParameter("profile"))
+        assertEquals("Bearer tok", r.headers["Authorization"])
+        val body = HermesJson.parseToJsonElement(r.body!!.utf8()).jsonObject
+        val expected = "data:audio/wav;base64," + java.util.Base64.getEncoder().encodeToString(wav)
+        assertEquals(expected, body["data_url"]!!.jsonPrimitive.content)
+        assertEquals("audio/wav", body["mime_type"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun transcribePassesAnEmptyTranscriptThrough() = runBlocking {
+        json("""{"ok":true,"transcript":"","provider":"openai"}""")
+        val result = api().transcribe(ByteArray(4))
+        assertTrue(result.ok)
+        assertEquals("", result.transcript)
+    }
+
+    @Test
+    fun transcribeRefusalKeepsTheServerDetail() {
+        json("""{"detail":"Speech-to-text is not available"}""", code = 400)
+        val e = assertThrows(ApiException::class.java) { runBlocking { api().transcribe(ByteArray(4)) } }
+        assertEquals(400, e.code)
+        assertEquals("Speech-to-text is not available", e.detail)
+        assertEquals("Speech-to-text is not available", e.userMessage())
+    }
+
+    @Test
+    fun voiceConfigReadsTheSttProviderAndDropsKeys() = runBlocking {
+        json(
+            """{"ok":true,"stt":{"mode":"direct","provider":"openai","model":"faster-whisper-large-v3","streaming":false,
+               "api_key":"sk-secret","base_url":"https://x"},"tts":{"provider":"edge"}}""",
+        )
+        val config = api().voiceConfig()
+        assertEquals(SttConfigDto(provider = "openai", model = "faster-whisper-large-v3", streaming = false), config.stt)
+        assertFalse(config.toString().contains("sk-secret"))
+        assertEquals("/api/audio/voice-config", server.takeRequest(1, TimeUnit.SECONDS)!!.url.encodedPath)
     }
 }

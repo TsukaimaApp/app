@@ -35,6 +35,7 @@ import labs.suchattai.tsukaima.data.prefs.NotificationPrefs
 import labs.suchattai.tsukaima.data.prefs.ServerUrl
 import labs.suchattai.tsukaima.data.prefs.SettingsStore
 import labs.suchattai.tsukaima.data.prefs.ThemeMode
+import labs.suchattai.tsukaima.data.prefs.VoiceRecognition
 import labs.suchattai.tsukaima.domain.voice.VoiceLanguage
 import java.util.Locale
 
@@ -93,6 +94,10 @@ data class SettingsUiState(
      * the full list (with the TTS engine's languages) once the sheet opened.
      */
     val voiceLanguages: List<VoiceLanguage> = emptyList(),
+    /** Where voice mode recognises speech. */
+    val voiceRecognition: VoiceRecognition = VoiceRecognition.Phone,
+    /** The server's speech-to-text model (`/api/audio/voice-config`), once probed; null = unknown or none. */
+    val sttModel: String? = null,
 ) {
     /** The URL field was edited to a different server than the one signed in to, and not yet signed in again. */
     val urlChangedWithoutSignIn: Boolean
@@ -149,6 +154,7 @@ class SettingsViewModel(
                         materialYou = s.materialYou,
                         notifications = s.notifications,
                         voiceLanguage = s.voiceLanguage,
+                        voiceRecognition = s.voiceRecognition,
                         // Seed the form once; later emissions (our own writes) must not clobber typing.
                         serverUrl = if (firstLoad && it.serverUrl.isEmpty()) s.serverUrl else it.serverUrl,
                         username = if (firstLoad && it.username.isEmpty()) s.username else it.username,
@@ -441,6 +447,24 @@ class SettingsViewModel(
         viewModelScope.launch { settings.update { it.copy(voiceLanguage = tag) } }
     }
 
+    /** Saves where voice mode recognises speech; the next voice session uses it. */
+    fun setVoiceRecognition(mode: VoiceRecognition) {
+        _state.update { it.copy(voiceRecognition = mode) }
+        viewModelScope.launch { settings.update { it.copy(voiceRecognition = mode) } }
+    }
+
+    /**
+     * The speech recognition sheet opens: asks the server which STT model it relays to, for the "On Hermes" label.
+     * A failure, or no STT provider, leaves the generic label.
+     */
+    fun loadSttModel() {
+        viewModelScope.launch {
+            val stt = repo.voiceConfig().getOrNull()?.stt
+            val model = stt?.model?.takeIf { stt.provider != null && stt.provider != "none" && it.isNotBlank() }
+            _state.update { it.copy(sttModel = model) }
+        }
+    }
+
     fun setAssistantRoleHeld(held: Boolean) = _state.update { it.copy(assistantRoleHeld = held) }
 
     /** No settings screen for the default assistant could be opened: say where it is. */
@@ -483,3 +507,6 @@ private fun compact(n: Double): String = when {
     n >= 1_000 -> String.format(Locale.US, "%.1fK", n / 1_000)
     else -> n.toLong().toString()
 }
+
+/** The speech recognition option for Hermes: the server's STT [model] when known, else the generic name. */
+fun serverRecognitionLabel(model: String?): String = "On Hermes (${model ?: "Whisper"})"

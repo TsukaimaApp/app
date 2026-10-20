@@ -107,7 +107,7 @@ class VoiceController(
         queue.clear()
         current = null
         output.stop()
-        _state.update { it.copy(phase = VoicePhase.Idle, heard = "") }
+        _state.update { it.copy(phase = VoicePhase.Idle, heard = "", transcribing = false) }
     }
 
     /** Muting releases the mic (phase Muted while it would listen); unmuting listens again. */
@@ -125,7 +125,7 @@ class VoiceController(
         val job = listenJob ?: return
         job.cancel()
         listenJob = null
-        _state.update { it.copy(heard = "") }
+        _state.update { it.copy(heard = "", transcribing = false) }
         refresh()
     }
 
@@ -296,7 +296,7 @@ class VoiceController(
         } else if (!wantMic && listenJob != null) {
             listenJob?.cancel()
             listenJob = null
-            _state.update { it.copy(heard = "") }
+            _state.update { it.copy(heard = "", transcribing = false) }
         }
         val phase = voicePhase(mode, s.muted, eligible, speaking, status).let {
             if (it == VoicePhase.Idle && awaitingTurn && status == AgentStatus.Idle) VoicePhase.Thinking else it
@@ -308,13 +308,17 @@ class VoiceController(
     private suspend fun listenOnce() {
         if (listeningSince == null) listeningSince = now()
         val end = input.listen().firstOrNull { e ->
-            if (e is SpeechEvent.Partial) {
-                consecutiveErrors = 0
-                _state.update { it.copy(heard = e.text) }
+            when (e) {
+                is SpeechEvent.Partial -> {
+                    consecutiveErrors = 0
+                    _state.update { it.copy(heard = e.text) }
+                }
+                SpeechEvent.Transcribing -> _state.update { it.copy(transcribing = true) }
+                else -> Unit
             }
-            e !is SpeechEvent.Partial
+            e !is SpeechEvent.Partial && e !is SpeechEvent.Transcribing
         }
-        _state.update { it.copy(heard = "") }
+        _state.update { it.copy(heard = "", transcribing = false) }
         when (end) {
             is SpeechEvent.Final -> {
                 consecutiveErrors = 0
@@ -337,7 +341,7 @@ class VoiceController(
                 }
                 else -> if (!listenedTooLong()) delay(backoff(consecutiveErrors))
             }
-            is SpeechEvent.Partial -> Unit
+            is SpeechEvent.Partial, SpeechEvent.Transcribing -> Unit
             // Ended without a result: do not spin on a recogniser that ends at once.
             null -> if (!listenedTooLong()) delay(RETRY_DELAY_MS)
         }

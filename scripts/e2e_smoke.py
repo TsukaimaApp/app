@@ -177,6 +177,7 @@ REST_CONTRACT = [
     "/api/analytics/usage?days=30",
     "/api/system/stats",
     "/api/auth/me",
+    "/api/audio/voice-config",  # Settings: the STT model label (only stt.provider/model/streaming are read)
 ]
 
 
@@ -187,6 +188,30 @@ def rest_contract_part(token):
         except urllib.error.HTTPError as e:
             fail(f"GET {path} -> HTTP {e.code}: {e.read()[:200]!r}")
     step(f"REST contract ({len(REST_CONTRACT)} GETs with the app's params, all 2xx)")
+
+
+def silence_wav(seconds=1, rate=16000):
+    """16-bit mono PCM silence as a RIFF/WAVE file, built like the app's Pcm.wav (44-byte header)."""
+    data = b"\x00\x00" * (rate * seconds)
+    header = (b"RIFF" + (36 + len(data)).to_bytes(4, "little") + b"WAVEfmt "
+              + (16).to_bytes(4, "little") + (1).to_bytes(2, "little") + (1).to_bytes(2, "little")
+              + rate.to_bytes(4, "little") + (rate * 2).to_bytes(4, "little")
+              + (2).to_bytes(2, "little") + (16).to_bytes(2, "little")
+              + b"data" + len(data).to_bytes(4, "little"))
+    return header + data
+
+
+def transcribe_part(token):
+    body = {"data_url": "data:audio/wav;base64," + base64.b64encode(silence_wav()).decode(), "mime_type": "audio/wav"}
+    try:
+        r = http_json("POST", "/api/audio/transcribe", body, token)
+    except urllib.error.HTTPError as e:
+        fail(f"POST /api/audio/transcribe -> HTTP {e.code}: {e.read()[:200]!r}")
+    if r.get("ok") is not True:
+        fail(f"transcribe not ok: {r!r}")
+    if r.get("transcript") != "":
+        fail(f"transcript of silence not empty ({len(r.get('transcript') or '')} chars)")
+    step(f"POST /api/audio/transcribe (silence → empty transcript, provider={r.get('provider')})")
 
 
 def cron_part(token):
@@ -212,6 +237,7 @@ def main():
     rest_contract_part(token)
     asyncio.run(ws_part(token))
     cron_part(token)
+    transcribe_part(token)
     print("PASS")
 
 

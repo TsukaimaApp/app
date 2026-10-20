@@ -12,6 +12,12 @@ import kotlinx.coroutines.flow.map
 enum class ThemeMode { Warm, Dark, System }
 
 /**
+ * Where voice mode recognises speech: [Phone] = the platform recogniser (live partials); [Server] = one WAV per
+ * utterance uploaded to Hermes' `/api/audio/transcribe` relay (its configured STT, Whisper).
+ */
+enum class VoiceRecognition { Phone, Server }
+
+/**
  * Which kinds of notification the app posts (Settings → Notifications); all on by default. Android's own channel
  * switches still apply on top. [alerts] covers the gateway going down and a cron job failing.
  */
@@ -51,6 +57,8 @@ data class Settings(
      * system default.
      */
     val voiceLanguage: String? = null,
+    /** Where voice mode recognises speech; read when a voice session opens. */
+    val voiceRecognition: VoiceRecognition = VoiceRecognition.Phone,
 )
 
 class SettingsStore(private val dataStore: DataStore<Preferences>) {
@@ -77,6 +85,7 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             prefs.putOrRemove(ASSIST_SESSION_ID, next.assistSessionId)
             if (next.assistSessionAt == null) prefs.remove(ASSIST_SESSION_AT) else prefs[ASSIST_SESSION_AT] = next.assistSessionAt
             prefs.putOrRemove(VOICE_LANGUAGE, next.voiceLanguage)
+            prefs[VOICE_RECOGNITION] = next.voiceRecognition.name
         }
     }
 
@@ -111,6 +120,8 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             assistSessionId = this[ASSIST_SESSION_ID],
             assistSessionAt = this[ASSIST_SESSION_AT],
             voiceLanguage = this[VOICE_LANGUAGE],
+            voiceRecognition = this[VOICE_RECOGNITION]?.let { name -> VoiceRecognition.entries.firstOrNull { it.name == name } }
+                ?: defaults.voiceRecognition,
         )
     }
 
@@ -133,5 +144,6 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
         val ASSIST_SESSION_ID = stringPreferencesKey("assist_session_id")
         val ASSIST_SESSION_AT = longPreferencesKey("assist_session_at")
         val VOICE_LANGUAGE = stringPreferencesKey("voice_language")
+        val VOICE_RECOGNITION = stringPreferencesKey("voice_recognition")
     }
 }

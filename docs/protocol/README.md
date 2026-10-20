@@ -237,3 +237,22 @@ All need the bearer header unless marked public. Management endpoints accept `?p
   platform. Toggling back on does not restore the preset.
 
 - **Cron-run sessions** (verified 2026-10-20): a job run is stored as a normal session with `source: "cron"`, id `cron_<jobid>_<YYYYMMDD_HHMMSS>`, title `"<job name> · Oct 20 15:02"`, preview starting `[IMPORTANT: You are running as a scheduled cron job…`. `GET /api/sessions` takes `source=`/`sources=`/`exclude_sources=`; the dashboard lists chats (`exclude_sources=cron`) and runs (`source=cron`) as two independent lists, each under the 100-row cap — the app does the same.
+
+### v0.7.0 — audio relay (2026-10-20, verified live)
+
+- **`POST /api/audio/transcribe`** (bearer like every `/api/*` call; not profile-scoped): body
+  `{"data_url":"data:audio/wav;base64,<…>","mime_type":"audio/wav"}`; Hermes relays the upload to its configured STT
+  provider (Melious `faster-whisper-large-v3` over the OpenAI wire on the test instance). Reply
+  `{"ok":true,"transcript":"<text>","provider":"openai"}`. Silence and filtered Whisper hallucinations answer
+  `{"ok":true,"transcript":"","provider":null}` (seen live for 1 s of 16 kHz silence: treat as "nothing heard").
+  Accepted mimes include `audio/wav`, `audio/mpeg`, `audio/ogg`, `audio/webm`, `audio/m4a`. Errors: `413` over 25 MB,
+  `400` with `detail` for a bad payload or a provider error, `500` when the relay fails. The request carries no
+  language: the server's STT language setting applies (Whisper auto-detects when it is unset; English and Polish
+  samples came back verbatim in about 1 s).
+- **`GET /api/audio/voice-config`** → `{"ok":true,"stt":{"mode":"direct"|"relay","provider","model","streaming":bool,…},"tts":{…}}`;
+  `stt.provider` `"none"` or a missing `stt` means no server STT. In `direct` mode the reply also carries the
+  provider's `api_key`: the app reads only `stt.provider`, `stt.model` and `stt.streaming` (its DTO has no key field)
+  and never stores the reply. `stt.streaming` is `false` for the OpenAI-wire provider: there are no live partials, so
+  the app records one utterance, ends it with its own voice-activity detection and uploads it whole.
+- The gateway's `voice.record` and `wake.*` RPCs capture on the **gateway host's own microphone**; they cannot serve
+  a remote client and the app does not use them.

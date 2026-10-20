@@ -33,11 +33,12 @@ data class VoiceLine(val label: String, val tone: StatusTone, val pulsing: Boole
 /**
  * The status line for a voice [phase]. Thinking/Approval defer to the chat [status] label (the thinking flair, the
  * running tool, the waiting request); Idle keeps Offline/Stopped red and otherwise invites speech (the mic is closed
- * until a tap, in both modes). [mode] does not change the mapping; it is kept for the callers' symmetry.
+ * until a tap, in both modes). [transcribing] (server recognition has the utterance) turns Listening into
+ * "Transcribing…". [mode] does not change the mapping; it is kept for the callers' symmetry.
  */
 @Suppress("UNUSED_PARAMETER")
-fun voiceLine(phase: VoicePhase, status: AgentStatus, mode: VoiceMode): VoiceLine = when (phase) {
-    VoicePhase.Listening -> VoiceLine("Listening…", StatusTone.Accent, true)
+fun voiceLine(phase: VoicePhase, status: AgentStatus, mode: VoiceMode, transcribing: Boolean = false): VoiceLine = when (phase) {
+    VoicePhase.Listening -> VoiceLine(if (transcribing) "Transcribing…" else "Listening…", StatusTone.Accent, true)
     VoicePhase.Thinking -> VoiceLine(status.label, StatusTone.Accent, true)
     VoicePhase.Speaking -> VoiceLine("Speaking", StatusTone.Accent, true)
     VoicePhase.Approval -> VoiceLine(status.label, StatusTone.Amber, false)

@@ -15,6 +15,7 @@ import labs.suchattai.tsukaima.data.HermesState
 import labs.suchattai.tsukaima.data.RecentIds
 import labs.suchattai.tsukaima.data.api.FileDownload
 import labs.suchattai.tsukaima.data.api.ModelOptionsDto
+import labs.suchattai.tsukaima.data.api.TranscriptionDto
 import labs.suchattai.tsukaima.data.api.WorkspacesDto
 import labs.suchattai.tsukaima.data.files.FileSaver
 import labs.suchattai.tsukaima.data.files.ImagePreview
@@ -79,7 +80,13 @@ interface ChatBackend {
     fun decodePreview(bytes: ByteArray): ImageBitmap?
     fun toast(text: String)
 
-    /** A fresh speech recogniser for one voice-mode session (it holds the mic while listening). */
+    /** One recorded utterance (WAV) through Hermes' speech-to-text relay (`/api/audio/transcribe`). */
+    suspend fun transcribe(wav: ByteArray): Result<TranscriptionDto>
+
+    /**
+     * A fresh speech recogniser for one voice-mode session (it holds the mic while listening): the phone's, or the
+     * server relay, per the speech recognition setting at the time of the call.
+     */
     fun speechInput(): SpeechInput
 
     /** The app's text-to-speech (shared, created on first use). */
@@ -123,6 +130,7 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override fun openFile(uri: String, mime: String) = c.openFile(uri, mime)
     override fun decodePreview(bytes: ByteArray) = ImagePreview.decode(bytes)?.asImageBitmap()
     override fun toast(text: String) = c.toastState.show(text)
+    override suspend fun transcribe(wav: ByteArray) = c.repository.transcribe(wav)
     override fun speechInput() = c.speechInput()
     override val speechOutput get() = c.speechOutput
     override fun voiceLanguages() = c.voiceLanguages(includeEngine = true)

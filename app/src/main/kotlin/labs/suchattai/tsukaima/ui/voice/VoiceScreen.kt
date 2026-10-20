@@ -117,7 +117,7 @@ fun VoiceScreen(
         ) {
             VoiceIndicator(voice.phase, 180.dp, onTap = actions.onVoiceTap)
             VoiceStatusLine(
-                voiceLine(voice.phase, state.status, VoiceMode.InApp),
+                voiceLine(voice.phase, state.status, VoiceMode.InApp, voice.transcribing),
                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 2.dp),
             )
             voice.error?.let {

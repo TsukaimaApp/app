@@ -530,4 +530,33 @@ class VoiceControllerTest {
         advanceUntilIdle()
         assertEquals(2, r.input.listenCount)
     }
+
+    @Test fun transcribingIsShownUntilTheFinal() = runTest {
+        val r = rig()
+        r.input.emit(SpeechEvent.Transcribing)
+        advanceUntilIdle()
+        assertTrue(r.state.transcribing)
+        assertEquals(VoicePhase.Listening, r.state.phase)
+        r.input.emit(SpeechEvent.Final("what time is it"))
+        advanceUntilIdle()
+        assertFalse(r.state.transcribing)
+        assertEquals(listOf("what time is it"), r.sent)
+    }
+
+    @Test fun transcribingClearsOnAnErrorAndWhenTheMicCloses() = runTest {
+        val r = rig()
+        r.input.emit(SpeechEvent.Transcribing)
+        advanceUntilIdle()
+        r.input.emit(SpeechEvent.Error("Nothing recognised", retry = true, silence = true))
+        advanceUntilIdle()
+        assertFalse(r.state.transcribing)
+        assertEquals(2, r.input.listenCount)
+        r.input.emit(SpeechEvent.Transcribing)
+        advanceUntilIdle()
+        assertTrue(r.state.transcribing)
+        r.controller.setMuted(true)
+        advanceUntilIdle()
+        assertFalse(r.state.transcribing)
+        assertEquals(VoicePhase.Muted, r.state.phase)
+    }
 }
