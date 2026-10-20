@@ -37,10 +37,10 @@ object ChatReducer {
         messages.mapIndexedNotNull { index, m ->
             val id = "h-${m.rowId ?: index}"
             when (m.role) {
-                "user" -> ChatItem.UserMessage(id, m.text)
+                "user" -> ChatItem.UserMessage(id, m.text, rowId = m.rowId)
                 "assistant" ->
                     if (m.text.isBlank()) null
-                    else ChatItem.AssistantMessage(id, m.text, streaming = false, reasoning = m.reasoning)
+                    else ChatItem.AssistantMessage(id, m.text, streaming = false, reasoning = m.reasoning, rowId = m.rowId)
                 "tool" -> ChatItem.ToolCall(
                     id = id,
                     name = m.name ?: "tool",
@@ -65,6 +65,54 @@ object ChatReducer {
         items = state.items + ChatItem.UserMessage(localId, text, attachments),
         status = AgentStatus.Thinking(flair()),
     )
+
+    /**
+     * `prompt.submit` accepted user message [localId]: stores its persisted [userRowId] (null = not proven yet, kept
+     * unknown). After a truncation, [survivorUserRowIds] are the kept user turns' ids in order (the server may mint
+     * new rows on a rewrite): they rebind the user messages above [localId] when the counts match, a null entry
+     * dropping a stale id.
+     */
+    fun onSubmitAccepted(
+        state: ChatState,
+        localId: String,
+        userRowId: Long?,
+        survivorUserRowIds: List<Long?>? = null,
+    ): ChatState {
+        val index = state.items.indexOfFirst { it.id == localId && it is ChatItem.UserMessage }
+        if (index < 0) return state
+        var items = state.items
+        if (userRowId != null) {
+            items = items.mapIndexed { i, item -> if (i == index) (item as ChatItem.UserMessage).copy(rowId = userRowId) else item }
+        }
+        if (survivorUserRowIds != null) {
+            val kept = items.subList(0, index).withIndex().filter { it.value is ChatItem.UserMessage && !(it.value as ChatItem.UserMessage).failed }
+            if (kept.size == survivorUserRowIds.size) {
+                val rebound = kept.map { it.index }.zip(survivorUserRowIds).toMap()
+                items = items.mapIndexed { i, item ->
+                    if (i in rebound) (item as ChatItem.UserMessage).copy(rowId = rebound[i]) else item
+                }
+            }
+        }
+        return if (items === state.items) state else state.copy(items = items)
+    }
+
+    /**
+     * An edit or regenerate rewound the transcript to user row [beforeRowId]: drops the first item whose row id is
+     * at or after it and everything below (later turns, their tools, and local echoes not persisted yet). Unchanged
+     * when no item carries such a row.
+     */
+    fun onTruncated(state: ChatState, beforeRowId: Long): ChatState {
+        val cut = state.items.indexOfFirst { (it.persistedRow ?: return@indexOfFirst false) >= beforeRowId }
+        return if (cut < 0) state else state.copy(items = state.items.subList(0, cut).toList())
+    }
+
+    /** The persisted row of a user or assistant message; null for other rows or when unknown. */
+    private val ChatItem.persistedRow: Long?
+        get() = when (this) {
+            is ChatItem.UserMessage -> rowId
+            is ChatItem.AssistantMessage -> rowId
+            else -> null
+        }
 
     /** Marks approval [id] answered; idempotent so a double tap sends one answer. */
     fun onApprovalAnswered(state: ChatState, id: String, flair: () -> String = ThinkingFlair::next): ChatState {
@@ -163,7 +211,7 @@ object ChatReducer {
                     // A failed turn with nothing to show: end it as an error, not as a silent empty reply.
                     turnFailed(s, ev.seq, p.string("error") ?: p.string("message"))
                 } else {
-                    onMessageComplete(s, p, ev.seq)
+                    withPersistedTurn(onMessageComplete(s, p, ev.seq), p["persisted_turn"] as? JsonObject)
                 },
                 p["usage"],
             )
@@ -314,6 +362,28 @@ object ChatReducer {
             items = opened.items.replace(fresh) { fresh.copy(text = final, streaming = false) },
             status = AgentStatus.Idle,
         )
+    }
+
+    /**
+     * `message.complete.persisted_turn`: the turn's committed rows. `user_row_id` goes to the newest user message
+     * still without one, `final_assistant_row_id` to the last assistant message (the reply just completed), so they
+     * can be edited / regenerated without reloading the history.
+     */
+    private fun withPersistedTurn(s: ChatState, turn: JsonObject?): ChatState {
+        if (turn == null) return s
+        fun long(key: String) = (turn[key] as? JsonPrimitive)?.longOrNull
+        var items = s.items
+        long("user_row_id")?.let { row ->
+            val i = items.indexOfLast { it is ChatItem.UserMessage && !it.failed }
+            val user = items.getOrNull(i) as? ChatItem.UserMessage
+            if (user != null && user.rowId == null) items = items.toMutableList().also { it[i] = user.copy(rowId = row) }
+        }
+        long("final_assistant_row_id")?.let { row ->
+            val i = items.indexOfLast { it is ChatItem.AssistantMessage }
+            val reply = items.getOrNull(i) as? ChatItem.AssistantMessage
+            if (reply != null && !reply.streaming) items = items.toMutableList().also { it[i] = reply.copy(rowId = row) }
+        }
+        return if (items === s.items) s else s.copy(items = items)
     }
 
     private fun onToolStart(s: ChatState, p: JsonObject): ChatState {

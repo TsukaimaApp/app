@@ -40,6 +40,19 @@ data class SessionResumed(
     val info: JsonObject = JsonObject(emptyMap()),
 )
 
+/**
+ * `prompt.submit` result. [status] is `streaming` for a turn that started (else `queued`, `steered`, …, or null on a
+ * typed stop phrase); [userRowId] is the persisted row of the accepted input, absent when not proven yet.
+ * [survivorUserRowIds] (after a truncation) are the kept user turns' row ids in order; a null entry means that
+ * turn's cached id is stale.
+ */
+@Serializable
+data class SubmitResult(
+    val status: String? = null,
+    @SerialName("user_row_id") val userRowId: Long? = null,
+    @SerialName("survivor_user_row_ids") val survivorUserRowIds: List<Long?>? = null,
+)
+
 /** `file.attach` result (gateway-contract `FileAttachResult`). */
 @Serializable
 data class FileAttached(

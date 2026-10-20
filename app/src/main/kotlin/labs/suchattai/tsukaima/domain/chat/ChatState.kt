@@ -11,12 +11,15 @@ sealed interface ChatItem {
     /**
      * [attachments]: names of the files sent with the message (local echo only; history shows the text).
      * [failed]: the local echo of a send that did not reach Hermes; the bubble offers Retry and Dismiss.
+     * [rowId]: the server's persisted row (history `row_id`, or `user_row_id` once a send was accepted); null
+     * until known. Edit and Regenerate rewind the transcript to it.
      */
     data class UserMessage(
         override val id: String,
         val text: String,
         val attachments: List<String> = emptyList(),
         val failed: Boolean = false,
+        val rowId: Long? = null,
     ) : ChatItem
 
     data class AssistantMessage(
@@ -26,6 +29,8 @@ sealed interface ChatItem {
         val reasoning: String?,
         /** The reasoning was streamed in this session (shown open unless the user closed it); history loads closed. */
         val reasoningLive: Boolean = false,
+        /** The persisted row (history `row_id`, or the turn's `final_assistant_row_id`); null until known. */
+        val rowId: Long? = null,
     ) : ChatItem
 
     data class ToolCall(

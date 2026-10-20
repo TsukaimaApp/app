@@ -58,6 +58,8 @@ data class ChatUiState(
     val pendingModel: PendingModel? = null,
     /** The message whose long-press menu (copy) is open. */
     val messageMenu: String? = null,
+    /** The row of the user message being edited: the next send replaces it and drops what followed. */
+    val pendingEdit: Long? = null,
     /** Voice mode's state; non-null while the voice screen is open. */
     val voice: VoiceState? = null,
     /** The voice language setting (BCP-47 tag), mirrored from settings; null = system default. */

@@ -123,7 +123,7 @@ class GatewaySessionTest {
     }
 
     @Test
-    fun submitReturnsWithoutResultParsing() = runBlocking {
+    fun submitSendsOnlySessionAndTextByDefault() = runBlocking {
         val t = FakeTransport(obj("""{"status":"streaming","weird":[1,2]}"""))
         GatewaySession(t).submit("s1", "hi")
         val (method, params) = t.calls.single()
@@ -212,5 +212,29 @@ class GatewaySessionTest {
         val r = GatewaySession(t).resume("st")
         assertTrue(r.running)
         assertEquals("1\n2", r.inflight!!["assistant"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun submitParsesTheAcceptedRow() = runBlocking {
+        val t = FakeTransport(obj("""{"status":"streaming","user_row_id":42,"survivor_user_row_ids":[1,null]}"""))
+        val r = GatewaySession(t).submit("s1", "hi")
+        assertEquals(SubmitResult("streaming", 42L, listOf(1L, null)), r)
+        t.result = obj("""{"status":"queued"}""")
+        assertEquals(SubmitResult("queued", null), GatewaySession(t).submit("s1", "hi"))
+    }
+
+    @Test
+    fun submitWithTruncationConfirmsTheCut() = runBlocking {
+        val t = FakeTransport(obj("""{"status":"streaming"}"""))
+        GatewaySession(t).submit("s1", "hi again", truncateBeforeRowId = 7L)
+        val params = t.calls.single().second
+        assertEquals(
+            setOf("session_id", "text", "truncate_before_row_id", "confirm_truncate", "confirm_deep_truncate", "confirm_empty_truncate"),
+            params.keys,
+        )
+        assertEquals(7L, params["truncate_before_row_id"]!!.jsonPrimitive.content.toLong())
+        assertTrue(params["confirm_truncate"]!!.jsonPrimitive.boolean)
+        assertTrue(params["confirm_deep_truncate"]!!.jsonPrimitive.boolean)
+        assertTrue(params["confirm_empty_truncate"]!!.jsonPrimitive.boolean)
     }
 }

@@ -38,10 +38,12 @@ import labs.suchattai.tsukaima.data.gateway.ApprovalChoice
 import labs.suchattai.tsukaima.data.gateway.ConnectionState
 import labs.suchattai.tsukaima.data.gateway.Frame
 import labs.suchattai.tsukaima.data.gateway.GatewayClosedException
+import labs.suchattai.tsukaima.data.gateway.RpcException
 import labs.suchattai.tsukaima.data.gateway.RpcTransport
 import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ChatItem
+import labs.suchattai.tsukaima.domain.chat.ChatState
 import labs.suchattai.tsukaima.domain.chat.SecretKind
 import labs.suchattai.tsukaima.domain.chat.StatusTone
 import labs.suchattai.tsukaima.domain.chat.running
@@ -88,6 +90,9 @@ class ChatViewModelTest {
         /** One-shot: the next call to the method waits for the gate, then proceeds normally. */
         val gateNext = mutableMapOf<String, CompletableDeferred<Unit>>()
 
+        /** One-shot: the next call to the method fails with this server error. */
+        val rpcErrors = mutableMapOf<String, RpcException>()
+
         fun on(method: String, vararg result: JsonObject) {
             results[method] = ArrayDeque(result.toList())
         }
@@ -102,6 +107,7 @@ class ChatViewModelTest {
                 throw GatewayClosedException()
             }
             gateNext.remove(method)?.await()
+            rpcErrors.remove(method)?.let { throw it }
             if (method in crashing) throw IllegalStateException("boom")
             if (method in failing) {
                 gate?.await()
@@ -2307,5 +2313,175 @@ class ChatViewModelTest {
         advanceUntilIdle()
         assertEquals("pl-PL", b.settings.value?.voiceLanguage)
         assertEquals(0, b.speech.listenCount)
+    }
+
+    // ---- edit and regenerate ----------------------------------------------------------------------
+
+    private val twoTurnsJson = """
+        {"session_id":"$live","stored_session_id":"$stored","running":false,"messages":[
+          {"role":"user","text":"what kernel?","row_id":1},
+          {"role":"assistant","text":"6.17.2","row_id":2},
+          {"role":"user","text":"and the distro?","row_id":3},
+          {"role":"assistant","text":"Ubuntu 25.04","row_id":4}
+        ]}
+    """.trimIndent()
+
+    private fun ChatUiState.texts() = chat.items.map {
+        when (it) {
+            is ChatItem.UserMessage -> it.text
+            is ChatItem.AssistantMessage -> it.text
+            else -> it.id
+        }
+    }
+
+    @Test
+    fun editRewindsToTheEditedMessageAndSendsTheNewText() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("session.resume", obj(twoTurnsJson))
+            transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":9,"survivor_user_row_ids":[1]}"""))
+        }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+
+        vm.showMessageMenu("h-3")
+        vm.editMessage("h-3")
+        assertEquals("and the distro?", vm.state.value.input)
+        assertEquals(3L, vm.state.value.pendingEdit)
+        assertNull(vm.state.value.messageMenu)
+
+        vm.setInput("and the init system?")
+        vm.send()
+        advanceUntilIdle()
+
+        val params = b.transport.last("prompt.submit")
+        assertEquals("and the init system?", params["text"]!!.jsonPrimitive.content)
+        assertEquals(3L, params["truncate_before_row_id"]!!.jsonPrimitive.long)
+        assertEquals("true", params["confirm_truncate"]!!.jsonPrimitive.content)
+        assertEquals("true", params["confirm_deep_truncate"]!!.jsonPrimitive.content)
+        val s = vm.state.value
+        assertEquals(listOf("what kernel?", "6.17.2", "and the init system?"), s.texts())
+        assertEquals(9L, (s.chat.items.last() as ChatItem.UserMessage).rowId)
+        assertEquals("", s.input)
+        assertNull(s.pendingEdit)
+        assertEquals(AgentStatus.Thinking("flair"), s.chat.status)
+    }
+
+    @Test
+    fun cancellingAnEditClearsTheComposer() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("session.resume", obj(twoTurnsJson)) }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+
+        vm.editMessage("h-1")
+        vm.cancelEdit()
+        assertEquals("", vm.state.value.input)
+        assertNull(vm.state.value.pendingEdit)
+
+        vm.editMessage("h-2") // an assistant message cannot be edited
+        assertNull(vm.state.value.pendingEdit)
+    }
+
+    @Test
+    fun editFallsBackWhenTheRowIsGone() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("session.resume", obj(twoTurnsJson))
+            transport.rpcErrors["prompt.submit"] = RpcException(4018, "truncate_before_row_id 3 not found in session history")
+        }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        val before = vm.state.value.chat.items
+
+        vm.editMessage("h-3")
+        vm.setInput("and the init system?")
+        vm.send()
+        advanceUntilIdle()
+
+        val s = vm.state.value
+        assertEquals(before, s.chat.items)
+        assertEquals("and the init system?", s.input)
+        assertEquals(3L, s.pendingEdit)
+        assertEquals(AgentStatus.Idle, s.chat.status)
+        assertTrue(b.toasts.last(), b.toasts.last().contains("truncate_before_row_id 3 not found"))
+    }
+
+    @Test
+    fun regenerateResubmitsThePrecedingUserMessage() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("session.resume", obj(twoTurnsJson))
+            transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":11}"""))
+        }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+
+        vm.regenerate("h-4")
+        advanceUntilIdle()
+
+        val params = b.transport.last("prompt.submit")
+        assertEquals("and the distro?", params["text"]!!.jsonPrimitive.content)
+        assertEquals(3L, params["truncate_before_row_id"]!!.jsonPrimitive.long)
+        val s = vm.state.value
+        assertEquals(listOf("what kernel?", "6.17.2", "and the distro?"), s.texts())
+        assertEquals(11L, (s.chat.items.last() as ChatItem.UserMessage).rowId)
+        assertEquals("", s.input)
+
+        vm.regenerate("h-2") // a turn is running: ignored
+        advanceUntilIdle()
+        assertEquals(1, b.transport.methods().count { it == "prompt.submit" })
+    }
+
+    @Test
+    fun failedRegenerateKeepsTheTranscript() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("session.resume", obj(twoTurnsJson))
+            transport.rpcErrors["prompt.submit"] = RpcException(4029, "session busy")
+        }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        val before = vm.state.value.chat.items
+
+        vm.regenerate("h-4")
+        advanceUntilIdle()
+
+        assertEquals(before, vm.state.value.chat.items)
+        assertEquals("", vm.state.value.input)
+        assertNull(vm.state.value.pendingEdit)
+        assertEquals(AgentStatus.Idle, vm.state.value.chat.status)
+        assertTrue(b.toasts.last().contains("session busy"))
+    }
+
+    @Test
+    fun plainSendStoresTheAcceptedRow() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":5}""")) }
+        val vm = vm(b)
+        advanceUntilIdle()
+
+        vm.setInput("hi")
+        vm.send()
+        advanceUntilIdle()
+
+        assertEquals(5L, (vm.state.value.chat.items.single() as ChatItem.UserMessage).rowId)
+        assertFalse("truncate_before_row_id" in b.transport.last("prompt.submit"))
+    }
+
+    @Test
+    fun messageMenuOffersEditAndRegenerateOnlyWhenTheyCanRewind() {
+        val items = listOf(
+            ChatItem.UserMessage("h-1", "what kernel?", rowId = 1),
+            ChatItem.AssistantMessage("h-2", "6.17.2", streaming = false, reasoning = null, rowId = 2),
+            ChatItem.UserMessage("u-l1", "not persisted"),
+            ChatItem.AssistantMessage("a-1", "reply", streaming = false, reasoning = null),
+        )
+        val idle = ChatUiState(chat = ChatState(items = items, status = AgentStatus.Idle))
+        fun labels(s: ChatUiState, id: String) = messageItems(s.copy(messageMenu = id), ChatActions()).map { it.label }
+
+        assertEquals(listOf("Copy text", "Edit"), labels(idle, "h-1"))
+        assertEquals(listOf("Copy text", "Regenerate"), labels(idle, "h-2"))
+        assertEquals(listOf("Copy text"), labels(idle, "u-l1"))
+        assertEquals(listOf("Copy text"), labels(idle, "a-1"))
+        val running = idle.copy(chat = idle.chat.copy(status = AgentStatus.Replying))
+        assertEquals(listOf("Copy text"), labels(running, "h-1"))
+        assertEquals(listOf("Copy text"), labels(running, "h-2"))
+        val offline = idle.copy(chat = idle.chat.copy(status = AgentStatus.Offline))
+        assertEquals(listOf("Copy text"), labels(offline, "h-2"))
     }
 }

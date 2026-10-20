@@ -136,6 +136,9 @@ class ChatActions(
     val onMessageMenu: (String?) -> Unit = {},
     val onToggleReasoning: (String) -> Unit = {},
     val onCopyMessage: (id: String, reasoning: Boolean) -> Unit = { _, _ -> },
+    val onEditMessage: (String) -> Unit = {},
+    val onCancelEdit: () -> Unit = {},
+    val onRegenerate: (String) -> Unit = {},
 )
 
 /**
@@ -233,6 +236,9 @@ fun ChatScreen(
                     scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Message", text))) }
                 }
             },
+            onEditMessage = vm::editMessage,
+            onCancelEdit = vm::cancelEdit,
+            onRegenerate = vm::regenerate,
         ),
     )
 }
@@ -350,6 +356,8 @@ private fun ChatColumn(
             onStop = actions.onStop,
             onVoice = actions.onVoice,
             focusRequester = composerFocus,
+            editing = state.pendingEdit != null,
+            onCancelEdit = actions.onCancelEdit,
         )
     }
 }
@@ -476,13 +484,22 @@ internal fun reasoningItems(state: ChatUiState, actions: ChatActions): List<Menu
         MenuItem(label, null, checked = state.chat.reasoningEffort == value) { actions.onReasoning(value) }
     }
 
-/** A message's long-press menu: Copy text, plus Copy reasoning for a reply that has some. */
+/**
+ * A message's long-press menu: Copy text, plus Copy reasoning for a reply that has some; Edit on a user message the
+ * server has persisted, Regenerate on a reply whose user message it has. Edit and Regenerate are left out while a
+ * turn runs or Hermes is unreachable ([ChatEdits.rewindable]).
+ */
 internal fun messageItems(state: ChatUiState, actions: ChatActions): List<MenuItem> {
     val item = state.chat.items.firstOrNull { it.id == state.messageMenu } ?: return emptyList()
     val reasoning = (item as? ChatItem.AssistantMessage)?.reasoning?.takeIf { it.isNotEmpty() }
+    val rewind = ChatEdits.rewindable(state)
+    val edit = (item as? ChatItem.UserMessage)?.takeIf { rewind && it.rowId != null && !it.failed }
+    val regenerate = (item as? ChatItem.AssistantMessage)?.takeIf { rewind && ChatEdits.regenerateSource(state.chat.items, it.id) != null }
     return listOfNotNull(
         MenuItem("Copy text", IconName.ContentCopy) { actions.onCopyMessage(item.id, false) },
         reasoning?.let { MenuItem("Copy reasoning", IconName.Psychology) { actions.onCopyMessage(item.id, true) } },
+        edit?.let { MenuItem("Edit", IconName.Edit) { actions.onEditMessage(it.id) } },
+        regenerate?.let { MenuItem("Regenerate", IconName.Refresh) { actions.onRegenerate(it.id) } },
     )
 }
 

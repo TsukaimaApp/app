@@ -90,6 +90,10 @@ class ChatViewModel(
         session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), io, _state, ::liveSession,
     )
 
+    private val edits = ChatEdits(
+        session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state, attachments, flair,
+    ) { "u-l${++userCounter}" }
+
     private val media = ChatMedia(backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), io, _state)
 
     /** The chat holds its history: a new chat at once, a stored one once `session.resume` has bound it. */
@@ -212,13 +216,26 @@ class ChatViewModel(
 
     fun setInput(text: String) = _state.update { it.copy(input = text) }
 
-    /** Sends the typed text with the ready attachments ([Attachments.promptText]); see [ChatUiState.canSend]. */
+    /**
+     * Sends the typed text with the ready attachments ([Attachments.promptText]); see [ChatUiState.canSend]. While
+     * [ChatUiState.pendingEdit] is set the text replaces that message instead ([ChatEdits]).
+     */
     fun send() {
         if (!_state.value.canSend) return
         val text = _state.value.input.trim()
         val live = chat.liveSessionId ?: return backend.toast("Still connecting to Hermes")
+        _state.value.pendingEdit?.let { row -> return edits.send(live, text, row) }
         startTurn(live, text, attachments.takeReady(), fromComposer = true)
     }
+
+    /** "Edit" on user message [id]: its text goes into the composer and the next [send] replaces it; see [ChatEdits]. */
+    fun editMessage(id: String) = edits.edit(id)
+
+    /** A tap on the composer's "Editing" caption: leaves edit mode and clears the text. */
+    fun cancelEdit() = edits.cancel()
+
+    /** "Regenerate" on reply [assistantId]: its user message is sent again in its place; see [ChatEdits]. */
+    fun regenerate(assistantId: String) = edits.regenerate(assistantId)
 
     /**
      * Sends [text] (trimmed) without attachments, leaving the composer alone (voice mode). False, with a toast,
@@ -258,8 +275,9 @@ class ChatViewModel(
         voice: Boolean = false, interrupted: Boolean = false,
     ) {
         try {
-            session.submit(live, Attachments.promptText(text, sent), voice, interrupted)
+            val accepted = session.submit(live, Attachments.promptText(text, sent), voice, interrupted)
             attachments.sent(sent)
+            setChat { ChatReducer.onSubmitAccepted(it, localId, accepted.userRowId) }
         } catch (c: CancellationException) {
             throw c
         } catch (e: Exception) {

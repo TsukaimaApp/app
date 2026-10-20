@@ -805,4 +805,81 @@ class ChatReducerTest {
             unbound.feed(ev("session.resume_progress", """{"phase":"history","status":"failed","message":"disk full"}""")).resumeProgress,
         )
     }
+
+    // ---- edit and regenerate ----------------------------------------------------------------------
+
+    @Test
+    fun historyKeepsRowIdsOnMessages() {
+        val messages = HermesJson.decodeFromString(HistoryResult.serializer(), historyJson).messages
+        val items = ChatReducer.fromHistory(messages)
+        assertEquals(1L, (items[0] as ChatItem.UserMessage).rowId)
+        assertEquals(4L, (items[2] as ChatItem.AssistantMessage).rowId)
+    }
+
+    @Test
+    fun submitAcceptedStoresTheRowOnTheEcho() {
+        val s = ChatReducer.onSubmitted(live, "hi", "u-l1", flair)
+        val accepted = ChatReducer.onSubmitAccepted(s, "u-l1", 42L)
+        assertEquals(42L, (accepted.items.single() as ChatItem.UserMessage).rowId)
+        assertEquals(accepted, ChatReducer.onSubmitAccepted(accepted, "missing", 7L))
+        assertEquals(accepted, ChatReducer.onSubmitAccepted(accepted, "u-l1", null))
+    }
+
+    @Test
+    fun truncationDropsTheEditedRowAndEverythingAfterIt() {
+        val items = listOf(
+            ChatItem.UserMessage("h-1", "first", rowId = 1),
+            ChatItem.AssistantMessage("h-2", "one", streaming = false, reasoning = null, rowId = 2),
+            ChatItem.UserMessage("h-3", "second", rowId = 3),
+            ChatItem.ToolCall("t-1", "terminal", null, null, ToolStatus.Done, null, null, null),
+            ChatItem.AssistantMessage("h-5", "two", streaming = false, reasoning = null, rowId = 5),
+            ChatItem.UserMessage("u-l1", "local echo, not yet persisted"),
+            ChatItem.AssistantMessage("a-9", "live reply", streaming = false, reasoning = null),
+        )
+        val cut = ChatReducer.onTruncated(live.copy(items = items), 3L)
+        assertEquals(listOf("h-1", "h-2"), cut.items.map { it.id })
+    }
+
+    @Test
+    fun truncationCutsAtTheFirstRowAtOrAfterTheTarget() {
+        // Row 3 is gone from the client (e.g. a blank reply) — the cut lands on the next known row.
+        val items = listOf(
+            ChatItem.UserMessage("h-1", "first", rowId = 1),
+            ChatItem.UserMessage("h-4", "later", rowId = 4),
+            ChatItem.UserMessage("u-l2", "echo"),
+        )
+        assertEquals(listOf("h-1"), ChatReducer.onTruncated(live.copy(items = items), 3L).items.map { it.id })
+        // No row at or after the target: nothing to drop.
+        val none = live.copy(items = items.take(1))
+        assertEquals(none, ChatReducer.onTruncated(none, 9L))
+    }
+
+    @Test
+    fun survivorRowIdsRebindTheKeptUserMessages() {
+        val items = listOf(
+            ChatItem.UserMessage("h-1", "first", rowId = 1),
+            ChatItem.AssistantMessage("h-2", "one", streaming = false, reasoning = null, rowId = 2),
+            ChatItem.UserMessage("h-3", "second", rowId = 3),
+            ChatItem.UserMessage("u-l1", "new"),
+        )
+        val s = ChatReducer.onSubmitAccepted(live.copy(items = items), "u-l1", 11L, survivorUserRowIds = listOf(1L, null))
+        assertEquals(listOf(1L, 2L, null, 11L), s.items.map {
+            when (it) {
+                is ChatItem.UserMessage -> it.rowId
+                is ChatItem.AssistantMessage -> it.rowId
+                else -> -1L
+            }
+        })
+    }
+
+    @Test
+    fun completedTurnTakesItsPersistedRowIds() {
+        val s = ChatReducer.onSubmitted(live, "hi", "u-l1", flair).feed(
+            ev("message.start", seq = 1),
+            ev("message.delta", """{"text":"Hello"}""", seq = 2),
+            ev("message.complete", """{"text":"Hello","persisted_turn":{"row_ids":[7,8],"complete":true,"user_row_id":7,"final_assistant_row_id":8}}""", seq = 3),
+        )
+        assertEquals(7L, (s.items[0] as ChatItem.UserMessage).rowId)
+        assertEquals(8L, (s.items[1] as ChatItem.AssistantMessage).rowId)
+    }
 }

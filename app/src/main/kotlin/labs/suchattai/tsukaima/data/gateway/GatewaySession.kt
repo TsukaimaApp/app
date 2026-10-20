@@ -49,16 +49,33 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
     }
 
     /**
-     * Result body (`{status:"streaming",…}`) is intentionally ignored; output arrives as events. [voice]: a spoken
-     * turn (the server answers with its voice persona); [interrupted]: the user barged in on the previous spoken reply.
+     * Sends a user turn; its output arrives as events. [voice]: a spoken turn (the server answers with its voice
+     * persona); [interrupted]: the user barged in on the previous spoken reply. [truncateBeforeRowId] rewinds first
+     * (edit / regenerate): the rows from that user row on are archived before the new turn. The cut is always
+     * confirmed, including one that archives several user turns (`confirm_deep_truncate`) or the whole transcript
+     * (`confirm_empty_truncate`, editing the first message): the user asked for exactly that rewind.
      */
-    suspend fun submit(sessionId: String, text: String, voice: Boolean = false, interrupted: Boolean = false) {
-        rpc("prompt.submit", buildJsonObject {
+    suspend fun submit(
+        sessionId: String,
+        text: String,
+        voice: Boolean = false,
+        interrupted: Boolean = false,
+        truncateBeforeRowId: Long? = null,
+    ): SubmitResult {
+        val result = rpc("prompt.submit", buildJsonObject {
             put("session_id", sessionId)
             put("text", text)
             if (voice) put("voice_turn", true)
             if (interrupted) put("interrupted", true)
+            if (truncateBeforeRowId != null) {
+                put("truncate_before_row_id", truncateBeforeRowId)
+                put("confirm_truncate", true)
+                put("confirm_deep_truncate", true)
+                put("confirm_empty_truncate", true)
+            }
         })
+        // The turn is running once the call succeeded: a result we cannot read must not turn it into a failed send.
+        return runCatching { HermesJson.decodeFromJsonElement<SubmitResult>(result) }.getOrDefault(SubmitResult())
     }
 
     /** Stops the running turn; returns the server's `status` (`interrupted` / `not_interrupted`), null if absent. */

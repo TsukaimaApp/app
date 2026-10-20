@@ -85,7 +85,8 @@ fun composerAction(
  * gates sending (text or a ready attachment); the caller clears [value] in [onSend]. While the agent is
  * [running] a turn, send becomes a danger-filled Stop ([onStop]) in the same 44dp slot, and Enter does nothing. When [onVoice] is set and there is nothing to send, send
  * becomes an accent mic that calls it (see [composerAction]). [focusRequester], when set, is attached to the text
- * field (leaving voice mode for the keyboard focuses it).
+ * field (leaving voice mode for the keyboard focuses it). While [editing] a sent message, an "Editing — tap to
+ * cancel" caption sits above the field; a tap on it calls [onCancelEdit].
  */
 @Composable
 fun Composer(
@@ -105,6 +106,8 @@ fun Composer(
     disabledPlaceholder: String = "Hermes is unreachable",
     onVoice: (() -> Unit)? = null,
     focusRequester: FocusRequester? = null,
+    editing: Boolean = false,
+    onCancelEdit: () -> Unit = {},
 ) {
     val colors = MaterialTheme.tsukaima
     val shape = TsukaimaShapes.composer
@@ -119,6 +122,7 @@ fun Composer(
             .border(1.dp, colors.hairline, shape)
             .padding(6.dp),
     ) {
+        if (editing) EditingCaption(onCancelEdit)
         if (attachments.isNotEmpty()) {
             Row(
                 modifier = Modifier
@@ -243,6 +247,25 @@ private fun AttachmentChip(a: PendingAttachment, onRemove: () -> Unit, onRetry: 
     }
 }
 
+/** "Editing — tap to cancel" above the field while a sent message is being edited; the whole 44dp row cancels. */
+@Composable
+private fun EditingCaption(onCancel: () -> Unit) {
+    val colors = MaterialTheme.tsukaima
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = Dimens.hit)
+            .clip(TsukaimaShapes.pill)
+            .clickable(onClickLabel = "Cancel the edit", role = Role.Button, onClick = onCancel)
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        TsukaimaIcon(IconName.Edit, size = 14.dp, tint = colors.ink2, contentDescription = null)
+        Text("Editing — tap to cancel", style = TsukaimaType.caption, color = colors.ink2)
+    }
+}
+
 @Composable
 private fun ComposerPreview(dark: Boolean) = PreviewPage(dark) {
     var text by remember { mutableStateOf("") }
@@ -251,6 +274,7 @@ private fun ComposerPreview(dark: Boolean) = PreviewPage(dark) {
     Composer("", {}, {}, {}, enabled = false)
     Composer("", {}, {}, {}, enabled = true, running = true)
     Composer("", {}, {}, {}, enabled = true, onVoice = {})
+    Composer("And the init system?", {}, {}, {}, enabled = true, editing = true)
     Composer(
         "What is in these?", {}, {}, {}, enabled = true, canSend = false,
         attachments = listOf(
