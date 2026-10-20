@@ -4,9 +4,10 @@ import java.security.SecureRandom
 
 /**
  * How far an [AssistActivity] launch is trusted. The activity is exported (it must take `ACTION_ASSIST`), so any app
- * could start it: only the system's launches — through [TsukaimaVoiceSession] (valid [AssistNonce]) or
- * `ACTION_ASSIST` while Tsukaima holds the assistant role — listen at once and resume the recent assist chat.
- * Anything else opens a new chat at rest ("Tap to speak"): listening starts only on the user's tap.
+ * could start it, even with `ACTION_ASSIST` while Tsukaima holds the assistant role (the role says nothing about the
+ * caller). Only a launch carrying the voice session's one-time [AssistNonce] — the system invoking the assistant
+ * through [TsukaimaVoiceSession] — listens at once and resumes the recent assist chat. Anything else opens a new
+ * chat at rest ("Tap to speak"), remembers nothing, and listens only on the user's tap.
  */
 sealed interface AssistLaunch {
     data object Trusted : AssistLaunch
@@ -14,14 +15,7 @@ sealed interface AssistLaunch {
     data object Untrusted : AssistLaunch
 
     companion object {
-        /** `Intent.ACTION_ASSIST`, spelled out so this stays plain JVM. */
-        const val ACTION_ASSIST = "android.intent.action.ASSIST"
-
-        fun trust(action: String?, nonceValid: Boolean, roleHeld: Boolean): AssistLaunch = when {
-            nonceValid -> Trusted
-            action == ACTION_ASSIST && roleHeld -> Trusted
-            else -> Untrusted
-        }
+        fun trust(nonceValid: Boolean): AssistLaunch = if (nonceValid) Trusted else Untrusted
     }
 }
 

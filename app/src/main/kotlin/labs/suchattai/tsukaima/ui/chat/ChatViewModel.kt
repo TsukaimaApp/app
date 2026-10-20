@@ -84,9 +84,9 @@ class ChatViewModel(
     private val media = ChatMedia(backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), io, _state)
 
     /** The chat holds its history: a new chat at once, a stored one once `session.resume` has bound it. */
-    private val historyLoaded = MutableStateFlow(storedSessionId == null)
+    private val history = MutableStateFlow(if (storedSessionId == null) ChatHistory.Loaded else ChatHistory.Loading)
 
-    private val voice = ChatVoice(backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state, ::sendText, historyLoaded)
+    private val voice = ChatVoice(backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state, ::sendText, history)
 
     private val chat get() = _state.value.chat
     private fun setChat(block: (ChatState) -> ChatState) = _state.update { it.copy(chat = block(it.chat)) }
@@ -130,7 +130,7 @@ class ChatViewModel(
                     sync.syncWatermark(r.sessionId)
                 }
                 opened = true
-                historyLoaded.value = true
+                history.value = ChatHistory.Loaded
                 sync.adoptRecent()
                 if (storedSessionId != null) checkArchived(storedSessionId)
             } catch (c: CancellationException) {
@@ -138,7 +138,10 @@ class ChatViewModel(
             } catch (_: GatewayClosedException) {
                 notConnected = true // not connected yet, or dropped: retried on Connected
             } catch (e: Exception) {
-                backend.toast("Couldn’t open the chat: ${e.message ?: "gateway error"}")
+                val message = "Couldn’t open the chat: ${e.message ?: "gateway error"}"
+                backend.toast(message)
+                // Voice stops waiting for the history and shows why (a later Connected may still retry the open).
+                if (history.value == ChatHistory.Loading) history.value = ChatHistory.Failed(message)
             } finally {
                 opening = false
                 _state.update { it.copy(loading = false) }

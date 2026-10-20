@@ -1,7 +1,6 @@
 package labs.suchattai.tsukaima.assist
 
 import android.Manifest
-import android.app.role.RoleManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -42,7 +41,7 @@ import labs.suchattai.tsukaima.ui.voice.AssistOverlay
 
 /**
  * The device-assistant sheet ([AssistOverlay]) in a translucent window over the current app, started by
- * [TsukaimaVoiceSession] (or `ACTION_ASSIST`). A trusted launch ([AssistLaunch]) opens voice mode in
+ * [TsukaimaVoiceSession] (or `ACTION_ASSIST`). A trusted launch ([AssistLaunch]: the session's) opens voice mode in
  * [VoiceMode.Assist], listening, on the chat the sheet used within the last half hour ([AssistSessionPolicy]), else a
  * new one; any other launch gets a new chat at rest until the indicator is tapped. The microphone is asked first. Back, a tap on
  * the scrim, a swipe down and leaving it (`noHistory`) close it; "Continue in Tsukaima", the Open and Keyboard icons
@@ -61,11 +60,8 @@ class AssistActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         container = (application as TsukaimaApp).container
-        trusted = savedInstanceState?.getBoolean(STATE_TRUSTED) ?: run {
-            val roleHeld = getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true
-            val nonceValid = AssistNonce.consume(intent?.getStringExtra(AssistNonce.EXTRA))
-            AssistLaunch.trust(intent?.action, nonceValid, roleHeld) == AssistLaunch.Trusted
-        }
+        trusted = savedInstanceState?.getBoolean(STATE_TRUSTED)
+            ?: (AssistLaunch.trust(AssistNonce.consume(intent?.getStringExtra(AssistNonce.EXTRA))) == AssistLaunch.Trusted)
         setContent {
             val settings by container.settings.collectAsStateWithLifecycle()
             TsukaimaTheme(darkTheme = isDarkTheme(settings?.theme), dynamicColor = settings?.materialYou == true) {

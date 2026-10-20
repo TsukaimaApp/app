@@ -69,6 +69,9 @@ class ChatViewModelTest {
         val responses = mutableListOf<Pair<String, JsonObject>>()
         val results = mutableMapOf<String, ArrayDeque<JsonObject>>()
         val failing = mutableSetOf<String>()
+
+        /** Methods that fail with a plain error (not "not connected"): not retried. */
+        val crashing = mutableSetOf<String>()
         var gate: CompletableDeferred<Unit>? = null
 
         /** One-shot: the next call to the method waits for the gate (if any), then fails. */
@@ -91,6 +94,7 @@ class ChatViewModelTest {
                 throw GatewayClosedException()
             }
             gateNext.remove(method)?.await()
+            if (method in crashing) throw IllegalStateException("boom")
             if (method in failing) {
                 gate?.await()
                 throw GatewayClosedException()
@@ -1967,6 +1971,40 @@ class ChatViewModelTest {
         assertEquals(2, s.chat.items.size)
         assertEquals(2, s.voice?.startIndex)
         assertTrue(b.speechOutput.spoken.isEmpty())
+    }
+
+    @Test
+    fun assistVoiceShowsWhyAChatThatFailedToOpenCannotListen() = runTest(dispatcher) {
+        val b = backend().apply { transport.crashing += "session.resume" }
+        val gate = CompletableDeferred<Unit>()
+        b.transport.gateNext["session.resume"] = gate
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        vm.openVoice(VoiceMode.Assist)
+        advanceUntilIdle()
+        assertNull(vm.state.value.voice?.error)
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+        val voice = vm.state.value.voice
+        assertEquals("Couldn’t open the chat: boom", voice?.error)
+        assertEquals(listOf("Couldn’t open the chat: boom"), b.toasts)
+        vm.tapVoiceIndicator()
+        advanceUntilIdle()
+        assertEquals(0, b.speech.listenCount)
+        assertTrue(b.speechOutput.spoken.isEmpty())
+    }
+
+    @Test
+    fun voiceWaitingForTheHistoryShowsNoTranscript() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("session.resume", obj(resumeJson)) }
+        val gate = CompletableDeferred<Unit>()
+        b.transport.gateNext["session.resume"] = gate
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        vm.openVoice(VoiceMode.Assist)
+        advanceUntilIdle()
+        assertEquals(Int.MAX_VALUE, vm.state.value.voice?.startIndex)
     }
 
     @Test

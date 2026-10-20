@@ -8,22 +8,12 @@ import org.junit.Test
 
 class AssistLaunchTest {
     @Test
-    fun theAssistantSessionIsTrusted() =
-        assertEquals(AssistLaunch.Trusted, AssistLaunch.trust(action = null, nonceValid = true, roleHeld = false))
+    fun theAssistantSessionIsTrusted() = assertEquals(AssistLaunch.Trusted, AssistLaunch.trust(nonceValid = true))
 
     @Test
-    fun assistActionIsTrustedWhileTheRoleIsHeld() =
-        assertEquals(AssistLaunch.Trusted, AssistLaunch.trust(AssistLaunch.ACTION_ASSIST, nonceValid = false, roleHeld = true))
-
-    @Test
-    fun assistActionWithoutTheRoleIsUntrusted() =
-        assertEquals(AssistLaunch.Untrusted, AssistLaunch.trust(AssistLaunch.ACTION_ASSIST, nonceValid = false, roleHeld = false))
-
-    @Test
-    fun anyOtherLaunchIsUntrusted() {
-        assertEquals(AssistLaunch.Untrusted, AssistLaunch.trust(action = null, nonceValid = false, roleHeld = true))
-        assertEquals(AssistLaunch.Untrusted, AssistLaunch.trust("android.intent.action.MAIN", nonceValid = false, roleHeld = true))
-    }
+    fun anythingWithoutTheSessionNonceIsUntrusted() =
+        // Including an explicit ACTION_ASSIST from another app while Tsukaima holds the assistant role.
+        assertEquals(AssistLaunch.Untrusted, AssistLaunch.trust(nonceValid = false))
 
     @Test
     fun aNonceIsValidOnceAndOnlyTheLatest() {
