@@ -2,13 +2,21 @@ package labs.suchattai.tsukaima.ui.chat.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,6 +35,8 @@ import labs.suchattai.tsukaima.ui.theme.Dimens
 import labs.suchattai.tsukaima.ui.theme.TsukaimaShapes
 import labs.suchattai.tsukaima.ui.theme.TsukaimaType
 import labs.suchattai.tsukaima.ui.theme.tsukaima
+
+private const val CommandMaxLines = 8
 
 /** Floating-card shell shared by [ApprovalCard] and [PairingCard]: raised, hairline, shadow, 16dp pad. */
 @Composable
@@ -79,17 +89,41 @@ fun ApprovalCard(
             color = colors.ink3,
             modifier = Modifier.padding(bottom = 6.dp),
         )
+        val revealed = remember(item.command) { CommandText.reveal(item.command) }
+        var expanded by rememberSaveable(item.id) { mutableStateOf(false) }
+        var overflows by remember(item.command) { mutableStateOf(false) }
         Text(
-            text = item.command,
+            text = revealed.text,
             style = TsukaimaType.mono,
             color = colors.codeInk,
-            softWrap = false,
+            maxLines = if (expanded) Int.MAX_VALUE else CommandMaxLines,
+            overflow = TextOverflow.Clip,
+            onTextLayout = { if (!expanded) overflows = it.hasVisualOverflow },
             modifier = Modifier
                 .fillMaxWidth()
                 .background(colors.codeBg, TsukaimaShapes.code)
-                .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 12.dp, vertical = 10.dp),
         )
+        if (overflows || expanded) {
+            Text(
+                text = if (expanded) "Show less" else "Show all",
+                style = TsukaimaType.caption,
+                color = colors.accent,
+                modifier = Modifier
+                    .heightIn(min = Dimens.hit)
+                    .clickable(role = Role.Button) { expanded = !expanded }
+                    .padding(horizontal = 4.dp)
+                    .wrapContentHeight(Alignment.CenterVertically),
+            )
+        }
+        if (revealed.hadHiddenChars) {
+            Text(
+                text = "This command contains hidden characters.",
+                style = TsukaimaType.caption,
+                color = colors.warn,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -116,7 +150,7 @@ fun ApprovalCard(
 }
 
 private fun sample(answered: Boolean) = ChatItem.Approval(
-    id = "srq-1", requestId = "srq-1", command = "rm -rf build/ && ./gradlew assembleRelease --no-daemon --stacktrace",
+    id = "srq-1", requestId = "srq-1", command = "rm -rf build/ && ./gradlew assembleRelease --no-daemon --stacktrace\n" + "echo line\n".repeat(10) + "ls \u202Etxt.exe",
     toolName = "shell", answered = answered,
 )
 

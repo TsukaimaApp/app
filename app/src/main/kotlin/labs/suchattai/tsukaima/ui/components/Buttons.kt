@@ -164,6 +164,7 @@ fun IconButton44(
     onClick: () -> Unit,
     filled: Boolean = false,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     val colors = MaterialTheme.tsukaima
     val source = remember { MutableInteractionSource() }
@@ -183,7 +184,7 @@ fun IconButton44(
             .clip(TsukaimaShapes.pill)
             .background(fill)
             .then(if (filled) Modifier else Modifier.pressWash(source, TsukaimaShapes.pill))
-            .clickable(interactionSource = source, indication = null, role = Role.Button, onClick = onClick),
+            .clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         TsukaimaIcon(

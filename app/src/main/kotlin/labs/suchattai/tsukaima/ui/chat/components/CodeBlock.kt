@@ -7,6 +7,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -31,6 +32,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import labs.suchattai.tsukaima.ui.components.IconName
 import labs.suchattai.tsukaima.ui.components.TsukaimaIcon
+import labs.suchattai.tsukaima.ui.theme.Dimens
 import labs.suchattai.tsukaima.ui.theme.TsukaimaShapes
 import labs.suchattai.tsukaima.ui.theme.TsukaimaType
 import labs.suchattai.tsukaima.ui.theme.tsukaima
@@ -66,7 +68,7 @@ fun CodeBlock(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 14.dp, top = 6.dp, end = 6.dp),
+                .padding(start = 14.dp, end = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
@@ -81,6 +83,7 @@ fun CodeBlock(
                         scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("code", code))) }
                         copied = true
                     }
+                    .heightIn(min = Dimens.hit)
                     .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(5.dp),

@@ -68,7 +68,7 @@ fun Composer(
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        IconButton44(IconName.Add, "Attach", onClick = { if (enabled) onAttach() })
+        IconButton44(IconName.Add, "Attach", onClick = onAttach, enabled = enabled)
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
@@ -101,7 +101,7 @@ fun Composer(
                 }
             },
         )
-        IconButton44(IconName.ArrowUpward, "Send", onClick = send, filled = enabled)
+        IconButton44(IconName.ArrowUpward, "Send", onClick = send, filled = enabled, enabled = enabled)
     }
 }
 

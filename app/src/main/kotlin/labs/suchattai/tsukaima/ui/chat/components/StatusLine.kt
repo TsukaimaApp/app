@@ -10,15 +10,15 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,39 +46,51 @@ fun statusVisual(status: AgentStatus, colors: TsukaimaColors): StatusVisual = St
     pulsing = status.pulsing,
 )
 
+/** The dot owns the animation so only it (via graphicsLayer) updates per frame. */
+@Composable
+private fun StatusDot(visual: StatusVisual) {
+    val alphaState = if (visual.pulsing) {
+        val transition = rememberInfiniteTransition(label = "statusPulse")
+        transition.animateFloat(
+            initialValue = 1f,
+            targetValue = 0.35f,
+            // Reverse doubles the period, so half the 2 s cycle each way.
+            animationSpec = infiniteRepeatable(
+                animation = tween(Motion.dotPulseMs / 2, easing = Motion.easing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "statusPulseAlpha",
+        )
+    } else {
+        null
+    }
+    Box(
+        Modifier
+            .size(7.dp)
+            .graphicsLayer { alpha = alphaState?.value ?: 1f }
+            .background(visual.color, TsukaimaShapes.pill),
+    )
+}
+
 /** The agent's live status: 7dp dot plus a serif-italic line. */
 @Composable
 fun StatusLine(status: AgentStatus, onClick: (() -> Unit)? = null, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.tsukaima
     val visual = statusVisual(status, colors)
-    val alpha = if (visual.pulsing) {
-        val transition = rememberInfiniteTransition(label = "statusPulse")
-        val a by transition.animateFloat(
-            initialValue = 1f,
-            targetValue = 0.35f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(Motion.dotPulseMs, easing = Motion.easing),
-                repeatMode = RepeatMode.Reverse,
-            ),
-            label = "statusPulseAlpha",
-        )
-        a
-    } else {
-        1f
-    }
     Row(
         modifier = modifier
-            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+            .then(
+                if (onClick != null) {
+                    Modifier.heightIn(min = Dimens.hit).clickable(role = Role.Button, onClick = onClick)
+                } else {
+                    Modifier
+                },
+            )
             .padding(horizontal = Dimens.gutter, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Box(
-            Modifier
-                .size(7.dp)
-                .alpha(alpha)
-                .background(visual.color, TsukaimaShapes.pill),
-        )
+        StatusDot(visual)
         Text(
             text = status.label,
             style = TsukaimaType.statusLine,
