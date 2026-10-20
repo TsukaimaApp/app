@@ -7,8 +7,18 @@ sealed interface MdSpan {
     data class Code(val s: String) : MdSpan
     data class Strike(val s: String) : MdSpan
 
-    /** `[text](url)` or a bare `http(s)://` autolink (then [text] is the URL). Only web and `mailto:` URLs. */
-    data class Link(val text: String, val url: String) : MdSpan
+    /**
+     * `[text](url)` or a bare `http(s)://` autolink (then [text] is the URL). Only web and `mailto:` URLs. The flags
+     * carry the emphasis around it (`**[docs](…)**`): emphasis spans stay flat strings, so a link inside one is split
+     * out and keeps the emphasis here.
+     */
+    data class Link(
+        val text: String,
+        val url: String,
+        val bold: Boolean = false,
+        val italic: Boolean = false,
+        val strike: Boolean = false,
+    ) : MdSpan
 }
 
 /** Column alignment from a table's separator row (`:--`, `:-:`, `--:`). */

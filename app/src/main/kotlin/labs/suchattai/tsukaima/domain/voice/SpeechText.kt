@@ -31,10 +31,12 @@ object SpeechText {
                 inFence = !inFence
                 continue
             }
-            if (inFence || media.containsMatchIn(raw) || isRuleOrUnderline(raw) || isTableSeparator(raw)) continue
-            var s = tableRow(raw)
+            if (inFence || media.containsMatchIn(raw)) continue
+            // The quote marker goes first, so a quoted table row or rule reads like an unquoted one.
+            val line = quote.replace(raw, "")
+            if (isRuleOrUnderline(line) || isTableSeparator(line)) continue
+            var s = tableRow(line)
             s = heading.replace(s, "")
-            s = quote.replace(s, "")
             s = listPrefix.replace(s, "")
             s = link.replace(s) { it.groupValues[1] }
             s = url.replace(s, "")

@@ -13,12 +13,30 @@ internal object MarkdownInline {
     /** Characters an autolink does not end with (GFM extended autolinks); `)` only when unbalanced. */
     private const val AUTOLINK_TRAILING = ".,;:!?*_~'\""
 
-    fun parse(s: String): List<MdSpan> {
+    fun parse(s: String): List<MdSpan> = parse(s, emphasis = true)
+
+    /**
+     * With [emphasis] false (the inside of a bold, italic or strike span) only code spans and links are read, so the
+     * second pass over that text is the last one and parsing stays linear.
+     */
+    private fun parse(s: String, emphasis: Boolean): List<MdSpan> {
         val spans = mutableListOf<MdSpan>()
         val lit = StringBuilder()
         fun emit(span: MdSpan) {
             if (lit.isNotEmpty()) { spans += MdSpan.Text(lit.toString()); lit.setLength(0) }
             spans += span
+        }
+
+        /** An emphasis span; a link or code span inside it is split out (a link keeps the emphasis via its flags). */
+        fun emphasised(inner: String, wrap: (String) -> MdSpan, link: (MdSpan.Link) -> MdSpan.Link) {
+            if ('[' !in inner && '`' !in inner && "http" !in inner) { emit(wrap(inner)); return }
+            for (span in parse(inner, emphasis = false)) emit(
+                when (span) {
+                    is MdSpan.Text -> wrap(span.s)
+                    is MdSpan.Link -> link(span)
+                    else -> span
+                },
+            )
         }
 
         // Next `]` at or after a position; positions only grow, so one cached answer serves until passed.
@@ -62,25 +80,26 @@ internal object MarkdownInline {
                     emit(MdSpan.Link(url, url))
                     i += url.length + if (angled) 1 else 0
                 }
+                !emphasis && (c == '~' || c == '*' || c == '_') -> { lit.append(c); i++ }
                 c == '~' && s.startsWith("~~", i) -> {
                     val j = s.indexOf("~~", i + 2)
-                    if (j > i + 2) { emit(MdSpan.Strike(s.substring(i + 2, j))); i = j + 2 }
+                    if (j > i + 2) { emphasised(s.substring(i + 2, j), MdSpan::Strike) { it.copy(strike = true) }; i = j + 2 }
                     else { lit.append("~~"); i += 2 }
                 }
                 c == '*' && s.startsWith("**", i) -> {
                     val j = s.indexOf("**", i + 2)
-                    if (j > i + 2) { emit(MdSpan.Bold(s.substring(i + 2, j))); i = j + 2 }
+                    if (j > i + 2) { emphasised(s.substring(i + 2, j), MdSpan::Bold) { it.copy(bold = true) }; i = j + 2 }
                     else { lit.append("**"); i += 2 }
                 }
                 c == '*' -> {
                     val j = s.indexOf('*', i + 1)
-                    if (j > i + 1 && !s[i + 1].isWhitespace()) { emit(MdSpan.Italic(s.substring(i + 1, j))); i = j + 1 }
+                    if (j > i + 1 && !s[i + 1].isWhitespace()) { emphasised(s.substring(i + 1, j), MdSpan::Italic) { it.copy(italic = true) }; i = j + 1 }
                     else { lit.append(c); i++ }
                 }
                 c == '_' && (i == 0 || !s[i - 1].isLetterOrDigit()) -> {
                     var j = s.indexOf('_', i + 1)
                     while (j != -1 && j + 1 < s.length && s[j + 1].isLetterOrDigit()) j = s.indexOf('_', j + 1)
-                    if (j > i + 1 && !s[i + 1].isWhitespace()) { emit(MdSpan.Italic(s.substring(i + 1, j))); i = j + 1 }
+                    if (j > i + 1 && !s[i + 1].isWhitespace()) { emphasised(s.substring(i + 1, j), MdSpan::Italic) { it.copy(italic = true) }; i = j + 1 }
                     else { lit.append(c); i++ }
                 }
                 else -> { lit.append(c); i++ }

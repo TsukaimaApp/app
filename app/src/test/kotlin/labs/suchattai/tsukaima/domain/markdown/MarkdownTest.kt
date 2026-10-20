@@ -471,4 +471,25 @@ class MarkdownTest {
         for (s in inputs) Markdown.parse(s)
         assertTrue("took too long", System.nanoTime() - start < 5_000_000_000L)
     }
+
+    @Test
+    fun linksAndCodeInsideEmphasisKeepTheEmphasis() {
+        assertEquals(
+            listOf(
+                para(
+                    MdSpan.Bold("see "),
+                    MdSpan.Link("docs", "https://x.io", bold = true),
+                    MdSpan.Bold(" or "),
+                    MdSpan.Code("man ls"),
+                    MdSpan.Text(", "),
+                    MdSpan.Link("https://y.io", "https://y.io", italic = true),
+                    MdSpan.Text(" "),
+                    MdSpan.Link("old", "https://z.io", strike = true),
+                ),
+            ),
+            Markdown.parse("**see [docs](https://x.io) or `man ls`**, *https://y.io* ~~[old](https://z.io)~~"),
+        )
+        // Emphasis markers inside emphasis stay literal, as before.
+        assertEquals(listOf(para(MdSpan.Bold("a *b* [c"))), Markdown.parse("**a *b* [c**"))
+    }
 }

@@ -55,6 +55,9 @@ class SpeechTextTest {
     @Test fun plainDropsRulesAndSetextUnderlines() =
         assertEquals("a\nTitle\nb\nc", SpeechText.plain("a\n\n---\nTitle\n===\nb\n* * *\n___\nc"))
 
+    @Test fun plainReadsAQuotedTableRow() =
+        assertEquals("a, b\n1, 2", SpeechText.plain("> | a | b |\n> |---|---|\n> | 1 | 2 |\n> ---"))
+
     @Test fun plainStripsNestedQuoteMarkers() =
         assertEquals("deep", SpeechText.plain("> > deep"))
 

@@ -25,6 +25,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalViewConfiguration
@@ -92,9 +93,10 @@ fun Modifier.longPressMenu(onLongPress: () -> Unit): Modifier = this
                 withTimeout(Motion.longPressMs.toLong()) { waitForUpOrCancellation() }
             } catch (_: PointerEventTimeoutCancellationException) {
                 onLongPress()
-                // Swallow the rest of the gesture so the eventual release is not a tap.
+                // Swallow the rest of the gesture so the eventual release is not a tap. In the Initial
+                // (parent-first) pass, so children — a link, a toggle, a copy button — never see the release.
                 do {
-                    val event = awaitPointerEvent()
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
                     event.changes.forEach { it.consume() }
                 } while (event.changes.any { it.pressed })
             }

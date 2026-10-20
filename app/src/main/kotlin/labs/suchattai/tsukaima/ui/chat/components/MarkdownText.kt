@@ -72,7 +72,18 @@ private fun AnnotatedString.Builder.appendSpans(spans: List<MdSpan>, colors: Tsu
         is MdSpan.Link -> withLink(
             LinkAnnotation.Url(
                 span.url,
-                TextLinkStyles(SpanStyle(color = colors.accent, textDecoration = TextDecoration.Underline)),
+                TextLinkStyles(
+                    SpanStyle(
+                        color = colors.accent,
+                        fontWeight = if (span.bold) FontWeight.SemiBold else null,
+                        fontStyle = if (span.italic) FontStyle.Italic else null,
+                        textDecoration = if (span.strike) {
+                            TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough))
+                        } else {
+                            TextDecoration.Underline
+                        },
+                    ),
+                ),
             ),
         ) { append(span.text) }
     }
@@ -165,12 +176,15 @@ private fun headingStyle(level: Int): TextStyle = when (level) {
 }
 
 /**
- * A bullet or numbered list: numbers right-aligned in a 22dp column, bullets `•` / `◦` / `▪` by depth, each
+ * A bullet or numbered list: numbers right-aligned in a two-digit column, bullets `•` / `◦` / `▪` by depth, each
  * nesting level 16dp further in. The caret, if any, follows the last item.
  */
 @Composable
 private fun MarkdownList(items: List<MdListItem>, caret: Boolean, caretContent: Map<String, InlineTextContent>) {
     val colors = MaterialTheme.tsukaima
+    // Two digits and the dot (about 1.6 em of the body size, so it follows font scaling): 1–99 share one column;
+    // only a 100th item grows it rather than clipping.
+    val numberColumn = with(LocalDensity.current) { (TsukaimaType.body.fontSize * 1.6f).toDp() }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         items.forEachIndexed { i, item ->
             Row(
@@ -186,7 +200,7 @@ private fun MarkdownList(items: List<MdListItem>, caret: Boolean, caretContent: 
                         textAlign = TextAlign.End,
                         maxLines = 1,
                         softWrap = false,
-                        modifier = Modifier.widthIn(min = 22.dp),
+                        modifier = Modifier.widthIn(min = numberColumn),
                     )
                 } else {
                     val glyph = when (item.depth) { 0 -> "•"; 1 -> "◦"; else -> "▪" }
