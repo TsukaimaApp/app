@@ -73,6 +73,8 @@ internal fun CardHeader(icon: IconName, title: String) {
 /**
  * Inline approval request. [approved] is the decision once [ChatItem.Approval.answered] is
  * true (the domain item only records that it was answered); null shows a neutral "Answered".
+ * When not [answerable] (the app has no id that binds the answer to this request) both buttons
+ * are disabled and the card points to the dashboard.
  */
 @Composable
 fun ApprovalCard(
@@ -81,6 +83,7 @@ fun ApprovalCard(
     onDeny: () -> Unit,
     modifier: Modifier = Modifier,
     approved: Boolean? = null,
+    answerable: Boolean = true,
 ) {
     val colors = MaterialTheme.tsukaima
     FloatingCard(modifier) {
@@ -159,6 +162,14 @@ fun ApprovalCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
         ) {
+            if (!item.answered && !answerable) {
+                Text(
+                    text = "Answer this on the dashboard",
+                    style = TsukaimaType.caption,
+                    color = colors.ink3,
+                    modifier = Modifier.weight(1f),
+                )
+            }
             if (item.answered) {
                 Text(
                     text = when (approved) {
@@ -171,8 +182,8 @@ fun ApprovalCard(
                     modifier = Modifier.weight(1f),
                 )
             }
-            GhostButton("Deny", onDeny, tone = Tone.Danger, enabled = !item.answered)
-            PrimaryButton("Approve", onApprove, icon = IconName.Check, enabled = !item.answered && !blocked)
+            GhostButton("Deny", onDeny, tone = Tone.Danger, enabled = answerable && !item.answered)
+            PrimaryButton("Approve", onApprove, icon = IconName.Check, enabled = answerable && !item.answered && !blocked)
         }
     }
 }
@@ -186,6 +197,7 @@ private fun sample(answered: Boolean) = ChatItem.Approval(
 private fun ApprovalPreview(dark: Boolean) = PreviewPage(dark) {
     ApprovalCard(sample(false), {}, {})
     ApprovalCard(sample(true), {}, {}, approved = true)
+    ApprovalCard(sample(false).copy(id = "pending-", requestId = "", command = "reboot"), {}, {}, answerable = false)
 }
 
 @Preview(name = "ApprovalCard light")

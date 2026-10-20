@@ -53,6 +53,12 @@ class ChatViewModelTest {
         val failing = mutableSetOf<String>()
         var gate: CompletableDeferred<Unit>? = null
 
+        /** One-shot: the next call to the method waits for the gate (if any), then fails. */
+        val failNext = mutableMapOf<String, CompletableDeferred<Unit>?>()
+
+        /** One-shot: the next call to the method waits for the gate, then proceeds normally. */
+        val gateNext = mutableMapOf<String, CompletableDeferred<Unit>>()
+
         fun on(method: String, vararg result: JsonObject) {
             results[method] = ArrayDeque(result.toList())
         }
@@ -62,6 +68,11 @@ class ChatViewModelTest {
 
         override suspend fun request(method: String, params: JsonObject): JsonObject {
             calls += method to params
+            if (method in failNext) {
+                failNext.remove(method)?.await()
+                throw GatewayClosedException()
+            }
+            gateNext.remove(method)?.await()
             if (method in failing) {
                 gate?.await()
                 throw GatewayClosedException()
@@ -518,5 +529,148 @@ class ChatViewModelTest {
         advanceUntilIdle()
         assertTrue(vm.state.value.offline)
         assertTrue(b.toasts.isEmpty())
+    }
+
+    private fun replayJson(vararg events: String) =
+        obj("""{"events":[${events.joinToString(",")}],"latest_seq":0,"truncated":false,"open_requests":[]}""")
+
+    private fun toolStart(seq: Long, id: String) =
+        """{"type":"tool.start","session_id":"$live","seq":$seq,"payload":{"tool_id":"$id","name":"terminal"}}"""
+
+    @Test
+    fun reconnectFlapCancelsStaleRun() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.events.emit(ev("message.start", 5))
+        advanceUntilIdle()
+        b.transport.on("session.resume", obj(resumeJson.replace("\"running\":false", "\"running\":true")))
+        b.transport.on("session.events.since", replayJson(toolStart(6, "t6"), toolStart(7, "t7")))
+        val firstResume = CompletableDeferred<Unit>()
+        val replayGate = CompletableDeferred<Unit>()
+        b.transport.gateNext["session.resume"] = firstResume
+
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected // run 1: resume parked on the gate
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Reconnecting // flap: run 1 is cancelled
+        advanceUntilIdle()
+        b.transport.gateNext["session.events.since"] = replayGate
+        b.connection.value = ConnectionState.Connected // run 2: resumes, replay parked on its gate
+        advanceUntilIdle()
+        b.events.emit(ev("tool.start", 8, """{"tool_id":"t8","name":"terminal"}""")) // live, held by run 2
+        advanceUntilIdle()
+        firstResume.complete(Unit) // run 1 is gone: nothing happens
+        advanceUntilIdle()
+        replayGate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(2, b.transport.methods().count { it == "session.resume" })
+        assertEquals(1, b.transport.methods().count { it == "session.events.since" })
+        val s = vm.state.value
+        assertEquals(listOf("t6", "t7", "t8"), s.chat.items.map { it.id }) // the empty a-5 bubble is dropped on loss
+        assertEquals(8L, s.chat.lastSeq)
+        assertTrue(b.toasts.isEmpty())
+        assertFalse(s.offline)
+    }
+
+    @Test
+    fun approvalWithoutAnyIdIsInert() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on(
+                "session.resume",
+                obj(resumeJson.replace("\"running\":false", "\"running\":true,\"pending_approval\":{\"command\":\"reboot\",\"tool_name\":\"terminal\"}")),
+            )
+        }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        val card = vm.state.value.chat.items.last() as ChatItem.Approval
+        assertFalse(ChatSync.answerable(card))
+
+        vm.approve(card.id)
+        vm.deny(card.id)
+        advanceUntilIdle()
+        assertFalse("approval.respond" in b.transport.methods())
+        assertTrue(b.transport.responses.isEmpty())
+        assertFalse((vm.state.value.chat.items.last() as ChatItem.Approval).answered)
+        assertFalse(card.id in b.answeredRequestIds)
+    }
+
+    @Test
+    fun pendingApprovalFallbackRequiresRequestId() = runTest(dispatcher) {
+        fun resumeWith(pending: String) = obj(resumeJson.replace("\"running\":false", "\"running\":true,\"pending_approval\":$pending"))
+
+        val empty = backend().apply { transport.on("session.resume", resumeWith("""{"request_id":"","command":"reboot"}""")) }
+        val vmEmpty = vm(empty, stored)
+        val bound = backend().apply { transport.on("session.resume", resumeWith("""{"request_id":"r5","command":"reboot"}""")) }
+        val vmBound = vm(bound, stored)
+        advanceUntilIdle()
+
+        vmEmpty.approve(vmEmpty.state.value.chat.items.last().id)
+        vmBound.approve(vmBound.state.value.chat.items.last().id)
+        advanceUntilIdle()
+
+        assertFalse("approval.respond" in empty.transport.methods())
+        assertEquals("r5", bound.transport.last("approval.respond")["request_id"]!!.jsonPrimitive.content)
+        assertTrue(empty.transport.responses.isEmpty() && bound.transport.responses.isEmpty())
+    }
+
+    @Test
+    fun failedFallbackAnswerCanBeRetried() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("session.resume", obj(resumeJson.replace("\"running\":false", "\"running\":true,\"pending_approval\":{\"request_id\":\"r5\"}")))
+            transport.failNext["approval.respond"] = null
+        }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        vm.approve("pending-r5")
+        advanceUntilIdle()
+        val card = vm.state.value.chat.items.last() as ChatItem.Approval
+        assertFalse(card.answered)
+        assertFalse("pending-r5" in b.answeredRequestIds)
+        assertEquals(AgentStatus.Approval, vm.state.value.status)
+
+        vm.approve("pending-r5")
+        advanceUntilIdle()
+        assertEquals(2, b.transport.methods().count { it == "approval.respond" })
+        assertTrue((vm.state.value.chat.items.last() as ChatItem.Approval).answered)
+    }
+
+    @Test
+    fun openRetriesAfterFailedAttemptDuringFlap() = runTest(dispatcher) {
+        val b = backend()
+        val gate = CompletableDeferred<Unit>()
+        b.transport.failNext["session.create"] = gate
+        val vm = vm(b)
+        advanceUntilIdle() // create parked
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected // opening: ignored by the collector
+        advanceUntilIdle()
+        gate.complete(Unit) // the in-flight attempt fails with the dropped socket
+        advanceUntilIdle()
+
+        assertEquals(2, b.transport.methods().count { it == "session.create" })
+        assertEquals(live, vm.state.value.chat.liveSessionId)
+        assertTrue(b.toasts.isEmpty())
+    }
+
+    @Test
+    fun sendFailureRemovesLocalBubble() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.transport.failNext["prompt.submit"] = null
+        vm.setInput("hello")
+        vm.send()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.chat.items.isEmpty())
+        assertEquals("hello", vm.state.value.input)
+        assertEquals(AgentStatus.Idle, vm.state.value.chat.status)
+
+        vm.send() // retry
+        advanceUntilIdle()
+        assertEquals(listOf("hello"), vm.state.value.chat.items.map { (it as ChatItem.UserMessage).text })
     }
 }

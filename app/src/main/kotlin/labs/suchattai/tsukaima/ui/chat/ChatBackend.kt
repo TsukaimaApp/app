@@ -17,6 +17,7 @@ import labs.suchattai.tsukaima.data.gateway.Frame
 import labs.suchattai.tsukaima.data.gateway.RpcTransport
 import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.di.AppContainer
+import labs.suchattai.tsukaima.domain.chat.ChatItem
 import java.io.IOException
 
 /**
@@ -117,6 +118,10 @@ internal object ChatSync {
             params = JsonObject(payload + ("session_id" to JsonPrimitive(liveId))),
         )
     }
+
+    /** Whether the app can answer [card] safely: by its server-request id, or by a non-empty `request_id`. */
+    fun answerable(card: ChatItem.Approval): Boolean =
+        !card.id.startsWith(PENDING_PREFIX) || card.requestId.isNotEmpty()
 
     /** Candidate working directories from `/api/chat/workspaces`: default first, then projects and repos. */
     fun workspacePaths(dto: WorkspacesDto): List<String> {

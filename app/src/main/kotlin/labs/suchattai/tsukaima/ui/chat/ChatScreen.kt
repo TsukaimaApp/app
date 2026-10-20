@@ -188,6 +188,7 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
                     onApprove = { actions.onApprove(item.id) },
                     onDeny = { actions.onDeny(item.id) },
                     approved = state.decisions[item.id],
+                    answerable = ChatSync.answerable(item),
                 )
                 is ChatItem.Thinking -> Spacer(Modifier.height(0.dp))
             }
