@@ -31,6 +31,7 @@ import labs.suchattai.tsukaima.data.api.PairingDto
 import labs.suchattai.tsukaima.data.api.ProfileDto
 import labs.suchattai.tsukaima.data.api.SkillDto
 import labs.suchattai.tsukaima.data.api.ToolsetDto
+import labs.suchattai.tsukaima.data.prefs.NotificationPrefs
 import labs.suchattai.tsukaima.data.prefs.ThemeMode
 import labs.suchattai.tsukaima.ui.chat.components.PairingCard
 import labs.suchattai.tsukaima.ui.components.ButtonSize
@@ -64,6 +65,9 @@ class SettingsActions(
     val onSkill: (name: String, enabled: Boolean) -> Unit = { _, _ -> },
     val onApprove: (PairingEntry) -> Unit = {},
     val onRevoke: (PairingEntry) -> Unit = {},
+    val onAskRevoke: (PairingEntry?) -> Unit = {},
+    val onToolset: (name: String, enabled: Boolean) -> Unit = { _, _ -> },
+    val onNotifications: ((NotificationPrefs) -> NotificationPrefs) -> Unit = {},
     val onTheme: (ThemeMode) -> Unit = {},
     val onMaterialYou: (Boolean) -> Unit = {},
     val onSimulateOffline: (Boolean) -> Unit = {},
@@ -96,6 +100,9 @@ fun SettingsScreen(
             onSkill = vm::toggleSkill,
             onApprove = vm::approvePairing,
             onRevoke = vm::revokePairing,
+            onAskRevoke = vm::askRevoke,
+            onToolset = vm::toggleToolset,
+            onNotifications = vm::setNotifications,
             onTheme = vm::setTheme,
             onMaterialYou = vm::setMaterialYou,
             onSimulateOffline = vm::setSimulateOffline,
@@ -111,6 +118,7 @@ fun SettingsScreen(
 fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.tsukaima
     SignOutDialog(state, actions)
+    RevokeDialog(state, actions)
     Column(
         modifier
             .fillMaxSize()
@@ -221,12 +229,14 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                 }
             }
 
-            Section("Toolsets", hint = "Managed in the dashboard") {
+            Section("Toolsets", hint = "Applies to new sessions. Provider keys and setup stay in the dashboard.") {
                 Column {
                     state.toolsets.forEach { tool ->
+                        val on = tool.enabled == true
                         TsukaimaRow(
                             title = tool.label ?: tool.name,
-                            trailing = { TsukaimaSwitch(tool.enabled == true, {}, enabled = false) },
+                            trailing = { TsukaimaSwitch(on, { actions.onToolset(tool.name, it) }) },
+                            onClick = { actions.onToolset(tool.name, !on) },
                             modifier = Modifier.bleed(12.dp),
                         )
                     }
@@ -245,10 +255,28 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                             subtitle = p.platform,
                             leading = platformIcon(p.platform),
                             trailing = {
-                                GhostButton("Revoke", { actions.onRevoke(p) }, size = ButtonSize.Sm, tone = Tone.Danger)
+                                GhostButton("Revoke", { actions.onAskRevoke(p) }, size = ButtonSize.Sm, tone = Tone.Danger)
                             },
                             modifier = Modifier.bleed(12.dp),
                         )
+                    }
+                }
+            }
+
+            Section("Notifications", hint = "What Tsukaima may notify you about. Android’s own settings still apply.") {
+                Column(Modifier.bleed(12.dp)) {
+                    val n = state.notifications
+                    NotifyRow("Approvals and questions", "When Hermes waits for you", n.approvals) { on ->
+                        actions.onNotifications { it.copy(approvals = on) }
+                    }
+                    NotifyRow("Pairing requests", "Someone asks to talk to the bot", n.pairing) { on ->
+                        actions.onNotifications { it.copy(pairing = on) }
+                    }
+                    NotifyRow("Finished replies", "A reply completes while the app is in the background", n.replies) { on ->
+                        actions.onNotifications { it.copy(replies = on) }
+                    }
+                    NotifyRow("Gateway and cron alerts", "The gateway stops, or a cron job fails", n.alerts) { on ->
+                        actions.onNotifications { it.copy(alerts = on) }
                     }
                 }
             }
@@ -312,6 +340,29 @@ private fun SignOutDialog(state: SettingsUiState, actions: SettingsActions) {
         confirmText = "Sign out",
         onConfirm = actions.onSignOut,
         onDismiss = { actions.onAskSignOut(false) },
+        danger = true,
+    )
+}
+
+@Composable
+private fun NotifyRow(title: String, subtitle: String, on: Boolean, onChange: (Boolean) -> Unit) {
+    TsukaimaRow(
+        title = title,
+        subtitle = subtitle,
+        trailing = { TsukaimaSwitch(on, onChange) },
+        onClick = { onChange(!on) },
+    )
+}
+
+@Composable
+private fun RevokeDialog(state: SettingsUiState, actions: SettingsActions) {
+    val entry = state.confirmRevoke ?: return
+    ConfirmDialog(
+        title = "Revoke ${entry.who}?",
+        body = "They can no longer talk to the bot on ${entry.platform} until they pair again.",
+        confirmText = "Revoke",
+        onConfirm = { actions.onRevoke(entry) },
+        onDismiss = { actions.onAskRevoke(null) },
         danger = true,
     )
 }

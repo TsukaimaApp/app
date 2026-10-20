@@ -7,6 +7,7 @@ import kotlinx.serialization.json.contentOrNull
 import labs.suchattai.tsukaima.data.RecentIds
 import labs.suchattai.tsukaima.data.api.CronJobDto
 import labs.suchattai.tsukaima.data.gateway.Frame
+import labs.suchattai.tsukaima.data.prefs.NotificationPrefs
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
 
 /** What to do with the notification shade. */
@@ -32,6 +33,9 @@ sealed interface NotificationCommand {
  * - Cron: a job whose `last_status` turns into a failure since the previous poll. The first poll after
  *   [resetCron] only seeds.
  * - Pairing: each pending request notified once in the background; cancelled when it leaves the list.
+ *
+ * [prefs] (Settings → Notifications) is read per decision: a kind switched off is never posted, but its
+ * bookkeeping (transitions, snapshots, cancellations) carries on, so switching it back on does not replay old news.
  */
 class NotificationCoordinator(
     private val answered: Set<String>,
@@ -42,6 +46,7 @@ class NotificationCoordinator(
      * the server-request replay still holds them, and they must never be notified later. Shared with chat.
      */
     private val closedIds: RecentIds = RecentIds(capacity),
+    private val prefs: () -> NotificationPrefs = { NotificationPrefs() },
 ) {
     private val notified = RecentIds(capacity)
 
@@ -72,7 +77,7 @@ class NotificationCoordinator(
         req.params.str("request_id")?.let { srqByRequestId[it] = req.id }
         val live = req.params.str("session_id")
         val shownInChat = foreground && visibleSession != null && live == visibleSession
-        if (shownInChat || req.id in answered || closedIds.contains(req.id)) return null
+        if (shownInChat || req.id in answered || closedIds.contains(req.id) || !prefs().approvals) return null
         if (!notified.add(req.id)) return null
         val stored = live?.let { storedFor(it) ?: storedByLive[it] }
         if (clarify) return ApprovalNotifier.forClarify(req, stored)
@@ -115,7 +120,7 @@ class NotificationCoordinator(
             ev.payload.str("session_id")?.takeIf { ev.sessionId.isNotEmpty() }?.let { storedByLive[ev.sessionId] = it }
             emptyList()
         }
-        "message.complete" -> if (foreground || ev.payload.str("status") == "error") {
+        "message.complete" -> if (foreground || ev.payload.str("status") == "error" || !prefs().replies) {
             emptyList()
         } else {
             listOf(NotificationCommand.Post(ApprovalNotifier.forTaskDone(titles[ev.sessionId], ev.sessionId)))
@@ -143,7 +148,7 @@ class NotificationCoordinator(
         gatewayDown = down
         return when {
             down != null && down != prev ->
-                if (foreground) null else ApprovalNotifier.forGateway(down)?.let { NotificationCommand.Post(it) }
+                if (foreground || !prefs().alerts) null else ApprovalNotifier.forGateway(down)?.let { NotificationCommand.Post(it) }
             down == null && prev != null -> NotificationCommand.Cancel(ApprovalNotifier.GATEWAY_ID)
             else -> null
         }
@@ -168,7 +173,7 @@ class NotificationCoordinator(
     fun onCronJobs(jobs: List<CronJobDto>): List<NotificationSpec> {
         val prev = cronSnapshot
         cronSnapshot = jobs.associateBy { it.id }
-        if (prev == null) return emptyList()
+        if (prev == null || !prefs().alerts) return emptyList()
         return jobs.filter { job ->
             if (!isFailure(job.lastStatus)) return@filter false
             val before = prev[job.id] ?: return@filter true // new since the last poll, already failed
@@ -183,7 +188,7 @@ class NotificationCoordinator(
         val gone = postedPairing.filter { it !in current }
         postedPairing.removeAll(gone.toSet())
         val out = gone.map { NotificationCommand.Cancel(it.toInt()) }.toMutableList<NotificationCommand>()
-        if (foreground) return out
+        if (foreground || !prefs().pairing) return out
         for (spec in specs) {
             if (spec.actions.isEmpty()) continue // no request id: nothing actionable to offer
             if (notified.add("pairing:${spec.id}")) {
@@ -200,7 +205,8 @@ class NotificationCoordinator(
         (this[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
 
     private companion object {
-        val FAILURE = setOf("error", "failed", "failure")
+        /** `last_status` values of a failed run (Hermes `cron/jobs.py` `_record_run_outcome`; `ok` is success). */
+        val FAILURE = setOf("error", "failed", "failure", "delivery_failed", "blocked_config", "timeout")
 
         fun <V> bounded(capacity: Int): MutableMap<String, V> = object : LinkedHashMap<String, V>() {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, V>?) = size > capacity

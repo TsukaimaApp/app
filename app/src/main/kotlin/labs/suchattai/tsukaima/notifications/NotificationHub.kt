@@ -17,6 +17,7 @@ import labs.suchattai.tsukaima.data.api.CronJobDto
 import labs.suchattai.tsukaima.data.api.PairingDto
 import labs.suchattai.tsukaima.data.gateway.Frame
 import labs.suchattai.tsukaima.data.gateway.RpcTransport
+import labs.suchattai.tsukaima.data.prefs.NotificationPrefs
 import labs.suchattai.tsukaima.data.gatewayStatus
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
@@ -106,8 +107,10 @@ class NotificationHub(
     closed: RecentIds = RecentIds(),
     private val pollMs: Long = 60_000,
     private val logger: (String, Throwable?) -> Unit = { _, _ -> },
+    /** Settings → Notifications, read per decision. */
+    prefs: () -> NotificationPrefs = { NotificationPrefs() },
 ) {
-    private val coordinator = NotificationCoordinator(answered, storedFor = storedFor, closedIds = closed)
+    private val coordinator = NotificationCoordinator(answered, storedFor = storedFor, closedIds = closed, prefs = prefs)
     private val started = AtomicBoolean(false)
     private val lock = Any()
     private var backgroundJob: Job? = null

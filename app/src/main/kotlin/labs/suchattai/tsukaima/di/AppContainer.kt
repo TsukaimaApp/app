@@ -30,6 +30,7 @@ import labs.suchattai.tsukaima.data.gateway.GatewaySession
 import labs.suchattai.tsukaima.data.prefs.CredentialStore
 import labs.suchattai.tsukaima.data.prefs.EncryptedCredentialStore
 import labs.suchattai.tsukaima.data.prefs.LazyCredentialStore
+import labs.suchattai.tsukaima.data.prefs.NotificationPrefs
 import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.data.prefs.SettingsStore
 import labs.suchattai.tsukaima.data.gateway.ConnectionState
@@ -189,6 +190,7 @@ class AppContainer(context: Context) {
         storedFor = sessionBindings::storedFor,
         closed = connection.closedRequestIds,
         logger = { m, t -> Log.w(TAG, m, t) },
+        prefs = { settings.value?.notifications ?: NotificationPrefs() },
     )
 
     /** Answers approvals from notification buttons, by srq id only, at most once. */

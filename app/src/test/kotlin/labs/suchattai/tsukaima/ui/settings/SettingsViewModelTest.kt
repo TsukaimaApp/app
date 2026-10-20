@@ -25,6 +25,7 @@ import labs.suchattai.tsukaima.data.gateway.GatewayClient
 import labs.suchattai.tsukaima.data.prefs.InMemoryCredentialStore
 import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.data.prefs.SettingsStore
+import labs.suchattai.tsukaima.data.prefs.ThemeMode
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -55,6 +56,9 @@ class SettingsViewModelTest {
     private val okHttp = OkHttpClient()
     private val snapshot = MutableStateFlow(Settings())
 
+    /** "METHOD path" of every request the server saw. */
+    private val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
+
     /** path -> response; unknown paths 404. */
     private val routes = mutableMapOf<String, () -> MockResponse>()
 
@@ -65,6 +69,7 @@ class SettingsViewModelTest {
             dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse {
                     val path = request.url.encodedPath
+                    requests += "${request.method} $path"
                     return routes[path]?.invoke() ?: MockResponse.Builder().code(404).build()
                 }
             }
@@ -107,7 +112,9 @@ class SettingsViewModelTest {
      */
     private val STORE_TIMEOUT_MS = 30_000L
 
-    private fun vm() = SettingsViewModel(repo, store, creds, connection).also { vms += it }
+    private val toasts = java.util.concurrent.CopyOnWriteArrayList<String>()
+
+    private fun vm() = SettingsViewModel(repo, store, creds, connection, toast = { toasts += it }).also { vms += it }
 
     private suspend fun SettingsViewModel.await(cond: (SettingsUiState) -> Boolean) =
         withTimeout(STORE_TIMEOUT_MS) { state.first(cond) }
@@ -395,5 +402,75 @@ class SettingsViewModelTest {
             connection.hermes.first { it.connection != labs.suchattai.tsukaima.data.gateway.ConnectionState.Disconnected }
         }
         connection.stop()
+    }
+
+    // ---- v0.5.0 --------------------------------------------------------------------------------------------
+
+    @Test
+    fun toolsetToggleIsOptimisticAndPutsTheFlag() = runBlocking<Unit> {
+        routes["/api/tools/toolsets"] = { json("""[{"name":"todo","label":"Todo","enabled":true}]""") }
+        routes["/api/tools/toolsets/todo"] = { json("""{"ok":true,"name":"todo","platform":"cli","enabled":false}""") }
+        signedInStore()
+        val vm = vm()
+        vm.await { it.toolsets.singleOrNull()?.enabled == true }
+
+        vm.toggleToolset("todo", false)
+        assertEquals(false, vm.state.value.toolsets.single().enabled)
+        withTimeout(STORE_TIMEOUT_MS) { while ("PUT /api/tools/toolsets/todo" !in requests) kotlinx.coroutines.delay(10) }
+        kotlinx.coroutines.delay(100)
+        assertEquals(false, vm.state.value.toolsets.single().enabled)
+        assertTrue(toasts.isEmpty())
+    }
+
+    @Test
+    fun toolsetToggleRevertsWhenRefused() = runBlocking<Unit> {
+        routes["/api/tools/toolsets"] = { json("""[{"name":"todo","enabled":true}]""") }
+        routes["/api/tools/toolsets/todo"] = { MockResponse.Builder().code(400).body("""{"detail":"Unknown toolset: todo"}""").build() }
+        signedInStore()
+        val vm = vm()
+        vm.await { it.toolsets.singleOrNull()?.enabled == true }
+
+        vm.toggleToolset("todo", false)
+        withTimeout(STORE_TIMEOUT_MS) { while (toasts.isEmpty()) kotlinx.coroutines.delay(10) }
+        assertEquals(true, vm.state.value.toolsets.single().enabled)
+        assertEquals(listOf("Couldn’t disable todo"), toasts.toList())
+    }
+
+    @Test
+    fun notificationTogglesPersist() = runBlocking<Unit> {
+        store.update { it.copy(theme = ThemeMode.Dark) }
+        val vm = vm()
+        vm.await { it.theme == ThemeMode.Dark } // the first settings emission
+        vm.setNotifications { it.copy(replies = false, alerts = false) }
+        assertFalse(vm.state.value.notifications.replies)
+        val s = awaitStore { !it.notifications.replies }
+        assertFalse(s.notifications.alerts)
+        assertTrue(s.notifications.approvals)
+        assertTrue(s.notifications.pairing)
+    }
+
+    @Test
+    fun revokeAsksFirstThenRevokesAndReloads() = runBlocking<Unit> {
+        var approved = """[{"platform":"telegram","user_id":"42","user_name":"alice"}]"""
+        routes["/api/pairing"] = { json("""{"pending":[],"approved":$approved}""") }
+        routes["/api/pairing/revoke"] = {
+            approved = "[]"
+            json("""{"ok":true}""")
+        }
+        signedInStore()
+        val vm = vm()
+        val entry = vm.await { it.approvedPairing.isNotEmpty() }.approvedPairing.single()
+
+        vm.askRevoke(entry)
+        assertEquals(entry, vm.state.value.confirmRevoke)
+        assertFalse("nothing is revoked before the confirmation", "POST /api/pairing/revoke" in requests)
+        vm.askRevoke(null)
+        assertNull(vm.state.value.confirmRevoke)
+
+        vm.askRevoke(entry)
+        vm.revokePairing(entry)
+        assertNull(vm.state.value.confirmRevoke)
+        vm.await { it.approvedPairing.isEmpty() }
+        assertTrue("POST /api/pairing/revoke" in requests)
     }
 }

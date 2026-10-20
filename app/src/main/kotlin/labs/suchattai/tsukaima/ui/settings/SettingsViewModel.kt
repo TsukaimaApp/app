@@ -30,6 +30,7 @@ import labs.suchattai.tsukaima.data.api.ProfileDto
 import labs.suchattai.tsukaima.data.api.SkillDto
 import labs.suchattai.tsukaima.data.api.ToolsetDto
 import labs.suchattai.tsukaima.data.prefs.CredentialStore
+import labs.suchattai.tsukaima.data.prefs.NotificationPrefs
 import labs.suchattai.tsukaima.data.prefs.ServerUrl
 import labs.suchattai.tsukaima.data.prefs.SettingsStore
 import labs.suchattai.tsukaima.data.prefs.ThemeMode
@@ -78,6 +79,9 @@ data class SettingsUiState(
     /** The "Sign out?" confirmation is showing. */
     val confirmSignOut: Boolean = false,
     val signingOut: Boolean = false,
+    val notifications: NotificationPrefs = NotificationPrefs(),
+    /** The approved pairing whose "Revoke?" confirmation is showing. */
+    val confirmRevoke: PairingEntry? = null,
 ) {
     /** The URL field was edited to a different server than the one signed in to, and not yet signed in again. */
     val urlChangedWithoutSignIn: Boolean
@@ -93,6 +97,8 @@ class SettingsViewModel(
     private val io: CoroutineDispatcher = Dispatchers.IO,
     /** App-wide sign-out side effects beyond the repository: notifications, the foreground service. */
     private val onSignedOut: () -> Unit = {},
+    /** Shows a transient message (the app's toast). */
+    private val toast: (String) -> Unit = {},
 ) : ViewModel() {
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
@@ -121,6 +127,7 @@ class SettingsViewModel(
                         model = s.model ?: it.model,
                         theme = s.theme,
                         materialYou = s.materialYou,
+                        notifications = s.notifications,
                         // Seed the form once; later emissions (our own writes) must not clobber typing.
                         serverUrl = if (firstLoad && it.serverUrl.isEmpty()) s.serverUrl else it.serverUrl,
                         username = if (firstLoad && it.username.isEmpty()) s.username else it.username,
@@ -222,6 +229,7 @@ class SettingsViewModel(
                 SettingsUiState(
                     serverUrl = it.serverUrl, username = it.username, storedUrl = it.storedUrl, profile = it.profile,
                     theme = it.theme, materialYou = it.materialYou, simulateOffline = it.simulateOffline,
+                    notifications = it.notifications,
                 )
             }
             _signedOut.trySend(Unit)
@@ -304,7 +312,7 @@ class SettingsViewModel(
         viewModelScope.launch { settings.update { it.copy(model = model, modelProvider = provider) } }
     }
 
-    /** Optimistic; reverted if the server refuses. Toolsets have no counterpart: they are read-only. */
+    /** Optimistic; reverted if the server refuses. */
     fun toggleSkill(name: String, enabled: Boolean) {
         setSkill(name, enabled)
         viewModelScope.launch {
@@ -316,12 +324,44 @@ class SettingsViewModel(
         st.copy(skills = st.skills.map { if (it.name == name) it.copy(enabled = enabled) else it })
     }
 
+    /**
+     * Enables or disables a toolset for new sessions (`PUT /api/tools/toolsets/{name}`); optimistic, reverted with a
+     * toast if the server refuses.
+     */
+    fun toggleToolset(name: String, enabled: Boolean) {
+        setToolset(name, enabled)
+        viewModelScope.launch {
+            repo.toggleToolset(name, enabled).onFailure {
+                setToolset(name, !enabled)
+                toast("Couldn’t ${if (enabled) "enable" else "disable"} $name")
+            }
+        }
+    }
+
+    private fun setToolset(name: String, enabled: Boolean) = _state.update { st ->
+        st.copy(toolsets = st.toolsets.map { if (it.name == name) it.copy(enabled = enabled) else it })
+    }
+
+    /** Turns one kind of notification on or off ([NotificationPrefs]); the coordinator reads it per decision. */
+    fun setNotifications(block: (NotificationPrefs) -> NotificationPrefs) {
+        _state.update { it.copy(notifications = block(it.notifications)) }
+        viewModelScope.launch { settings.update { it.copy(notifications = block(it.notifications)) } }
+    }
+
     fun approvePairing(entry: PairingEntry) {
         viewModelScope.launch { repo.approvePairing(entry.platform, entry.requestId); reloadPairing() }
     }
 
+    /** Opens (or with null closes) the "Revoke?" confirmation for an approved pairing. */
+    fun askRevoke(entry: PairingEntry?) = _state.update { it.copy(confirmRevoke = entry) }
+
+    /** Revokes [entry] (`POST /api/pairing/revoke`) and reloads the list; a refusal is toasted. */
     fun revokePairing(entry: PairingEntry) {
-        viewModelScope.launch { repo.revokePairing(entry.platform, entry.userId); reloadPairing() }
+        _state.update { it.copy(confirmRevoke = null) }
+        viewModelScope.launch {
+            repo.revokePairing(entry.platform, entry.userId).onFailure { toast("Couldn’t revoke ${entry.who}") }
+            reloadPairing()
+        }
     }
 
     private suspend fun reloadPairing() {

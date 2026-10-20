@@ -8,6 +8,7 @@ import kotlinx.serialization.json.put
 import labs.suchattai.tsukaima.data.RecentIds
 import labs.suchattai.tsukaima.data.api.CronJobDto
 import labs.suchattai.tsukaima.data.gateway.Frame
+import labs.suchattai.tsukaima.data.prefs.NotificationPrefs
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.notifications.NotificationCommand.Cancel
 import labs.suchattai.tsukaima.notifications.NotificationCommand.Post
@@ -264,5 +265,90 @@ class NotificationCoordinatorTest {
         assertEquals(listOf(Cancel("srq-s".hashCode())), cancel)
         val secret = Frame.ServerRequest("srq-s", "secret", buildJsonObject { put("session_id", "live-1"); put("env_var", "K") })
         assertNull("withdrawn before it was seen: never notified", c.onServerRequest(secret, foreground = false))
+    }
+
+    // ---- v0.5.0: Settings → Notifications ----------------------------------------------------------------
+
+    private var prefs = NotificationPrefs()
+    private val gated = NotificationCoordinator(answered, prefs = { prefs })
+
+    private fun pairing(id: String) = buildJsonObject {
+        put("platform", "telegram")
+        put("request_id", id)
+        put("user_name", "alice")
+    }
+
+    @Test
+    fun approvalsOffSuppressesRequestsButNotTheirCancellation() {
+        prefs = prefs.copy(approvals = false)
+        assertNull(gated.onServerRequest(approval("srq-1"), foreground = false))
+        assertNull(gated.onServerRequest(clarify("srq-2"), foreground = false))
+        assertEquals(listOf(Cancel(ApprovalNotifier.approvalId("srq-1"))), gated.onEvent(event("request.cancel", payload = buildJsonObject { put("id", "srq-1") }), foreground = false))
+        // Switched back on: a new request is notified; the withdrawn one never is.
+        prefs = prefs.copy(approvals = true)
+        assertNull(gated.onServerRequest(approval("srq-1"), foreground = false))
+        assertNotNull(gated.onServerRequest(approval("srq-3"), foreground = false))
+    }
+
+    @Test
+    fun repliesOffSuppressesTaskDone() {
+        prefs = prefs.copy(replies = false)
+        assertTrue(gated.onEvent(event("message.complete"), foreground = false).isEmpty())
+        prefs = prefs.copy(replies = true)
+        assertEquals(1, gated.onEvent(event("message.complete"), foreground = false).size)
+    }
+
+    @Test
+    fun alertsOffStillTracksTheGatewayTransition() {
+        prefs = prefs.copy(alerts = false)
+        assertNull(gated.onGatewayStatus(AgentStatus.Stopped, foreground = false))
+        // Coming back still clears (whatever might be showing), and going down again while on alerts posts.
+        assertEquals(Cancel(ApprovalNotifier.GATEWAY_ID), gated.onGatewayStatus(null, foreground = false))
+        prefs = prefs.copy(alerts = true)
+        assertNull("still down is no transition", gated.onGatewayStatus(null, foreground = false))
+        assertTrue(gated.onGatewayStatus(AgentStatus.Stopped, foreground = false) is Post)
+        assertNull("deduped while it stays down", gated.onGatewayStatus(AgentStatus.Stopped, foreground = false))
+    }
+
+    @Test
+    fun gatewayDownPostsOnlyFromRunningToStoppedInTheBackground() {
+        assertNull(gated.onGatewayStatus(null, foreground = false)) // running
+        assertNull("foreground: the status line says it", gated.onGatewayStatus(AgentStatus.Stopped, foreground = true))
+        assertEquals(Cancel(ApprovalNotifier.GATEWAY_ID), gated.onGatewayStatus(null, foreground = false))
+        val down = gated.onGatewayStatus(AgentStatus.Stopped, foreground = false) as Post
+        assertEquals(Channels.GATEWAY, down.spec.channel)
+        assertEquals("Gateway stopped", down.spec.title)
+    }
+
+    @Test
+    fun alertsOffSuppressesCronFailuresButKeepsTheSnapshot() {
+        fun job(status: String?, run: String) = CronJobDto(id = "a", name = "backup", lastStatus = status, lastRunAt = run)
+        assertTrue(gated.onCronJobs(listOf(job("ok", "t1"))).isEmpty()) // seed
+        prefs = prefs.copy(alerts = false)
+        assertTrue(gated.onCronJobs(listOf(job("error", "t2"))).isEmpty())
+        prefs = prefs.copy(alerts = true)
+        assertTrue("the failure seen while off is not replayed", gated.onCronJobs(listOf(job("error", "t2"))).isEmpty())
+        assertEquals(1, gated.onCronJobs(listOf(job("delivery_failed", "t3"))).size)
+    }
+
+    @Test
+    fun cronFailureStatusesFromHermes() {
+        fun job(status: String?, run: String) = CronJobDto(id = "a", name = "backup", lastStatus = status, lastRunAt = run)
+        assertTrue(c.onCronJobs(listOf(job("ok", "t1"))).isEmpty())
+        listOf("error", "delivery_failed", "blocked_config", "timeout").forEachIndexed { i, status ->
+            assertEquals(status, 1, c.onCronJobs(listOf(job(status, "t${i + 2}"))).size)
+            assertTrue(c.onCronJobs(listOf(job("ok", "u${i + 2}"))).isEmpty())
+        }
+    }
+
+    @Test
+    fun pairingOffStillCancelsGoneRequests() {
+        assertEquals(1, gated.onPairing(listOf(pairing("p-1")), foreground = false).size)
+        prefs = prefs.copy(pairing = false)
+        assertTrue(gated.onPairing(listOf(pairing("p-1"), pairing("p-2")), foreground = false).isEmpty())
+        assertEquals(
+            listOf(Cancel(ApprovalNotifier.pairingId("telegram", "p-1"))),
+            gated.onPairing(listOf(pairing("p-2")), foreground = false),
+        )
     }
 }
