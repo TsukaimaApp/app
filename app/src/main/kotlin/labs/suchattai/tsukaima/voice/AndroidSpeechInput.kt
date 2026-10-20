@@ -2,14 +2,11 @@ package labs.suchattai.tsukaima.voice
 
 import android.content.ComponentName
 import android.content.Context
-import android.content.pm.ApplicationInfo
-import android.content.pm.ServiceInfo
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.speech.RecognitionListener
-import android.speech.RecognitionService
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
@@ -50,20 +47,15 @@ class AndroidSpeechInput(
     private val language: () -> String? = { null },
 ) : SpeechInput {
     override val available: Boolean
-        get() = onDeviceAvailable() || if (stubIsDefault()) systemRecognizer() != null else recognizers().isNotEmpty()
+        get() = onDeviceAvailable() || if (stubIsDefault()) systemRecognizer(context) != null else recognizers(context).isNotEmpty()
 
     private fun onDeviceAvailable() = preferOnDevice &&
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
 
-    /** Installed recognition services other than Tsukaima's own stub (`assist.TsukaimaRecognitionService`). */
-    private fun recognizers(): List<ServiceInfo> =
-        context.packageManager.queryIntentServices(Intent(RecognitionService.SERVICE_INTERFACE), 0)
-            .map { it.serviceInfo }
-            .filter { it.packageName != context.packageName }
-
     /**
-     * On Android 10/11, making Tsukaima the device assistant also makes its stub recogniser the default one (12+ keep
-     * the default apart from the assistant).
+     * On Android 10/11, making Tsukaima the device assistant also makes its own (forwarding) recogniser the default
+     * one (12+ keep the default apart from the assistant). Voice mode then goes to the system recogniser directly
+     * instead of through the forwarder.
      */
     private fun stubIsDefault(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return false
@@ -72,19 +64,11 @@ class AndroidSpeechInput(
         return current?.packageName == context.packageName
     }
 
-    /**
-     * The recogniser to use instead of the stub: a system one only (preinstalled or its update), never an arbitrary
-     * third-party app the user did not pick for the microphone. Null when there is none.
-     */
-    private fun systemRecognizer(): ComponentName? = recognizers()
-        .firstOrNull { (it.applicationInfo.flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0 }
-        ?.let { ComponentName(it.packageName, it.name) }
-
     override fun listen(): Flow<SpeechEvent> {
         val tag = language()
         val choice = RecognizerRouting.choose(tag, Locale.getDefault().stripExtensions().toLanguageTag(), onDeviceAvailable())
         val explicit = if (!choice.onDevice && stubIsDefault()) {
-            systemRecognizer() ?: return flowOf(SpeechEvent.Error(UNAVAILABLE, retry = false))
+            systemRecognizer(context) ?: return flowOf(SpeechEvent.Error(UNAVAILABLE, retry = false))
         } else {
             null
         }

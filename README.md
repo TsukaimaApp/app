@@ -63,8 +63,8 @@ opened it in Tsukaima."). Launches of the sheet by other apps (`ACTION_ASSIST`) 
 listen until tapped.
 
 Not supported: a hotword, and anything on the lock screen. Android 10 and 11: while Tsukaima is the assistant, its
-stub recogniser becomes the device's default speech recogniser and other apps' speech input stops working until you
-change the assistant back; Android 12+ is unaffected.
+recogniser becomes the device's default speech recogniser and forwards to the system one, so voice input from the
+assistant gesture and other apps keeps working there; Android 12+ keeps the two apart.
 
 ## Screenshots
 

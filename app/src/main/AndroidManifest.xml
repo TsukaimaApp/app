@@ -71,7 +71,7 @@
             android:exported="true"
             android:permission="android.permission.BIND_VOICE_INTERACTION" />
 
-        <!-- Required by the assistant on Android 10/11; recognises nothing (see TsukaimaRecognitionService).
+        <!-- Required by the assistant on Android 10/11; forwards to the system recogniser (see TsukaimaRecognitionService).
              Exported without a permission like every recogniser: clients bind it from their own process. -->
         <service
             android:name=".assist.TsukaimaRecognitionService"

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Stub recogniser required by the assistant on Android 10/11; never offered as the default recogniser. -->
+<!-- Forwarding recogniser required by the assistant on Android 10/11; never offered as the default recogniser. -->
 <recognition-service xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:selectableAsDefault="false"

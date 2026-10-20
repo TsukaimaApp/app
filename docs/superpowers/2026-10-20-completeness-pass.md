@@ -68,7 +68,8 @@ whose session opens a translucent `AssistActivity` sheet). Both run on one voice
 password prompts stay a tap.
 
 Deliberately not there: a hotword; assist from the lock screen; per-word reveal of spoken text (the reveal is per
-sentence); a forwarding recogniser for Android 10/11 (the stub recogniser takes over as the default there).
+sentence). (The Android 10/11 stub recogniser became a forwarding one in v0.8.0: it relays to the system
+recogniser instead of failing.)
 
 ### Open (deferred minors)
 

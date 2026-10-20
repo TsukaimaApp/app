@@ -250,3 +250,7 @@ Decisions taken on the user's behalf while implementing `design/handoff_voice/RE
 
 - Ruling: tables are a custom layout with content-sized columns capped at 220dp and horizontal scroll beyond the width — wrapping every column to fit makes agent tables unreadable on a phone — cost if wrong: a wide table needs a sideways scroll.
 - Ruling: list nesting follows indentation relative to the open items (CommonMark-style), not leading spaces ÷ 2, so four-space nesting under `1.` reads as one level; each item carries its shown number (null for a bullet), counted on from the first marker at its depth (`1.` `1.` `1.` shows 1, 2, 3), so mixed bullet/numbered nesting renders — cost if wrong: an oddly indented list nests one level shallower than its spaces suggest.
+
+## v0.8.0
+
+- Ruling: the assistant recogniser forwards to the first system recogniser instead of failing — Android 10/11 reset an assistant without one and the stub made assistant voice input fail there — cost if wrong: a relay bug shows up only on those two versions, which no JVM test covers.
