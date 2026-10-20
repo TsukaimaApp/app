@@ -10,5 +10,7 @@ class TsukaimaApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        // Polling and gateway management run on the container's background scope; returns immediately.
+        container.connection.start()
     }
 }

@@ -48,21 +48,57 @@ class EncryptedCredentialStore(context: Context) : CredentialStore {
     }
 }
 
+/** Process-lifetime store: tests, and the fallback when the encrypted store cannot be built. Thread-safe. */
 class InMemoryCredentialStore : CredentialStore {
     private var password: String? = null
     private var accessToken: String? = null
 
+    @Synchronized
     override fun password(): String? = password
 
+    @Synchronized
     override fun accessToken(): String? = accessToken
 
+    @Synchronized
     override fun save(password: String?, accessToken: String?) {
         this.password = password
         this.accessToken = accessToken
     }
 
+    @Synchronized
     override fun clear() {
         password = null
         accessToken = null
     }
+}
+
+/**
+ * Defers building the real store until first use, and survives a store that cannot be built.
+ *
+ * [EncryptedCredentialStore] touches the Android Keystore: slow, and it can throw (corrupted keyset,
+ * broken Keystore on some devices). [create] runs at most once, on whichever thread first reads or writes
+ * credentials (callers keep that off the main thread). If it throws, [onFallback] is told and an
+ * [InMemoryCredentialStore] is used for the rest of the process, so the app still starts and the user can
+ * sign in again (credentials then do not persist across restarts).
+ */
+class LazyCredentialStore(
+    create: () -> CredentialStore,
+    onFallback: (Throwable) -> Unit,
+) : CredentialStore {
+    private val delegate: CredentialStore by lazy {
+        try {
+            create()
+        } catch (e: Exception) {
+            onFallback(e)
+            InMemoryCredentialStore()
+        }
+    }
+
+    override fun password(): String? = delegate.password()
+
+    override fun accessToken(): String? = delegate.accessToken()
+
+    override fun save(password: String?, accessToken: String?) = delegate.save(password, accessToken)
+
+    override fun clear() = delegate.clear()
 }
