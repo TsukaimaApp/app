@@ -106,6 +106,21 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
         transport.respond(requestId, buildJsonObject { put("choice", JsonPrimitive(choice.wire)) })
 
     /**
+     * Answers a `clarify` request by its server-request id: `{"answers": {qid: answer|null}}`, or `{}` (no
+     * `answers` key = cancel all, gateway-contract `ClarifyResult`) when [answers] is null. Returns whether the
+     * answer was enqueued on a live connection.
+     */
+    fun respondClarify(srqId: String, answers: Map<String, String?>?): Boolean =
+        transport.respond(
+            srqId,
+            if (answers == null) {
+                JsonObject(emptyMap())
+            } else {
+                buildJsonObject { put("answers", JsonObject(answers.mapValues { (_, v) -> JsonPrimitive(v) })) }
+            },
+        )
+
+    /**
      * Answers an approval by its `request_id` rather than a server-request id: for the `pending_approval` a
      * resume reports, which has no `srq-…` id to [respondApproval] to.
      */

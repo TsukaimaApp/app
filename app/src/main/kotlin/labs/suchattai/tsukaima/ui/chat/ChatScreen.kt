@@ -36,11 +36,13 @@ import kotlinx.coroutines.launch
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.ChatState
+import labs.suchattai.tsukaima.domain.chat.ClarifyQuestion
 import labs.suchattai.tsukaima.domain.chat.ToolStatus
 import labs.suchattai.tsukaima.ui.chat.components.ApprovalCard
 import labs.suchattai.tsukaima.ui.chat.components.AssistantMessage
 import labs.suchattai.tsukaima.ui.chat.components.ChatSkeleton
 import labs.suchattai.tsukaima.ui.chat.components.ChatTopBar
+import labs.suchattai.tsukaima.ui.chat.components.ClarifyCard
 import labs.suchattai.tsukaima.ui.chat.components.Composer
 import labs.suchattai.tsukaima.ui.chat.components.StatusLine
 import labs.suchattai.tsukaima.ui.chat.components.ToolRow
@@ -60,6 +62,8 @@ class ChatActions(
     val onAttach: () -> Unit = {},
     val onApprove: (String) -> Unit = {},
     val onDeny: (String) -> Unit = {},
+    val onClarify: (id: String, answers: Map<String, String?>) -> Unit = { _, _ -> },
+    val onClarifySkip: (String) -> Unit = {},
     val onMenu: (ChatMenu?) -> Unit = {},
     val onDialog: (ChatDialog?) -> Unit = {},
     val onModel: (provider: String, model: String) -> Unit = { _, _ -> },
@@ -107,6 +111,8 @@ fun ChatScreen(
             onAttach = vm::attach,
             onApprove = vm::approve,
             onDeny = vm::deny,
+            onClarify = vm::answerClarify,
+            onClarifySkip = vm::skipClarify,
             onMenu = vm::showMenu,
             onDialog = vm::showDialog,
             onModel = vm::setModel,
@@ -201,6 +207,11 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
                     approved = state.decisions[item.id],
                     answerable = ChatSync.answerable(item),
                 )
+                is ChatItem.Clarify -> ClarifyCard(
+                    item = item,
+                    onSend = { actions.onClarify(item.id, it) },
+                    onSkipAll = { actions.onClarifySkip(item.id) },
+                )
                 is ChatItem.Thinking -> Spacer(Modifier.height(0.dp))
             }
         }
@@ -294,6 +305,19 @@ private val previewApproval = ChatState(
     storedSessionId = "20261020_010916_48c967",
 )
 
+private val previewClarify = ChatState(
+    items = listOf(
+        ChatItem.UserMessage("u1", "Pick a colour scheme for the dashboard."),
+        ChatItem.Clarify(
+            "srq-2",
+            listOf(ClarifyQuestion("q1", "Which colour do you prefer?", listOf("red", "green", "blue"), multiSelect = false)),
+            answered = false,
+        ),
+    ),
+    status = AgentStatus.Question,
+    storedSessionId = "20261020_010916_48c967",
+)
+
 @Composable
 private fun ChatPreview(dark: Boolean, state: ChatUiState) {
     TsukaimaTheme(darkTheme = dark) {
@@ -324,6 +348,14 @@ private fun ChatApprovalLight() = ChatPreview(false, ChatUiState(chat = previewA
 @Preview(name = "Chat approval dark", heightDp = 640)
 @Composable
 private fun ChatApprovalDark() = ChatPreview(true, ChatUiState(chat = previewApproval, model = "Hermes 4 · 405B"))
+
+@Preview(name = "Chat question light", heightDp = 640)
+@Composable
+private fun ChatQuestionLight() = ChatPreview(false, ChatUiState(chat = previewClarify, model = "Hermes 4 · 405B"))
+
+@Preview(name = "Chat question dark", heightDp = 640)
+@Composable
+private fun ChatQuestionDark() = ChatPreview(true, ChatUiState(chat = previewClarify, model = "Hermes 4 · 405B"))
 
 @Preview(name = "Chat offline light", heightDp = 640)
 @Composable

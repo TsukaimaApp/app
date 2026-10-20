@@ -18,6 +18,7 @@ import labs.suchattai.tsukaima.data.gateway.TranscriptMessage
  */
 object ChatReducer {
     private const val APPROVAL = "approval"
+    private const val CLARIFY = "clarify"
 
     fun reduce(state: ChatState, frame: Frame, flair: () -> String = ThinkingFlair::next): ChatState =
         when (frame) {
@@ -63,6 +64,19 @@ object ChatReducer {
         val card = state.items.firstOrNull { it.id == id } as? ChatItem.Approval
         if (card == null || card.answered) return state
         val items = state.items.map { if (it === card) card.copy(answered = true) else it }
+        return state.copy(items = items, status = statusAfterApproval(state.status, items, flair))
+    }
+
+    /** Marks clarify [id] answered with what was sent ([answers]; empty = cancel all); idempotent. */
+    fun onClarifyAnswered(
+        state: ChatState,
+        id: String,
+        answers: Map<String, String?>,
+        flair: () -> String = ThinkingFlair::next,
+    ): ChatState {
+        val card = state.items.firstOrNull { it.id == id } as? ChatItem.Clarify
+        if (card == null || card.answered) return state
+        val items = state.items.map { if (it === card) card.copy(answered = true, answers = answers) else it }
         return state.copy(items = items, status = statusAfterApproval(state.status, items, flair))
     }
 
@@ -140,7 +154,7 @@ object ChatReducer {
             )
             "request.cancel" -> {
                 val id = p.string("id") ?: return s
-                val card = s.items.firstOrNull { it.id == id } as? ChatItem.Approval ?: return s
+                val card = s.items.firstOrNull { it.id == id && (it is ChatItem.Approval || it is ChatItem.Clarify) } ?: return s
                 val items = s.items - card
                 s.copy(items = items, status = statusAfterApproval(s.status, items, flair))
             }
@@ -239,9 +253,14 @@ object ChatReducer {
     // ---- server requests ----------------------------------------------------------------------
 
     private fun reduceServerRequest(state: ChatState, req: Frame.ServerRequest): ChatState {
-        if (req.method != APPROVAL) return state
+        if (req.method != APPROVAL && req.method != CLARIFY) return state
         if (!isForUs(state, req.params.string("session_id").orEmpty())) return state
         if (state.items.any { it.id == req.id }) return state
+        if (req.method == CLARIFY) {
+            val questions = ClarifyAnswers.questions(req.params).takeIf { it.isNotEmpty() } ?: return state
+            val card = ChatItem.Clarify(id = req.id, questions = questions, answered = false)
+            return state.copy(items = state.items + card, status = statusFor(state.items + card) ?: AgentStatus.Question)
+        }
         val card = ChatItem.Approval(
             id = req.id,
             requestId = req.params.string("request_id").orEmpty(),
@@ -249,7 +268,7 @@ object ChatReducer {
             toolName = req.params.string("tool_name").orEmpty(),
             answered = false,
         )
-        return state.copy(items = state.items + card, status = AgentStatus.Approval)
+        return state.copy(items = state.items + card, status = statusFor(state.items + card) ?: AgentStatus.Approval)
     }
 
     // ---- helpers ------------------------------------------------------------------------------
@@ -257,22 +276,25 @@ object ChatReducer {
     private fun isForUs(state: ChatState, sessionId: String): Boolean =
         state.liveSessionId == null || sessionId.isEmpty() || sessionId == state.liveSessionId
 
-    /** After an approval is answered or withdrawn: stay on Approval while others are pending. */
+    /** Approval while an approval waits, else Question while a clarify waits, else null. */
+    private fun statusFor(items: List<ChatItem>): AgentStatus? = when {
+        items.any { it is ChatItem.Approval && !it.answered } -> AgentStatus.Approval
+        items.any { it is ChatItem.Clarify && !it.answered } -> AgentStatus.Question
+        else -> null
+    }
+
+    /** After an approval or clarify is answered or withdrawn: keep waiting while others are pending. */
     private fun statusAfterApproval(current: AgentStatus, items: List<ChatItem>, flair: () -> String): AgentStatus =
-        when {
-            items.any { it is ChatItem.Approval && !it.answered } -> AgentStatus.Approval
-            current == AgentStatus.Approval -> AgentStatus.Thinking(flair())
-            else -> current
-        }
+        statusFor(items) ?: if (current == AgentStatus.Approval || current == AgentStatus.Question) AgentStatus.Thinking(flair()) else current
 
     /**
      * The streaming assistant item that new text may still flow into: the last streaming one,
-     * provided no tool call or approval card was appended after it (that would reorder the turn).
+     * provided no tool call, approval or clarify card was appended after it (that would reorder the turn).
      */
     private fun liveAssistant(items: List<ChatItem>): ChatItem.AssistantMessage? {
         val index = items.indexOfLast { it is ChatItem.AssistantMessage && it.streaming }
         if (index < 0) return null
-        val blocked = items.subList(index + 1, items.size).any { it is ChatItem.ToolCall || it is ChatItem.Approval }
+        val blocked = items.subList(index + 1, items.size).any { it is ChatItem.ToolCall || it is ChatItem.Approval || it is ChatItem.Clarify }
         return if (blocked) null else items[index] as ChatItem.AssistantMessage
     }
 
@@ -292,12 +314,13 @@ object ChatReducer {
         return counted.copy(items = counted.items + item) to item
     }
 
-    /** Abnormal turn end: close streams, fail running tools, drop approvals nobody answered. */
+    /** Abnormal turn end: close streams, fail running tools, drop approvals and questions nobody answered. */
     private fun abortTurn(items: List<ChatItem>): List<ChatItem> =
         finalizeStreaming(items).mapNotNull { item ->
             when {
                 item is ChatItem.ToolCall && item.status == ToolStatus.Running -> item.copy(status = ToolStatus.Failed)
                 item is ChatItem.Approval && !item.answered -> null
+                item is ChatItem.Clarify && !item.answered -> null
                 else -> item
             }
         }

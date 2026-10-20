@@ -15,9 +15,12 @@ class IconsTest {
         "receipt_long", "bar_chart", "open_in_new", "cloud_off", "send", "tag",
     )
 
+    /** Added after the handoff (v0.2.0: clarify card, attachment chips). */
+    private val additions = listOf("help", "attach_file", "image")
+
     @Test
     fun everyHandoffIconResolves() {
-        assertEquals(handoffNames.size, IconName.entries.size)
+        assertEquals(handoffNames.size + additions.size, IconName.entries.size)
         IconName.entries.forEach { name ->
             val vector = iconFor(name)
             assertNotNull("no vector for $name", vector)
@@ -27,6 +30,6 @@ class IconsTest {
 
     @Test
     fun enumCoversExactlyTheHandoffList() {
-        assertEquals(handoffNames.toSet(), IconName.entries.map { it.symbol }.toSet())
+        assertEquals((handoffNames + additions).toSet(), IconName.entries.map { it.symbol }.toSet())
     }
 }

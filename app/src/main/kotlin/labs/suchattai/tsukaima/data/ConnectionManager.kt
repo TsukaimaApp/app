@@ -3,7 +3,6 @@ package labs.suchattai.tsukaima.data
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -122,20 +121,15 @@ class ConnectionManager(
     private val _serverRequests = MutableSharedFlow<Frame.ServerRequest>(replay = 16, extraBufferCapacity = 64)
 
     /**
-     * Server→client approval requests (the rest are answered by [router]), hot and multicast. The last 16 are
+     * Server→client approval and clarify requests (the rest are answered by [router]), hot and multicast. The last 16 are
      * replayed so a screen or notification that subscribes late still sees them; subscribers must ignore
      * requests already answered ([labs.suchattai.tsukaima.di.AppContainer.answeredRequestIds]) or withdrawn
      * ([closedRequestIds]).
      */
     val serverRequests: SharedFlow<Frame.ServerRequest> = _serverRequests.asSharedFlow()
 
-    private val _hints = MutableSharedFlow<String>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
-
-    /** One-shot UI hints (not replayed), e.g. "Hermes asked a question"; the shell shows them as toasts. */
-    val hints: SharedFlow<String> = _hints.asSharedFlow()
-
-    /** Answers every server request except approvals, and tracks withdrawn ones; see [ServerRequestRouter]. */
-    private val router = ServerRequestRouter(gateway, hint = { _hints.tryEmit(it) }, logger = logger)
+    /** Answers every server request except approvals and questions, and tracks withdrawn ones; see [ServerRequestRouter]. */
+    private val router = ServerRequestRouter(gateway, logger = logger)
 
     /**
      * Server requests the server withdrew (`request.cancel` / `approval.cancelled`), bounded to the latest 64.
@@ -172,7 +166,7 @@ class ConnectionManager(
 
     private fun run(interval: Long) {
         if (forwarding.compareAndSet(false, true)) {
-            // The single collector of the gateway's requests: only approvals reach subscribers.
+            // The single collector of the gateway's requests: only approvals and questions reach subscribers.
             scope.launch { gateway.serverRequests.collect { if (router.route(it)) _serverRequests.emit(it) } }
             scope.launch { gateway.events.collect(router::onEvent) }
         }

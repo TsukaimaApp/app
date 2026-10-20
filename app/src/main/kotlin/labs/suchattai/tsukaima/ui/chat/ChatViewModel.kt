@@ -223,12 +223,41 @@ class ChatViewModel(
         }
     }
 
+    /** Sends the answers to clarify [id] (qid → answer, null = skipped); see [ChatItem.Clarify]. */
+    fun answerClarify(id: String, answers: Map<String, String?>) = answerQuestion(id, answers)
+
+    /** "Skip": cancels every question of clarify [id] (a reply without `answers`). */
+    fun skipClarify(id: String) = answerQuestion(id, null)
+
+    /** Claims [id] (shared with notifications), marks the card answered, then answers through its srq id. */
+    private fun answerQuestion(id: String, answers: Map<String, String?>?) {
+        val card = chat.items.firstOrNull { it.id == id } as? ChatItem.Clarify ?: return
+        if (card.answered) return
+        val shown = answers.orEmpty()
+        if (!backend.answeredRequestIds.add(id)) {
+            return setChat { ChatReducer.onClarifyAnswered(it, id, shown, flair) } // answered elsewhere
+        }
+        setChat { ChatReducer.onClarifyAnswered(it, id, shown, flair) }
+        if (!session.respondClarify(id, answers)) {
+            backend.toast("Couldn’t send the answer: not connected to Hermes")
+            reopenAnswer(id)
+        }
+    }
+
     /** Undoes an answer that was not delivered: the card is answerable again and the claim is released. */
     private fun reopenAnswer(id: String) {
         backend.answeredRequestIds.remove(id)
         _state.update { s ->
-            val items = s.chat.items.map { if (it.id == id && it is ChatItem.Approval) it.copy(answered = false) else it }
-            s.copy(chat = s.chat.copy(items = items, status = unlessOffline(s.chat.status, AgentStatus.Approval)), decisions = s.decisions - id)
+            var waiting: AgentStatus = AgentStatus.Approval
+            val items = s.chat.items.map {
+                when {
+                    it.id != id -> it
+                    it is ChatItem.Approval -> it.copy(answered = false)
+                    it is ChatItem.Clarify -> it.copy(answered = false, answers = emptyMap()).also { waiting = AgentStatus.Question }
+                    else -> it
+                }
+            }
+            s.copy(chat = s.chat.copy(items = items, status = unlessOffline(s.chat.status, waiting)), decisions = s.decisions - id)
         }
     }
 

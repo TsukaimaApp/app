@@ -3,7 +3,6 @@ package labs.suchattai.tsukaima.data
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -289,7 +288,7 @@ class ConnectionManagerTest {
     }
 
     @Test
-    fun onlyApprovalsForwarded() = runBlocking<Unit> {
+    fun approvalsAndClarifyForwarded() = runBlocking<Unit> {
         val answers = java.util.concurrent.ConcurrentHashMap<String, kotlinx.serialization.json.JsonObject>()
         wsListener = object : WebSocketListener() {
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -299,7 +298,8 @@ class ConnectionManagerTest {
                 if (method(text) == "client.capabilities") {
                     webSocket.send(READY)
                     for ((rid, m) in listOf("srq-c" to "clarify", "srq-p" to "preview.read", "srq-s" to "secret", "srq-a" to "approval")) {
-                        webSocket.send("""{"jsonrpc":"2.0","id":"$rid","method":"$m","params":{"session_id":"live-1"}}""")
+                        val qs = if (m == "clarify") ""","questions":[{"qid":"q1","question":"Colour?"}]""" else ""
+                        webSocket.send("""{"jsonrpc":"2.0","id":"$rid","method":"$m","params":{"session_id":"live-1"$qs}}""")
                     }
                 }
             }
@@ -310,16 +310,14 @@ class ConnectionManagerTest {
         }
         creds.save("pw", "tok", serverUrl())
         val cm = manager()
-        val hint = scope.async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { cm.hints.first() }
         cm.start()
-        await { while (answers.size < 3 || cm.serverRequests.replayCache.isEmpty()) delay(10) }
+        await { while (answers.size < 2 || cm.serverRequests.replayCache.size < 2) delay(10) }
 
-        assertEquals(listOf("srq-a"), cm.serverRequests.replayCache.map { it.id })
-        assertEquals("{\"answers\":null}", answers["srq-c"]!!["result"].toString())
+        assertEquals(listOf("srq-c", "srq-a"), cm.serverRequests.replayCache.map { it.id })
+        assertNull("clarify waits for the user", answers["srq-c"])
         assertEquals("4404", answers["srq-p"]!!["error"]!!.jsonObject["code"]!!.jsonPrimitive.content)
         assertEquals("-32601", answers["srq-s"]!!["error"]!!.jsonObject["code"]!!.jsonPrimitive.content)
         assertNull("approvals wait for the user", answers["srq-a"])
-        assertEquals(ServerRequestRouter.CLARIFY_HINT, await { hint.await() })
     }
 
     @Test

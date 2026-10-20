@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import labs.suchattai.tsukaima.data.gateway.Frame
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
+import labs.suchattai.tsukaima.domain.chat.ClarifyAnswers
 import labs.suchattai.tsukaima.ui.chat.ChatSync
 import labs.suchattai.tsukaima.ui.chat.components.CommandText
 import labs.suchattai.tsukaima.ui.settings.pairingEntry
@@ -67,6 +68,8 @@ object ApprovalNotifier {
     private const val MAX_PAIRING_FIELD = 40
     private const val HIDDEN_SUFFIX = " (hidden characters)"
     private const val APPROVAL_METHOD = "approval"
+    private const val CLARIFY_METHOD = "clarify"
+    private const val MAX_QUESTION = 120
 
     fun approvalId(srqId: String): Int = srqId.hashCode()
     fun pairingId(platform: String, requestId: String): Int = "pairing:$platform:$requestId".hashCode()
@@ -81,6 +84,20 @@ object ApprovalNotifier {
         !id.isNullOrBlank() && !id.startsWith(ChatSync.PENDING_PREFIX)
 
     fun isApproval(req: Frame.ServerRequest): Boolean = req.method == APPROVAL_METHOD
+
+    fun isClarify(req: Frame.ServerRequest): Boolean = req.method == CLARIFY_METHOD
+
+    /**
+     * "Hermes has a question": the first question (agent-controlled text, revealed and capped). No inline
+     * answers: tapping opens the chat that asked, where the card answers it.
+     */
+    fun forClarify(req: Frame.ServerRequest, storedSessionId: String? = null): NotificationSpec {
+        val first = ClarifyAnswers.questions(req.params).firstOrNull()?.question.orEmpty()
+        return NotificationSpec(
+            Channels.APPROVALS, approvalId(req.id), "Hermes has a question", cap(CommandText.reveal(first).text, MAX_QUESTION),
+            openScreen = SCREEN_CHAT, sessionId = storedSessionId,
+        )
+    }
 
     /**
      * Approve is offered inline only when the notification shows the whole command and it had no hidden

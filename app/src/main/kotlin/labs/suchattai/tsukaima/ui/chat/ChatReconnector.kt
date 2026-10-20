@@ -156,7 +156,7 @@ internal class ChatReconnector(
     }
 
     private fun reopen(req: Frame.ServerRequest) {
-        if (req.method != "approval") return
+        if (req.method !in ADOPTED) return
         backend.answeredRequestIds.remove(req.id)
         state.update { s ->
             s.copy(chat = s.chat.copy(items = s.chat.items.filterNot { it.id == req.id }), decisions = s.decisions - req.id)
@@ -176,14 +176,19 @@ internal class ChatReconnector(
     }
 
     /**
-     * Approvals for this live session that nobody has answered yet; replays of answered ones are skipped, and
+     * Approvals and questions for this live session that nobody has answered yet; replays of answered ones are skipped, and
      * so are withdrawn ones unless a resume [snapshot] (authoritative) lists them as open again.
      */
     private fun adopt(req: Frame.ServerRequest, snapshot: Boolean = false) {
-        if (req.method != "approval" || req.id in backend.answeredRequestIds) return
+        if (req.method !in ADOPTED || req.id in backend.answeredRequestIds) return
         if (!snapshot && backend.closedRequestIds.contains(req.id)) return
         val live = chat.liveSessionId ?: return
         if ((req.params["session_id"] as? JsonPrimitive)?.contentOrNull != live) return
         setChat { ChatReducer.reduce(it, req, flair) }
+    }
+
+    private companion object {
+        /** Server requests a chat shows and answers. */
+        val ADOPTED = setOf("approval", "clarify")
     }
 }

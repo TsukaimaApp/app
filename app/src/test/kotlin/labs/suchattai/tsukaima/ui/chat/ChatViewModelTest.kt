@@ -355,6 +355,98 @@ class ChatViewModelTest {
         assertTrue("srq-1" in b.answeredRequestIds)
     }
 
+    private fun clarify(id: String, session: String = live) = Frame.ServerRequest(
+        id, "clarify",
+        obj(
+            """{"session_id":"$session","questions":[
+                 {"qid":"q1","question":"Which colour?","choices":["red","green","blue"],"multi_select":false},
+                 {"qid":"q2","question":"Why?","choices":null,"multi_select":false}]}""",
+        ),
+    )
+
+    @Test
+    fun sendClarifyAnswersEncodesNulls() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.serverRequests.emit(clarify("srq-c"))
+        advanceUntilIdle()
+        assertEquals(AgentStatus.Question, vm.state.value.status)
+
+        vm.answerClarify("srq-c", mapOf("q1" to "red", "q2" to null))
+        vm.answerClarify("srq-c", mapOf("q1" to "blue", "q2" to null)) // double tap
+        advanceUntilIdle()
+
+        val (id, result) = b.transport.responses.single()
+        assertEquals("srq-c", id)
+        assertEquals("""{"answers":{"q1":"red","q2":null}}""", result.toString())
+        val card = vm.state.value.chat.items.single() as ChatItem.Clarify
+        assertTrue(card.answered)
+        assertEquals(mapOf("q1" to "red", "q2" to null), card.answers)
+        assertTrue("srq-c" in b.answeredRequestIds)
+        assertTrue(vm.state.value.status is AgentStatus.Thinking)
+    }
+
+    @Test
+    fun skipAllSendsNoAnswers() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.serverRequests.emit(clarify("srq-c"))
+        advanceUntilIdle()
+
+        vm.skipClarify("srq-c")
+        advanceUntilIdle()
+
+        // No `answers` key = cancel-all (gateway-contract ClarifyResult; the TUI's Esc sends `{}` too).
+        assertEquals(listOf("srq-c" to JsonObject(emptyMap())), b.transport.responses)
+        val card = vm.state.value.chat.items.single() as ChatItem.Clarify
+        assertTrue(card.answered)
+        assertTrue(card.answers.isEmpty())
+    }
+
+    @Test
+    fun clarifyNotSentReopensCard() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.serverRequests.emit(clarify("srq-c"))
+        b.serverRequests.emit(clarify("srq-foreign", session = "ffff0000"))
+        advanceUntilIdle()
+        assertEquals(listOf("srq-c"), vm.state.value.chat.items.map { it.id })
+
+        b.transport.respondOk = false
+        vm.answerClarify("srq-c", mapOf("q1" to "red", "q2" to null))
+        advanceUntilIdle()
+        assertFalse((vm.state.value.chat.items.single() as ChatItem.Clarify).answered)
+        assertFalse("srq-c" in b.answeredRequestIds)
+        assertEquals(AgentStatus.Question, vm.state.value.status)
+        assertTrue(b.toasts.any { it.startsWith("Couldn’t send the answer") })
+    }
+
+    @Test
+    fun resumeReadoptsOpenClarify() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on(
+                "session.resume",
+                obj(
+                    resumeJson.replace(
+                        "\"running\":false",
+                        "\"running\":true,\"open_requests\":[{\"id\":\"srq-c\",\"method\":\"clarify\"," +
+                            "\"params\":{\"session_id\":\"old\",\"questions\":[{\"qid\":\"q1\",\"question\":\"Colour?\"}]," +
+                            "\"answers\":{\"q1\":null}}}]",
+                    ),
+                ),
+            )
+        }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        val card = vm.state.value.chat.items.last() as ChatItem.Clarify
+        assertEquals("srq-c", card.id)
+        assertFalse(card.answered)
+        assertEquals(AgentStatus.Question, vm.state.value.status)
+    }
+
     @Test
     fun reconnectReplaysOnlyNewSeq() = runTest(dispatcher) {
         val b = backend()

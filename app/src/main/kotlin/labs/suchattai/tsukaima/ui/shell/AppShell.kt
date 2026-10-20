@@ -140,7 +140,6 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
             }
         }
     }
-    LaunchedEffect(Unit) { container.connection.hints.collect { container.toastState.show(it) } }
     LaunchedEffect(vm, navController) {
         vm.authPrompts.collect {
             navController.navigate(Route.Settings.path) { launchSingleTop = true }

@@ -37,6 +37,12 @@ sealed interface AgentStatus {
         override val tone = StatusTone.Amber
     }
 
+    /** A `clarify` request waits for the user. */
+    data object Question : AgentStatus {
+        override val label = "Waiting for your answer"
+        override val tone = StatusTone.Amber
+    }
+
     data object Stopped : AgentStatus {
         override val label = "Gateway stopped"
         override val tone = StatusTone.Red

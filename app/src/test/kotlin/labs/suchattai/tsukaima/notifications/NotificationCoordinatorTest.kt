@@ -42,8 +42,8 @@ class NotificationCoordinatorTest {
         // A fresh one is notified once; the replay of the same id is not.
         assertNotNull(c.onServerRequest(approval("srq-2"), foreground = false))
         assertNull(c.onServerRequest(approval("srq-2"), foreground = false))
-        // Clarify and other methods are not approvals.
-        assertNull(c.onServerRequest(Frame.ServerRequest("srq-3", "clarify", JsonObject(emptyMap())), foreground = false))
+        // Other server requests are never notified.
+        assertNull(c.onServerRequest(Frame.ServerRequest("srq-3", "secret", JsonObject(emptyMap())), foreground = false))
     }
 
     @Test
@@ -220,5 +220,27 @@ class NotificationCoordinatorTest {
         c.onEvent(withdrawn, foreground = true)
         // Only the withdrawn one stays quiet; the still-open one is notified on the hand-off.
         assertEquals(listOf("srq-3".hashCode()), c.onBackground(listOf(req, other)).map { it.id })
+    }
+    private fun clarify(id: String) = Frame.ServerRequest(
+        id, "clarify",
+        buildJsonObject {
+            put("session_id", "live-1")
+            put("questions", JsonArray(listOf(buildJsonObject { put("qid", "q1"); put("question", "Colour?") })))
+        },
+    )
+
+    @Test
+    fun clarifyNotifiedLikeApprovals() {
+        // The chat showing that session handles it in the foreground.
+        assertNull(c.onServerRequest(clarify("srq-q"), foreground = true, visibleSession = "live-1"))
+        val spec = c.onServerRequest(clarify("srq-q"), foreground = false)
+        assertEquals("Hermes has a question", spec?.title)
+        assertNull("once per id", c.onServerRequest(clarify("srq-q"), foreground = false))
+        // Withdrawn → cancelled and never notified again.
+        val cancel = c.onEvent(event("request.cancel", payload = buildJsonObject { put("id", "srq-r") }), foreground = false)
+        assertEquals(listOf(Cancel("srq-r".hashCode())), cancel)
+        assertNull(c.onServerRequest(clarify("srq-r"), foreground = false))
+        // Answered from chat → its notification goes.
+        assertEquals(Cancel("srq-q".hashCode()), c.onAnswered("srq-q"))
     }
 }

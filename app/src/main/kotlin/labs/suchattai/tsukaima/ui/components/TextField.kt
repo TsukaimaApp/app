@@ -41,7 +41,7 @@ import labs.suchattai.tsukaima.ui.theme.tsukaima
  * Settings-style input: tiny uppercase [label], raised field with a hairline border and a 2dp
  * accent focus ring (drawn outside the border, as the design's `0 0 0 2px` shadow), optional
  * [helper] caption, replaced by a danger-coloured [error] (with a danger border) while it is non-null. [mono] switches to Plex Mono for URLs and tokens; for a textarea pass
- * `singleLine = false` and [minLines].
+ * `singleLine = false`, [minLines] and optionally [maxLines] (it then scrolls).
  */
 @Composable
 fun TsukaimaTextField(
@@ -57,6 +57,7 @@ fun TsukaimaTextField(
     visualTransformation: VisualTransformation = VisualTransformation.None,
     modifier: Modifier = Modifier,
     error: String? = null,
+    maxLines: Int = Int.MAX_VALUE,
 ) {
     val colors = MaterialTheme.tsukaima
     val source = remember { MutableInteractionSource() }
@@ -97,6 +98,7 @@ fun TsukaimaTextField(
             textStyle = textStyle,
             singleLine = singleLine,
             minLines = minLines,
+            maxLines = if (singleLine) 1 else maxLines,
             keyboardOptions = keyboardOptions,
             visualTransformation = visualTransformation,
             interactionSource = source,

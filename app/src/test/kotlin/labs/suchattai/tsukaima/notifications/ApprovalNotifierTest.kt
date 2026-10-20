@@ -167,4 +167,44 @@ class ApprovalNotifierTest {
         assertTrue(spec.text.contains("nightly backup"))
         assertEquals(ApprovalNotifier.cronId("j1"), spec.id)
     }
+    private fun clarify(id: String, question: String) = Frame.ServerRequest(
+        id = id,
+        method = "clarify",
+        params = buildJsonObject {
+            put("session_id", "live-1")
+            put(
+                "questions",
+                kotlinx.serialization.json.JsonArray(
+                    listOf(
+                        buildJsonObject {
+                            put("qid", "q1")
+                            put("question", question)
+                        },
+                        buildJsonObject {
+                            put("qid", "q2")
+                            put("question", "second")
+                        },
+                    ),
+                ),
+            )
+        },
+    )
+
+    @Test
+    fun clarifySpecHasNoInlineActions() {
+        val spec = ApprovalNotifier.forClarify(clarify("srq-q", "Which colour do you prefer?"), "20261020_010916_48c967")
+        assertEquals(Channels.APPROVALS, spec.channel)
+        assertEquals("srq-q".hashCode(), spec.id)
+        assertEquals("Hermes has a question", spec.title)
+        assertEquals("Which colour do you prefer?", spec.text)
+        assertTrue("no inline answers: the tap opens the chat", spec.actions.isEmpty())
+        assertEquals(ApprovalNotifier.SCREEN_CHAT, spec.openScreen)
+        assertEquals("20261020_010916_48c967", spec.sessionId)
+
+        // Agent-controlled text: hidden characters revealed, capped at 120 chars.
+        val long = ApprovalNotifier.forClarify(clarify("srq-r", "x".repeat(130) + "\u202E"))
+        assertEquals("x".repeat(120) + "…", long.text)
+        val hidden = ApprovalNotifier.forClarify(clarify("srq-s", "ok\u202Eexe"))
+        assertTrue(hidden.text, hidden.text.contains("U+202E"))
+    }
 }

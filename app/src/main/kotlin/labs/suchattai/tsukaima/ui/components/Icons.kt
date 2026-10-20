@@ -4,11 +4,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Chat
+import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Archive
+import androidx.compose.material.icons.rounded.AttachFile
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Check
@@ -25,6 +27,7 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.GppMaybe
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Menu
@@ -106,6 +109,13 @@ enum class IconName(val symbol: String) {
     CloudOff("cloud_off"),
     Send("send"),
     Tag("tag"),
+
+    /** Not in the handoff: the clarify card header (v0.2.0). */
+    Help("help"),
+
+    /** Not in the handoff: attachment chips (v0.2.0). */
+    AttachFile("attach_file"),
+    Image("image"),
 }
 
 /** Pure lookup, safe from JVM unit tests (no Android context involved). */
@@ -151,6 +161,9 @@ fun iconFor(name: IconName): ImageVector = when (name) {
     IconName.CloudOff -> Icons.Rounded.CloudOff
     IconName.Send -> Icons.AutoMirrored.Rounded.Send
     IconName.Tag -> Icons.Rounded.Tag
+    IconName.Help -> Icons.AutoMirrored.Rounded.HelpOutline
+    IconName.AttachFile -> Icons.Rounded.AttachFile
+    IconName.Image -> Icons.Rounded.Image
 }
 
 /**

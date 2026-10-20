@@ -1,11 +1,11 @@
 package labs.suchattai.tsukaima.data
 
 import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import labs.suchattai.tsukaima.data.api.HermesJson
 import labs.suchattai.tsukaima.data.gateway.Frame
 import labs.suchattai.tsukaima.data.gateway.RpcTransport
 import org.junit.Assert.assertEquals
@@ -29,19 +29,27 @@ class ServerRequestRouterTest {
     }
 
     private val transport = FakeTransport()
-    private val hints = mutableListOf<String>()
-    private val router = ServerRequestRouter(transport, hint = { hints += it })
+    private val router = ServerRequestRouter(transport)
 
     private fun req(id: String, method: String, params: JsonObject = JsonObject(emptyMap())) =
         Frame.ServerRequest(id, method, params)
 
     @Test
-    fun clarifyAutoCancelled() {
-        val forwarded = router.route(req("srq-c", "clarify", buildJsonObject { put("session_id", "live-1") }))
-        assertFalse(forwarded)
-        assertEquals(listOf("srq-c" to JsonObject(mapOf("answers" to JsonNull))), transport.results)
+    fun clarifyForwardedNotAutoCancelled() {
+        val params = buildJsonObject {
+            put("session_id", "live-1")
+            put("questions", HermesJson.parseToJsonElement("""[{"qid":"q1","question":"Colour?","choices":["red"]}]"""))
+        }
+        assertTrue(router.route(req("srq-c", "clarify", params)))
+        assertTrue("the user answers it", transport.results.isEmpty())
         assertTrue(transport.errors.isEmpty())
-        assertEquals(listOf(ServerRequestRouter.CLARIFY_HINT), hints)
+    }
+
+    @Test
+    fun clarifyWithoutQuestionsCancelledLikeTheTui() {
+        // No askable question: the TUI answers `{}` (cancel-all) at once instead of leaving the agent waiting.
+        assertFalse(router.route(req("srq-e", "clarify", buildJsonObject { put("session_id", "live-1") })))
+        assertEquals(listOf("srq-e" to JsonObject(emptyMap())), transport.results)
     }
 
     @Test
@@ -54,7 +62,6 @@ class ServerRequestRouterTest {
         assertEquals(4404, ServerRequestRouter.NOT_SHOWN_CODE)
         assertEquals("srq-tour", transport.errors.last().first)
         assertTrue(transport.results.isEmpty())
-        assertTrue(hints.isEmpty())
     }
 
     @Test

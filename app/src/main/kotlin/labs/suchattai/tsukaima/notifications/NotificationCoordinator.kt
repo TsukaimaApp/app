@@ -19,7 +19,7 @@ sealed interface NotificationCommand {
  * The decisions behind every notification, free of Android and coroutines. Inputs are fed by
  * [NotificationHub]; each method returns what to post or cancel. All methods are synchronized.
  *
- * - Approvals: notified at most once per id ([RecentIds] of 64), never when already in [answered] or [closed],
+ * - Approvals and questions (`clarify`, no inline answers): notified at most once per id ([RecentIds] of 64), never when already in [answered] or [closed],
  *   and in the foreground only when the chat on screen is not the session that asked (that chat shows it).
  *   `request.cancel` / `approval.cancelled` cancel the notification. The notification carries the stored
  *   session id ([storedFor], else learned from `session.title`) so a tap opens the chat that asked.
@@ -64,7 +64,8 @@ class NotificationCoordinator(
      */
     @Synchronized
     fun onServerRequest(req: Frame.ServerRequest, foreground: Boolean, visibleSession: String? = null): NotificationSpec? {
-        if (!ApprovalNotifier.isApproval(req)) return null
+        val clarify = ApprovalNotifier.isClarify(req)
+        if (!clarify && !ApprovalNotifier.isApproval(req)) return null
         // Recorded even when suppressed, so a foreground `approval.cancelled` can close it.
         req.params.str("request_id")?.let { srqByRequestId[it] = req.id }
         val live = req.params.str("session_id")
@@ -72,6 +73,7 @@ class NotificationCoordinator(
         if (shownInChat || req.id in answered || closedIds.contains(req.id)) return null
         if (!notified.add(req.id)) return null
         val stored = live?.let { storedFor(it) ?: storedByLive[it] }
+        if (clarify) return ApprovalNotifier.forClarify(req, stored)
         return ApprovalNotifier.forApproval(req, stored).also { postedApprovals[req.id] = it }
     }
 

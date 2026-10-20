@@ -187,6 +187,69 @@ class ChatReducerTest {
         assertEquals(once, twice)
     }
 
+    private fun clarifyRequest(id: String = "srq-q", session: String = sid) = Frame.ServerRequest(
+        id = id,
+        method = "clarify",
+        params = obj(
+            """{"session_id":"$session","questions":[
+                 {"qid":"q1","question":"Which colour?","choices":["red","green","blue"],"multi_select":false},
+                 {"qid":"q2","question":"Toppings?","choices":["a","b"],"multi_select":true},
+                 {"qid":"q3","question":"Anything else?","choices":null}
+               ]}""",
+        ),
+    )
+
+    @Test
+    fun clarifyAppendsCardAndStatus() {
+        val s = live.feed(ev("message.start", seq = 1), clarifyRequest())
+        val card = s.items.filterIsInstance<ChatItem.Clarify>().single()
+        assertEquals("srq-q", card.id)
+        assertFalse(card.answered)
+        assertEquals(
+            listOf(
+                ClarifyQuestion("q1", "Which colour?", listOf("red", "green", "blue"), multiSelect = false),
+                ClarifyQuestion("q2", "Toppings?", listOf("a", "b"), multiSelect = true),
+                ClarifyQuestion("q3", "Anything else?", null, multiSelect = false),
+            ),
+            card.questions,
+        )
+        assertEquals(AgentStatus.Question, s.status)
+        assertEquals("Waiting for your answer", AgentStatus.Question.label)
+        assertEquals(StatusTone.Amber, AgentStatus.Question.tone)
+        assertFalse(AgentStatus.Question.pulsing)
+        // Another live session's question, and a replay of the same id, are ignored.
+        assertEquals(s, s.feed(clarifyRequest("srq-other", session = "ffffffff"), clarifyRequest()))
+    }
+
+    @Test
+    fun clarifyCancelRemovesCard() {
+        val pending = live.feed(ev("message.start", seq = 1), clarifyRequest())
+        val s = pending.feed(ev("request.cancel", """{"id":"srq-q","method":"clarify","reason":"timeout"}""", 2))
+        assertTrue(s.items.none { it is ChatItem.Clarify })
+        assertTrue(s.status is AgentStatus.Thinking)
+    }
+
+    @Test
+    fun clarifyAnsweredOnce() {
+        val pending = live.feed(ev("message.start", seq = 1), clarifyRequest())
+        val answers = mapOf("q1" to "red", "q2" to null, "q3" to null)
+        val once = ChatReducer.onClarifyAnswered(pending, "srq-q", answers, flair)
+        val twice = ChatReducer.onClarifyAnswered(once, "srq-q", mapOf("q1" to "blue"), flair)
+
+        val card = twice.items.filterIsInstance<ChatItem.Clarify>().single()
+        assertTrue(card.answered)
+        assertEquals(answers, card.answers)
+        assertTrue(twice.status is AgentStatus.Thinking)
+        assertEquals(once, twice)
+    }
+
+    @Test
+    fun turnErrorDropsUnansweredClarify() {
+        val s = live.feed(ev("message.start", seq = 1), clarifyRequest(), ev("error", """{"message":"boom"}""", 2))
+        assertTrue(s.items.none { it is ChatItem.Clarify })
+        assertEquals(AgentStatus.Idle, s.status)
+    }
+
     @Test
     fun requestCancelRemovesApproval() {
         val pending = live.feed(ev("message.start", seq = 1), approvalRequest)

@@ -37,9 +37,28 @@ sealed interface ChatItem {
         val answered: Boolean,
     ) : ChatItem
 
+    /**
+     * A `clarify` server request; [id] is the server-request id (`srq-…`) to answer. [answers] holds what was
+     * sent once [answered] (qid → answer, null = skipped; empty after "Skip" = cancel all).
+     */
+    data class Clarify(
+        override val id: String,
+        val questions: List<ClarifyQuestion>,
+        val answered: Boolean,
+        val answers: Map<String, String?> = emptyMap(),
+    ) : ChatItem
+
     /** Placeholder "agent is working" row; replaced by the assistant message on `message.start`. */
     data class Thinking(override val id: String) : ChatItem
 }
+
+/** One question of a `clarify` request; [choices] null = free text. */
+data class ClarifyQuestion(
+    val qid: String,
+    val question: String,
+    val choices: List<String>?,
+    val multiSelect: Boolean,
+)
 
 data class ChatState(
     val items: List<ChatItem> = emptyList(),
