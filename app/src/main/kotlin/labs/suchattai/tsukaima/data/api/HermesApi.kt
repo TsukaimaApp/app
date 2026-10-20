@@ -59,7 +59,11 @@ class HermesApi(
             .tag(NoAuth::class.java, NoAuth())
             .build()
         client.newCall(request).execute().use { response ->
-            if (response.code == 401) throw AuthException("Invalid username or password")
+            when (response.code) {
+                401 -> throw AuthException("Invalid username or password (401)")
+                429 -> throw AuthException("Login rate limited by server (429)")
+                503 -> throw AuthException("Login unavailable on server (503)")
+            }
             if (!response.isSuccessful) throw apiException(response.code, response.body.string())
             return response.headers("Set-Cookie").firstNotNullOfOrNull { parseSessionCookie(it) }
                 ?: throw ApiException(response.code, "Login response carried no $SESSION_COOKIE cookie")

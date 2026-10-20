@@ -196,6 +196,22 @@ class HermesApiTest {
         )
     }
 
+    @Test
+    fun rateLimitedReloginThrowsAuthException() {
+        val creds = labs.suchattai.tsukaima.data.prefs.InMemoryCredentialStore().apply { save("pw", "old") }
+        settings = Settings(serverUrl = server.url("/").toString().trimEnd('/'), username = "u")
+        lateinit var api: HermesApi
+        val client = OkHttpClient.Builder()
+            .addInterceptor(AuthInterceptor(creds, { settings }) { _, u, p -> api.loginBlocking(u, p) })
+            .build()
+        api = HermesApi(client, { server.url("/").toString().trimEnd('/') }, { settings })
+        server.enqueue(MockResponse.Builder().code(401).build())
+        server.enqueue(MockResponse.Builder().code(429).body("slow down").build())
+        val e = assertThrows(AuthException::class.java) { runBlocking { api.cronJobs() } }
+        assertEquals(true, e.message!!.contains("429"))
+        assertEquals(2, server.requestCount)
+    }
+
     private fun MockWebServer.takeRequests(): List<String> =
         generateSequence { takeRequest(100, TimeUnit.MILLISECONDS) }.map { it.target }.toList()
 }

@@ -24,6 +24,7 @@ class AuthInterceptorTest {
     private lateinit var server: MockWebServer
     private val creds = InMemoryCredentialStore()
     private val loginCalls = AtomicInteger()
+    private var expectedPassword = "pw"
     private var loginResult: () -> String = { "new-token" }
 
     @Before
@@ -44,7 +45,7 @@ class AuthInterceptorTest {
             loginCalls.incrementAndGet()
             assertEquals(baseUrl(), url)
             assertEquals("u", user)
-            assertEquals("pw", password)
+            assertEquals(expectedPassword, password)
             loginResult()
         }
         return OkHttpClient.Builder().addInterceptor(interceptor).build()
@@ -181,5 +182,61 @@ class AuthInterceptorTest {
         }
         assertEquals(1, loginCalls.get())
         assertEquals(4, server.requestCount)
+    }
+
+    @Test
+    fun failedReloginIsNotRetriedByWaiters() {
+        creds.save("pw", "old")
+        loginResult = { throw AuthException() }
+        val arrived = CountDownLatch(3)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                arrived.countDown()
+                arrived.await(5, TimeUnit.SECONDS)
+                return ok(401)
+            }
+        }
+        val client = client()
+        val pool = Executors.newFixedThreadPool(3)
+        try {
+            val calls = (1..3).map { pool.submit<Int> { get(client, "/api/p$it") } }
+            calls.forEach { f ->
+                val e = assertThrows(java.util.concurrent.ExecutionException::class.java) { f.get(10, TimeUnit.SECONDS) }
+                assertEquals(AuthException::class.java, e.cause!!.javaClass)
+            }
+        } finally {
+            pool.shutdownNow()
+        }
+        assertEquals(1, loginCalls.get())
+        // A later request also fails fast, without another login.
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) = ok(401)
+        }
+        assertThrows(AuthException::class.java) { get(client) }
+        assertEquals(1, loginCalls.get())
+    }
+
+    @Test
+    fun newPasswordClearsFailureLatch() {
+        creds.save("pw", "old")
+        loginResult = { throw AuthException() }
+        server.enqueue(ok(401))
+        val client = client()
+        assertThrows(AuthException::class.java) { get(client) }
+        assertEquals(1, loginCalls.get())
+
+        loginResult = { "fresh" }
+        creds.save("pw", "old") // identical credentials: still latched
+        server.enqueue(ok(401))
+        assertThrows(AuthException::class.java) { get(client) }
+        assertEquals(1, loginCalls.get())
+
+        expectedPassword = "pw2"
+        creds.save("pw2", "old")
+        server.enqueue(ok(401))
+        server.enqueue(ok())
+        assertEquals(200, get(client))
+        assertEquals(2, loginCalls.get())
+        assertEquals("fresh", creds.accessToken())
     }
 }

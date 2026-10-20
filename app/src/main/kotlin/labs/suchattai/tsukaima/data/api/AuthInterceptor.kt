@@ -39,13 +39,27 @@ class AuthInterceptor(
         return retry
     }
 
-    /** Returns a token newer than [staleToken]: either one a concurrent caller just stored, or a fresh login. */
+    /** Credentials state at the time a re-login last failed with an auth error; null when none is latched. */
+    private var failedLogin: Pair<String?, String?>? = null
+
+    /**
+     * Returns a token newer than [staleToken]: either one a concurrent caller just stored, or a fresh login.
+     * After an auth-level login failure, later callers fail fast until the stored token or password changes,
+     * so a wrong password cannot fan out into a burst of logins that trips the server's rate limit.
+     */
     private fun refreshToken(staleToken: String?): String = lock.withLock {
         val current = creds.accessToken()
         if (current != null && current != staleToken) return@withLock current
         val password = creds.password() ?: throw AuthException("No stored credentials")
+        if (failedLogin == current to password) throw AuthException("Re-login previously failed; credentials unchanged")
         val s = settings()
-        val fresh = login(s.serverUrl, s.username, password)
+        val fresh = try {
+            login(s.serverUrl, s.username, password)
+        } catch (e: AuthException) {
+            failedLogin = current to password
+            throw e
+        }
+        failedLogin = null
         creds.save(password, fresh)
         fresh
     }
