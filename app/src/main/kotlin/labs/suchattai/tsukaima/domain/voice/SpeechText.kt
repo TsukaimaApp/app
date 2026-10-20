@@ -12,6 +12,7 @@ object SpeechText {
     private val inlineCode = Regex("`([^`]*)`")
     private val strong = Regex("(\\*\\*|__)(.+?)\\1")
     private val emphasis = Regex("(?<![\\w*])([*_])(?=\\S)(.+?)(?<=\\S)\\1(?![\\w*])")
+    private val multiSpace = Regex(" {2,}")
     private val strike = Regex("~~(.+?)~~")
 
     /**
@@ -38,7 +39,7 @@ object SpeechText {
             s = strong.replace(s) { it.groupValues[2] }
             s = emphasis.replace(s) { it.groupValues[2] }
             s = strike.replace(s) { it.groupValues[1] }
-            s = s.trim()
+            s = multiSpace.replace(s, " ").trim()
             if (s.isNotEmpty()) out += s
         }
         return out.joinToString("\n")
@@ -72,7 +73,7 @@ class SentenceChunker {
         var inFence = false
         while (i < text.length) {
             val c = text[i]
-            if (i == cursor || text[i - 1] == '\n') {
+            if (i == 0 || text[i - 1] == '\n') {
                 var j = i
                 while (j < text.length && text[j] != '\n' && text[j].isWhitespace()) j++
                 if (text.startsWith("```", j)) inFence = !inFence

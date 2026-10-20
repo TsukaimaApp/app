@@ -39,4 +39,37 @@ class SpeechTextTest {
         assertEquals(listOf("Run:"), first)
         assertEquals(expected.drop(1), inc.feed(text))
     }
+
+    @Test fun chunkerIgnoresInlineBackticksAfterABoundary() {
+        val c = SentenceChunker()
+        assertEquals(listOf("Yes."), c.feed("Yes. ```x``` is code."))
+        assertEquals(listOf("```x``` is code."), c.feed("Yes. ```x``` is code. Next"))
+    }
+
+    @Test fun plainDropsBareUrls() =
+        assertEquals("see now", SpeechText.plain("see https://example.com/a?b=1 now"))
+
+    @Test fun plainRemovesStrikeAndUnderscoreEmphasis() =
+        assertEquals("gone and soft", SpeechText.plain("~~gone~~ and _soft_"))
+
+    @Test fun plainRemovesUnterminatedFenceToTheEnd() =
+        assertEquals("before", SpeechText.plain("before\n```kotlin\nval x = 1\nmore"))
+
+    @Test fun chunkerCutsAtEllipsisAndColon() {
+        assertEquals(listOf("Wait…"), SentenceChunker().feed("Wait… Next"))
+        assertEquals(listOf("Note:"), SentenceChunker().feed("Note: x"))
+    }
+
+    @Test fun chunkerFeedingTheSameTextTwiceEmitsNothingNew() {
+        val c = SentenceChunker()
+        assertEquals(listOf("A."), c.feed("A. B"))
+        assertEquals(emptyList<String>(), c.feed("A. B"))
+    }
+
+    @Test fun chunkerFlushResets() {
+        val c = SentenceChunker()
+        assertEquals(listOf("A."), c.feed("A. B"))
+        assertEquals("B", c.flush())
+        assertEquals(listOf("C."), c.feed("C. D"))
+    }
 }
