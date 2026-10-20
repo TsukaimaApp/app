@@ -28,6 +28,7 @@ class VoiceControllerTest {
 
     private val approvalLine = "That needs your approval. I’ve opened it in Tsukaima."
 
+    private var sendFails = false
     private val interruptedFlags = mutableListOf<Boolean>()
 
     private class Rig(
@@ -60,7 +61,7 @@ class VoiceControllerTest {
         // unconfined: collectors resume inline inside the chat update, as on the app's Main.immediate.
         val dispatcher = if (unconfined) UnconfinedTestDispatcher(testScheduler) else StandardTestDispatcher(testScheduler)
         val scope = CoroutineScope(dispatcher + SupervisorJob()).also { scopes += it }
-        val c = VoiceController(input, output, scope, chat, { text, interrupted -> sent += text; interruptedFlags += interrupted; sendResult }, mode, { approvals[0]++ }, { testScheduler.currentTime })
+        val c = VoiceController(input, output, scope, chat, { text, interrupted -> sent += text; interruptedFlags += interrupted; sendResult && !sendFails }, mode, { approvals[0]++ }, { testScheduler.currentTime })
         c.start()
         advanceUntilIdle()
         return Rig(c, input, output, chat, sent, approvals)
@@ -234,6 +235,24 @@ class VoiceControllerTest {
         advanceUntilIdle()
         say(r, "thanks")
         assertEquals(listOf(false, true, false), interruptedFlags)
+    }
+
+    @Test fun aRefusedSendKeepsTheBargeInForTheNextTurn() = runTest {
+        val r = rig()
+        say(r, "tell me a story")
+        r.add(reply("a1", "Once. Upon. A time.", streaming = false), AgentStatus.Idle)
+        advanceUntilIdle()
+        r.controller.tapIndicator()
+        advanceUntilIdle()
+        sendFails = true
+        r.input.emit(SpeechEvent.Final("something else"))
+        advanceUntilIdle()
+        assertTrue(r.controller.interruptedSinceLastSend)
+        sendFails = false
+        r.input.emit(SpeechEvent.Final("again"))
+        advanceUntilIdle()
+        assertEquals(listOf(false, true, true), interruptedFlags)
+        assertFalse(r.controller.interruptedSinceLastSend)
     }
 
     @Test fun stopDuringSpeakingLeavesTheTurnRunning() = runTest {
@@ -520,6 +539,7 @@ class VoiceControllerTest {
 
         assertTrue("the replayed sentence is cut off", r.output.stopped > stops)
         assertFalse(r.output.speaking)
+        assertTrue("stopping speech on a rebuild is a barge-in", r.controller.interruptedSinceLastSend)
         r.output.finishSpeaking()
         advanceUntilIdle()
         assertEquals("nothing more of the rebuilt reply", listOf("Version 6.17.", "Version 6.17."), r.output.spoken)

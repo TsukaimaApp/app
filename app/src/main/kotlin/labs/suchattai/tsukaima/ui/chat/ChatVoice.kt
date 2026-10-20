@@ -35,7 +35,7 @@ internal sealed interface ChatHistory {
  * Voice mode for one [ChatViewModel]: owns the [VoiceController] while the voice screen is open and mirrors its
  * state into [ChatUiState.voice]. The controller reads the chat through a synchronous view of [state] (a send
  * turns the status to Thinking before [send] returns, which the controller relies on) and sends through [send]
- * (`ChatViewModel.sendText`). Driven from the VM's single-threaded [scope].
+ * (`ChatViewModel.sendText` as a voice turn; [send]'s `interrupted` is the controller's barge-in flag). Driven from the VM's single-threaded [scope].
  */
 internal class ChatVoice(
     private val backend: ChatBackend,

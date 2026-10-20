@@ -20,7 +20,8 @@ import labs.suchattai.tsukaima.domain.chat.ChatState
  * Voice mode's phase machine: listens while the chat could take a message, sends what was said, speaks the reply
  * sentence by sentence while revealing it, and listens again ([VoiceMode.InApp]) or rests ([VoiceMode.Assist]).
  *
- * It only reads [chat] and calls [send] (`ChatViewModel.sendText`; false = not sent). Everything runs in [scope],
+ * It only reads [chat] and calls [send] (`ChatViewModel.sendText`; `interrupted` = the user barged in since the
+ * last send, see [interruptedSinceLastSend]; returns false = not sent, then the barge-in stays pending). Everything runs in [scope],
  * whose dispatcher must be single-threaded (the chat's Main-immediate in the app): the fields below are unguarded.
  * [onApprovalNeeded] (Assist only) fires once per request card, after the hand-off line was spoken.
  *
@@ -335,7 +336,12 @@ class VoiceController(
                     turnSeen = false
                     val interrupted = interruptedSinceLastSend // snapshot: cleared as the turn goes out
                     interruptedSinceLastSend = false
-                    if (send(text, interrupted)) turnSeen = turnSeen || chat.value.status != AgentStatus.Idle else awaitingTurn = false
+                    if (send(text, interrupted)) {
+                        turnSeen = turnSeen || chat.value.status != AgentStatus.Idle
+                    } else {
+                        awaitingTurn = false
+                        interruptedSinceLastSend = interrupted || interruptedSinceLastSend // not sent: the barge-in still counts
+                    }
                 } else {
                     listenedTooLong()
                 }

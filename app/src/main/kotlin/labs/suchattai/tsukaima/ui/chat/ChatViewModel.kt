@@ -70,7 +70,12 @@ class ChatViewModel(
     private var userCounter = 0L
 
     /** What a failed send carried, by its bubble's local id, for Retry / Dismiss. */
-    private data class FailedSend(val text: String, val attachments: List<PendingAttachment>)
+    private data class FailedSend(
+        val text: String,
+        val attachments: List<PendingAttachment>,
+        val voice: Boolean = false,
+        val interrupted: Boolean = false,
+    )
 
     private val failedSends = mutableMapOf<String, FailedSend>()
     private val sync = ChatReconnector(
@@ -90,7 +95,13 @@ class ChatViewModel(
     /** The chat holds its history: a new chat at once, a stored one once `session.resume` has bound it. */
     private val history = MutableStateFlow(if (storedSessionId == null) ChatHistory.Loaded else ChatHistory.Loading)
 
-    private val voice = ChatVoice(backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state, { text, interrupted -> sendText(text, voice = true, interrupted = interrupted) }, history)
+    private val voice = ChatVoice(
+        backend,
+        CoroutineScope(viewModelScope.coroutineContext + dispatcher),
+        _state,
+        { text, interrupted -> sendText(text, voice = true, interrupted = interrupted) },
+        history,
+    )
 
     private val chat get() = _state.value.chat
     private fun setChat(block: (ChatState) -> ChatState) = _state.update { it.copy(chat = block(it.chat)) }
@@ -212,7 +223,8 @@ class ChatViewModel(
     /**
      * Sends [text] (trimmed) without attachments, leaving the composer alone (voice mode). False, with a toast,
      * when Hermes is unreachable, the chat archived, the context is being compacted, or no live session is open
-     * yet. The status turns Thinking before this returns.
+     * yet. The status turns Thinking before this returns. [voice] marks a spoken turn and [interrupted] a barge-in on
+     * the previous spoken reply; both go to Hermes (`voice_turn`, `interrupted`).
      */
     fun sendText(text: String, voice: Boolean = false, interrupted: Boolean = false): Boolean {
         val trimmed = text.trim()
@@ -251,7 +263,7 @@ class ChatViewModel(
         } catch (c: CancellationException) {
             throw c
         } catch (e: Exception) {
-            failedSends[localId] = FailedSend(text, sent)
+            failedSends[localId] = FailedSend(text, sent, voice, interrupted)
             setChat { c -> c.copy(items = c.items.markFailed(localId, true), status = unlessOffline(c.status, AgentStatus.Idle)) }
             backend.toast("Message not sent: ${e.message ?: "gateway error"}")
         }
@@ -276,7 +288,7 @@ class ChatViewModel(
         }
         failedSends.remove(localId)
         setChat { c -> c.copy(items = c.items.markFailed(localId, false), status = AgentStatus.Thinking(flair())) }
-        launch { submit(live, localId, failed.text, failed.attachments) }
+        launch { submit(live, localId, failed.text, failed.attachments, failed.voice, failed.interrupted) }
     }
 
     /** The reasoning header of message [id] was tapped. */
