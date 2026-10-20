@@ -1883,12 +1883,12 @@ class ChatViewModelTest {
         val b = backend().apply {
             transport.on(
                 "session.resume",
-                obj(resumeJson.replace("\"running\":false", "\"running\":false,\"info\":{\"reasoning_effort\":\"medium\",\"usage\":{\"total\":12345,\"context_percent\":42}}")),
+                obj(resumeJson.replace("\"running\":false", "\"running\":false,\"info\":{\"reasoning_effort\":\"medium\",\"usage\":{\"total\":3123456,\"context_used\":15754,\"context_max\":1000000,\"context_percent\":2}}")),
             )
         }
         val vm = vm(b, stored)
         advanceUntilIdle()
         assertEquals("medium", vm.state.value.chat.reasoningEffort)
-        assertEquals("42% ctx · 12.3k tok", vm.state.value.chat.usage?.meter)
+        assertEquals("the cumulative total (3.1M) is not the meter", "15.8k / 1M ctx · 2%", vm.state.value.chat.usage?.meter)
     }
 }

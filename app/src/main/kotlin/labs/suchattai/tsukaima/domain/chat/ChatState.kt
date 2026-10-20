@@ -112,18 +112,35 @@ data class SessionUsage(
     val contextPercent: Int? = null,
     val contextUsed: Long? = null,
     val contextMax: Long? = null,
+    /** Hermes' `usage.total`: input+output summed over every call of the session — a billing figure, not a size. */
     val totalTokens: Long? = null,
 ) {
-    /** "42% ctx · 12.3k tok", either half alone when the other is unknown; null when neither is. */
+    /**
+     * The context window as the next turn sees it: "16k / 1M ctx · 2%", or what is known of it ("2% ctx",
+     * "16k ctx"); null when nothing is. The cumulative [totalTokens] is deliberately not shown — each call
+     * re-sends the whole context, so it reads as millions in a long session and says nothing about room left.
+     */
     val meter: String?
-        get() = listOfNotNull(contextPercent?.let { "$it% ctx" }, totalTokens?.takeIf { it > 0 }?.let { "${compactTokens(it)} tok" })
-            .takeIf { it.isNotEmpty() }?.joinToString(" · ")
+        get() {
+            val percent = contextPercent ?: contextUsed?.let { u -> contextMax?.takeIf { it > 0 }?.let { m -> (u * 100 / m).toInt() } }
+            val size = when {
+                contextUsed != null && contextMax != null && contextMax > 0 -> "${compactTokens(contextUsed)} / ${compactTokens(contextMax)} ctx"
+                contextUsed != null -> "${compactTokens(contextUsed)} ctx"
+                else -> null
+            }
+            return when {
+                size != null && percent != null -> "$size · $percent%"
+                size != null -> size
+                percent != null -> "$percent% ctx"
+                else -> null
+            }
+        }
 }
 
-/** 950, 12.3k, 1.2M. */
+/** 950, 12.3k, 1.2M, 1M (no trailing .0). */
 fun compactTokens(n: Long): String = when {
-    n >= 1_000_000 -> String.format(java.util.Locale.US, "%.1fM", n / 1_000_000.0)
-    n >= 1_000 -> String.format(java.util.Locale.US, "%.1fk", n / 1_000.0)
+    n >= 1_000_000 -> String.format(java.util.Locale.US, "%.1fM", n / 1_000_000.0).removeSuffix(".0M") + if (n % 1_000_000 < 50_000) "M" else ""
+    n >= 1_000 -> String.format(java.util.Locale.US, "%.1fk", n / 1_000.0).removeSuffix(".0k") + if (n % 1_000 < 50) "k" else ""
     else -> n.toString()
 }
 

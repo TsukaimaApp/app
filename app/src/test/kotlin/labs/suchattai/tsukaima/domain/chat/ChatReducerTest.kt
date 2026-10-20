@@ -694,7 +694,7 @@ class ChatReducerTest {
     fun sessionUsageEventSetsTheCounters() {
         val s = live.feed(ev("session.usage", """{"usage":$usageJson}""", seq = 3))
         assertEquals(SessionUsage(contextPercent = 2, contextUsed = 15754, contextMax = 1000000, totalTokens = 31502), s.usage)
-        assertEquals("2% ctx · 31.5k tok", s.usage?.meter)
+        assertEquals("15.8k / 1M ctx · 2%", s.usage?.meter)
     }
 
     @Test
@@ -732,8 +732,8 @@ class ChatReducerTest {
     @Test
     fun meterFormatsEitherHalf() {
         assertEquals("42% ctx", SessionUsage(contextPercent = 42).meter)
-        assertEquals("950 tok", SessionUsage(totalTokens = 950).meter)
-        assertEquals("1.2M tok", SessionUsage(totalTokens = 1_234_567).meter)
+        assertEquals("950 ctx", SessionUsage(contextUsed = 950).meter)
+        assertNull("the billing total alone is not a meter", SessionUsage(totalTokens = 1_234_567).meter)
         assertNull(SessionUsage().meter)
     }
 

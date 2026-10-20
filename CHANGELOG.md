@@ -3,6 +3,12 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.5.5 — 2026-10-20 (versionCode 11)
+
+### Fixed
+- The status-line meter showed Hermes' cumulative `usage.total` (input+output summed over every call, so "3M
+  tok" in a long session). It now shows the context window: "15.8k / 1M ctx · 2%".
+
 ## 0.5.4 — 2026-10-20 (versionCode 10)
 
 ### Fixed
