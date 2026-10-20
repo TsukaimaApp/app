@@ -124,7 +124,8 @@ internal class ChatReconnector(
         setChat { c ->
             val bound = ChatReducer.onSessionBound(c, r.sessionId, r.storedSessionId ?: routeStoredId)
             val items = if (rebuild) bound.copy(items = ChatSync.transcript(r)) else bound
-            if (r.running) items.copy(status = AgentStatus.Thinking(flair())) else ChatReducer.onConnectionRestored(items)
+            val withInfo = ChatReducer.onSessionInfo(items, r.info).copy(resumeProgress = null)
+            if (r.running) withInfo.copy(status = AgentStatus.Thinking(flair())) else ChatReducer.onConnectionRestored(withInfo)
         }
     }
 
@@ -171,14 +172,24 @@ internal class ChatReconnector(
     }
 
     private fun applyEvent(ev: Frame.Event) {
-        val live = chat.liveSessionId ?: return
+        val live = chat.liveSessionId
+        if (live == null) {
+            // A deferred resume reports its history load before the resume binds the live id.
+            if (ev.type == RESUME_PROGRESS && state.value.loading) setChat { ChatReducer.reduce(it, ev, flair) }
+            return
+        }
         if (ev.sessionId.isNotEmpty() && ev.sessionId != live) return
         if (ev.type == "session.info") {
-            val model = (ev.payload["model"] as? JsonPrimitive)?.contentOrNull
-            val provider = (ev.payload["provider"] as? JsonPrimitive)?.contentOrNull
+            val model = (ev.payload["model"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotEmpty() }
+            val provider = (ev.payload["provider"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotEmpty() }
             state.update { it.copy(model = model ?: it.model, provider = provider ?: it.provider) }
         }
+        val before = chat
         setChat { ChatReducer.reduce(it, ev, flair) }
+        // A notice is shown once: a replayed one (at or below the watermark) left the state untouched.
+        if (ev.type == NOTIFICATION && (ev.seq == null || chat.lastSeq != before.lastSeq)) {
+            (ev.payload["text"] as? JsonPrimitive)?.contentOrNull?.let(ChatSync::toastLine)?.takeIf { it.isNotEmpty() }?.let(backend::toast)
+        }
     }
 
     /**
@@ -194,6 +205,11 @@ internal class ChatReconnector(
     }
 
     private companion object {
+        const val RESUME_PROGRESS = "session.resume_progress"
+
+        /** `notification.show {text, level, kind, key}`: an out-of-band notice (model switch dropped, slow start). */
+        const val NOTIFICATION = "notification.show"
+
         /** Server requests a chat shows and answers. */
         val ADOPTED = setOf("approval", "clarify") + ServerRequestRouter.SECRET_METHODS
     }

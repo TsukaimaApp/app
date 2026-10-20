@@ -9,6 +9,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 import labs.suchattai.tsukaima.data.gateway.Frame
 import labs.suchattai.tsukaima.data.gateway.TranscriptMessage
 
@@ -20,6 +21,10 @@ import labs.suchattai.tsukaima.data.gateway.TranscriptMessage
 object ChatReducer {
     private const val APPROVAL = "approval"
     private const val CLARIFY = "clarify"
+    private const val SUBAGENT_PREFIX = "subagent."
+
+    /** Terminal `subagent.complete` statuses that mean the child did not finish its goal. */
+    private val SUBAGENT_FAILED = setOf("failed", "error", "timeout", "interrupted")
 
     fun reduce(state: ChatState, frame: Frame, flair: () -> String = ThinkingFlair::next): ChatState =
         when (frame) {
@@ -153,13 +158,19 @@ object ChatReducer {
                     status = AgentStatus.Replying,
                 )
             }
-            "message.complete" ->
+            "message.complete" -> withUsage(
                 if (p.string("status") == "error" && p.string("text").isNullOrEmpty()) {
                     // A failed turn with nothing to show: end it as an error, not as a silent empty reply.
                     turnFailed(s, ev.seq, p.string("error") ?: p.string("message"))
                 } else {
                     onMessageComplete(s, p, ev.seq)
-                }
+                },
+                p["usage"],
+            )
+            "session.usage" -> withUsage(s, p["usage"])
+            "session.info" -> onSessionInfo(s, p)
+            "tool.output_risk" -> onOutputRisk(s, p)
+            "session.resume_progress" -> s.copy(resumeProgress = resumeProgressText(p) ?: s.resumeProgress)
             // `error` is what the gateway emits (server.py, methods_prompt.py); `turn.error` is kept for older ones.
             "turn.error", "error" -> turnFailed(s, ev.seq, p.string("message") ?: "unknown error")
             "session.title" -> s.copy(
@@ -179,8 +190,77 @@ object ChatReducer {
                 if (items.size == s.items.size) s
                 else s.copy(items = items, status = statusAfterApproval(s.status, items, flair))
             }
-            else -> s
+            else -> if (ev.type.startsWith(SUBAGENT_PREFIX)) onSubagent(s, ev.type, p) else s
         }
+    }
+
+    /**
+     * The `session.info` snapshot (event, or the `info` of `session.create` / `resume`): its token counters and
+     * reasoning effort. A lazy session's info has neither yet, which keeps what is known.
+     */
+    fun onSessionInfo(state: ChatState, info: JsonObject): ChatState {
+        val effort = if ("reasoning_effort" in info) info.string("reasoning_effort").orEmpty() else state.reasoningEffort
+        return withUsage(state.copy(reasoningEffort = effort), info["usage"])
+    }
+
+    /** [state] with the counters of a `usage` object; an empty or absent one changes nothing. */
+    private fun withUsage(state: ChatState, usage: JsonElement?): ChatState {
+        val u = usage as? JsonObject ?: return state
+        fun long(key: String) = (u[key] as? JsonPrimitive)?.longOrNull
+        val parsed = SessionUsage(
+            contextPercent = (u["context_percent"] as? JsonPrimitive)?.intOrNull,
+            contextUsed = long("context_used"),
+            contextMax = long("context_max"),
+            totalTokens = long("total"),
+        )
+        return if (parsed == SessionUsage()) state else state.copy(usage = parsed)
+    }
+
+    /** `tool.output_risk {tool_id, risk, findings, redacted}`: flags the tool row it names. */
+    private fun onOutputRisk(s: ChatState, p: JsonObject): ChatState {
+        val toolId = p.string("tool_id") ?: return s
+        val row = s.items.firstOrNull { it.id == toolId } as? ChatItem.ToolCall ?: return s
+        val findings = (p["findings"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+        val risk = ToolRisk(p.string("risk") ?: "low", findings, p.bool("redacted") == true)
+        return s.copy(items = s.items.replace(row) { row.copy(risk = risk) })
+    }
+
+    /**
+     * `subagent.*`: one row per delegated child, keyed by `subagent_id` (else delegation id + task index), updated
+     * in place. Children may run in the background after the turn ended, so the agent's status is left alone.
+     */
+    private fun onSubagent(s: ChatState, type: String, p: JsonObject): ChatState {
+        val event = type.removePrefix(SUBAGENT_PREFIX)
+        if (event == "text") return s // the child's per-token reply: only for a watch window
+        val index = (p["task_index"] as? JsonPrimitive)?.intOrNull ?: 0
+        val count = (p["task_count"] as? JsonPrimitive)?.intOrNull ?: 1
+        val key = p.string("subagent_id") ?: p.string("delegation_id")?.let { "$it-$index" } ?: return s
+        val id = "sub-$key"
+        val existing = s.items.firstOrNull { it.id == id } as? ChatItem.Subagent
+        val status = when {
+            event != "complete" -> existing?.status?.takeIf { it != SubagentStatus.Running } ?: SubagentStatus.Running
+            p.string("status")?.lowercase() in SUBAGENT_FAILED -> SubagentStatus.Failed
+            else -> SubagentStatus.Done
+        }
+        val text = (p.string("tool_preview") ?: p.string("text"))?.takeIf { it.isNotBlank() && event != "complete" }
+        val row = ChatItem.Subagent(
+            id = id,
+            goal = p.string("goal") ?: existing?.goal.orEmpty(),
+            status = status,
+            detail = text ?: existing?.detail,
+            summary = p.string("summary") ?: existing?.summary,
+            position = if (count > 1) "${index + 1}/$count" else null,
+        )
+        val items = if (existing != null) s.items.replace(existing) { row } else s.items + row
+        return s.copy(items = items)
+    }
+
+    /** "Loading history…", "Loaded 42 messages", or the failure, from `session.resume_progress`. */
+    private fun resumeProgressText(p: JsonObject): String? = when (p.string("status")) {
+        "loading" -> "Loading history…"
+        "complete" -> (p["message_count"] as? JsonPrimitive)?.intOrNull?.let { "Loaded $it ${if (it == 1) "message" else "messages"}" }
+        "failed" -> p.string("message") ?: "Couldn’t load the history"
+        else -> null
     }
 
     /** Abnormal turn end: [abortTurn], then "Something went wrong[: reason]" as the reply. */

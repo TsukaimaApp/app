@@ -46,6 +46,8 @@ import labs.suchattai.tsukaima.domain.chat.ToolStatus
 import labs.suchattai.tsukaima.domain.chat.running
 import labs.suchattai.tsukaima.data.gateway.ApprovalChoice
 import labs.suchattai.tsukaima.ui.chat.components.ApprovalCard
+import labs.suchattai.tsukaima.ui.chat.components.ArchivedBanner
+import labs.suchattai.tsukaima.ui.chat.components.SubagentRow
 import labs.suchattai.tsukaima.ui.chat.components.AssistantMessage
 import labs.suchattai.tsukaima.ui.chat.components.ChatSkeleton
 import labs.suchattai.tsukaima.ui.chat.components.ChatTopBar
@@ -89,6 +91,14 @@ class ChatActions(
     val onArchive: () -> Unit = {},
     val onCopyId: () -> Unit = {},
     val onDelete: () -> Unit = {},
+    val onReasoning: (String) -> Unit = {},
+    val onCompact: () -> Unit = {},
+    val onUnarchive: () -> Unit = {},
+    val onConfirmModel: () -> Unit = {},
+    val onRetrySend: (String) -> Unit = {},
+    val onDismissFailed: (String) -> Unit = {},
+    val onMessageMenu: (String?) -> Unit = {},
+    val onCopyMessage: (id: String, reasoning: Boolean) -> Unit = { _, _ -> },
 )
 
 /**
@@ -154,6 +164,18 @@ fun ChatScreen(
                 }
             },
             onDelete = vm::delete,
+            onReasoning = vm::setReasoning,
+            onCompact = vm::compact,
+            onUnarchive = vm::unarchive,
+            onConfirmModel = vm::confirmModel,
+            onRetrySend = vm::retrySend,
+            onDismissFailed = vm::dismissFailed,
+            onMessageMenu = vm::showMessageMenu,
+            onCopyMessage = { id, reasoning ->
+                vm.copyMessage(id, reasoning) { text ->
+                    scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Message", text))) }
+                }
+            },
         ),
     )
 }
@@ -184,24 +206,26 @@ fun ChatContent(
             onMore = { if (overflow.isNotEmpty()) actions.onMenu(ChatMenu.Overflow) },
             moreEnabled = overflow.isNotEmpty(),
         )
-        StatusLine(state.status, onClick = onStatus)
+        StatusLine(state.status, onClick = onStatus, meter = state.chat.usage?.meter)
         Box(
             Modifier
                 .weight(1f)
                 .fillMaxWidth(),
         ) {
             when {
-                state.loading -> ChatSkeleton(Modifier.padding(top = 10.dp))
+                state.loading -> ChatSkeleton(Modifier.padding(top = 10.dp), caption = state.chat.resumeProgress)
                 state.empty -> EmptyChat(state.workspace?.let { ChatSync.displayPath(it, state.workspaces?.home) }, { actions.onMenu(ChatMenu.Workspace) })
                 else -> Transcript(state, actions, listState)
             }
         }
+        if (state.archived) ArchivedBanner(onUnarchive = actions.onUnarchive)
         Composer(
             value = state.input,
             onValueChange = actions.onInput,
             onSend = actions.onSend,
             onAttach = actions.onAttach,
-            enabled = !state.offline,
+            enabled = state.writable,
+            disabledPlaceholder = if (state.archived && !state.offline) "This chat is archived" else "Hermes is unreachable",
             canSend = state.canSend,
             attachments = state.attachments,
             onRemoveAttachment = actions.onRemoveAttachment,
@@ -234,9 +258,23 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
     ) {
         items(items, key = { it.id }, contentType = { it::class }) { item ->
             when (item) {
-                is ChatItem.UserMessage -> UserBubble(item.text, attachments = item.attachments)
-                is ChatItem.AssistantMessage -> AssistantMessage(item.text, item.streaming, item.reasoning, media = media)
+                is ChatItem.UserMessage -> UserBubble(
+                    item.text,
+                    attachments = item.attachments,
+                    failed = item.failed,
+                    onRetry = { actions.onRetrySend(item.id) },
+                    onDismiss = { actions.onDismissFailed(item.id) },
+                    onLongPress = { actions.onMessageMenu(item.id) },
+                )
+                is ChatItem.AssistantMessage -> AssistantMessage(
+                    item.text,
+                    item.streaming,
+                    item.reasoning,
+                    media = media,
+                    onLongPress = { actions.onMessageMenu(item.id) }.takeIf { !item.streaming },
+                )
                 is ChatItem.ToolCall -> ToolRow(item)
+                is ChatItem.Subagent -> SubagentRow(item)
                 is ChatItem.Approval -> ApprovalCard(
                     item = item,
                     onApprove = { actions.onApprove(item.id) },
@@ -268,17 +306,52 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
  * id — once a live session exists); empty disables the button rather than opening a sheet that does nothing.
  */
 internal fun overflowItems(state: ChatUiState, actions: ChatActions): List<MenuItem> {
-    val stop = MenuItem("Stop", IconName.Stop, onClick = actions.onStop).takeIf { state.chat.status.running && !state.offline }
+    val running = state.chat.status.running
+    val stop = MenuItem("Stop", IconName.Stop, onClick = actions.onStop).takeIf { running && !state.offline }
     val copy = MenuItem("Copy session ID", IconName.ContentCopy, onClick = actions.onCopyId)
+    val live = state.chat.liveSessionId != null && state.writable
+    val reasoning = MenuItem(reasoningMenuLabel(state.chat.reasoningEffort), IconName.Psychology) { actions.onMenu(ChatMenu.Reasoning) }
+        .takeIf { live }
+    // Compaction is idle-gated on the server: offered between turns only.
+    val compact = MenuItem("Compact context", IconName.Compress, onClick = actions.onCompact)
+        .takeIf { live && !running && !state.compacting && state.chat.items.isNotEmpty() }
     if (state.chat.storedSessionId == null) {
-        return listOfNotNull(stop, copy.takeIf { state.chat.liveSessionId != null })
+        return listOfNotNull(stop, reasoning, compact, copy.takeIf { state.chat.liveSessionId != null })
     }
     return listOfNotNull(
         stop,
+        reasoning,
+        compact,
         MenuItem("Rename", IconName.Edit) { actions.onDialog(ChatDialog.Rename) },
-        MenuItem("Archive", IconName.Archive, onClick = actions.onArchive),
+        if (state.archived) {
+            MenuItem("Unarchive", IconName.Unarchive, onClick = actions.onUnarchive)
+        } else {
+            MenuItem("Archive", IconName.Archive, onClick = actions.onArchive)
+        },
         copy,
         MenuItem("Delete session", IconName.Delete, danger = true) { actions.onDialog(ChatDialog.DeleteConfirm) },
+    )
+}
+
+/** "Reasoning · Low"; just "Reasoning" while the effort is unknown or the provider's default. */
+internal fun reasoningMenuLabel(effort: String?): String {
+    val label = REASONING_LEVELS.firstOrNull { it.first == effort }?.second ?: return "Reasoning"
+    return "Reasoning · $label"
+}
+
+/** The reasoning sheet: every level, check on the session's current one. */
+internal fun reasoningItems(state: ChatUiState, actions: ChatActions): List<MenuItem> =
+    REASONING_LEVELS.map { (value, label) ->
+        MenuItem(label, null, checked = state.chat.reasoningEffort == value) { actions.onReasoning(value) }
+    }
+
+/** A message's long-press menu: Copy text, plus Copy reasoning for a reply that has some. */
+internal fun messageItems(state: ChatUiState, actions: ChatActions): List<MenuItem> {
+    val item = state.chat.items.firstOrNull { it.id == state.messageMenu } ?: return emptyList()
+    val reasoning = (item as? ChatItem.AssistantMessage)?.reasoning?.takeIf { it.isNotEmpty() }
+    return listOfNotNull(
+        MenuItem("Copy text", IconName.ContentCopy) { actions.onCopyMessage(item.id, false) },
+        reasoning?.let { MenuItem("Copy reasoning", IconName.Psychology) { actions.onCopyMessage(item.id, true) } },
     )
 }
 
@@ -288,6 +361,9 @@ private fun ChatSheets(state: ChatUiState, actions: ChatActions, overflow: List<
     MenuSheet(state.menu == ChatMenu.Model, dismiss, modelItems(state, actions))
     MenuSheet(state.menu == ChatMenu.Workspace, dismiss, workspaceItems(state, actions))
     MenuSheet(state.menu == ChatMenu.Overflow && overflow.isNotEmpty(), dismiss, overflow)
+    MenuSheet(state.menu == ChatMenu.Reasoning, dismiss, reasoningItems(state, actions))
+    val messageMenu = messageItems(state, actions)
+    MenuSheet(messageMenu.isNotEmpty(), { actions.onMessageMenu(null) }, messageMenu)
     when (state.dialog) {
         ChatDialog.Rename -> {
             var name by rememberSaveable { mutableStateOf(state.chat.title.orEmpty()) }
@@ -299,6 +375,13 @@ private fun ChatSheets(state: ChatUiState, actions: ChatActions, overflow: List<
                 onDismiss = { actions.onDialog(null) },
             ) { TsukaimaTextField(name, { name = it }, placeholder = "Session name") }
         }
+        ChatDialog.ModelConfirm -> ConfirmDialog(
+            title = "Switch to ${state.pendingModel?.model ?: "this model"}?",
+            body = state.pendingModel?.message,
+            confirmText = "Switch",
+            onConfirm = actions.onConfirmModel,
+            onDismiss = { actions.onDialog(null) },
+        )
         ChatDialog.DeleteConfirm -> ConfirmDialog(
             title = "Delete session?",
             body = "Messages and tool output are removed from Hermes. This can’t be undone.",

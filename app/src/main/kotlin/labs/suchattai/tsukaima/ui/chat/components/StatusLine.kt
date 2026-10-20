@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -72,13 +73,17 @@ private fun StatusDot(visual: StatusVisual) {
     )
 }
 
-/** The agent's live status: 7dp dot plus a serif-italic line. */
+/**
+ * The agent's live status: 7dp dot plus a serif-italic line. [meter] (chat only: "42% ctx · 12.3k tok") sits at the
+ * right end in caption type.
+ */
 @Composable
-fun StatusLine(status: AgentStatus, onClick: (() -> Unit)? = null, modifier: Modifier = Modifier) {
+fun StatusLine(status: AgentStatus, onClick: (() -> Unit)? = null, modifier: Modifier = Modifier, meter: String? = null) {
     val colors = MaterialTheme.tsukaima
     val visual = statusVisual(status, colors)
     Row(
         modifier = modifier
+            .then(if (meter != null) Modifier.fillMaxWidth() else Modifier)
             .then(
                 if (onClick != null) {
                     Modifier.heightIn(min = Dimens.hit).clickable(role = Role.Button, onClick = onClick)
@@ -97,13 +102,16 @@ fun StatusLine(status: AgentStatus, onClick: (() -> Unit)? = null, modifier: Mod
             color = colors.ink2,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = if (meter != null) Modifier.weight(1f) else Modifier,
         )
+        if (meter != null) Text(meter, style = TsukaimaType.caption, color = colors.ink3, maxLines = 1)
     }
 }
 
 @Composable
 private fun StatusLinePreview(dark: Boolean) = PreviewPage(dark) {
     StatusLine(AgentStatus.Idle)
+    StatusLine(AgentStatus.Idle, meter = "42% ctx · 12.3k tok")
     StatusLine(AgentStatus.Thinking("Steeping matcha…"))
     StatusLine(AgentStatus.Tool("shell"), onClick = {})
     StatusLine(AgentStatus.Approval)

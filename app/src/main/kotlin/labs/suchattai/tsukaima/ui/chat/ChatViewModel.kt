@@ -66,6 +66,11 @@ class ChatViewModel(
     /** One automatic open() retry per connection-state transition; reset whenever the state changes. */
     private var openRetried = false
     private var userCounter = 0L
+
+    /** What a failed send carried, by its bubble's local id, for Retry / Dismiss. */
+    private data class FailedSend(val text: String, val attachments: List<PendingAttachment>)
+
+    private val failedSends = mutableMapOf<String, FailedSend>()
     private val sync = ChatReconnector(
         session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), storedSessionId, flair, _state,
     )
@@ -119,6 +124,7 @@ class ChatViewModel(
                 }
                 opened = true
                 sync.adoptRecent()
+                if (storedSessionId != null) checkArchived(storedSessionId)
             } catch (c: CancellationException) {
                 throw c
             } catch (_: GatewayClosedException) {
@@ -148,7 +154,7 @@ class ChatViewModel(
         val infoModel = (created.info["model"] as? JsonPrimitive)?.contentOrNull
         _state.update {
             it.copy(
-                chat = ChatReducer.onSessionBound(it.chat, created.sessionId, created.storedSessionId),
+                chat = ChatReducer.onSessionInfo(ChatReducer.onSessionBound(it.chat, created.sessionId, created.storedSessionId), created.info),
                 model = infoModel ?: model ?: it.model,
                 provider = provider ?: it.provider,
             )
@@ -185,21 +191,60 @@ class ChatViewModel(
         _state.update {
             it.copy(input = "", chat = ChatReducer.onSubmitted(it.chat, text, localId, flair, sent.map(PendingAttachment::name)))
         }
-        launch {
-            try {
-                session.submit(live, Attachments.promptText(text, sent))
-                attachments.sent(sent)
-            } catch (c: CancellationException) {
-                throw c
-            } catch (e: Exception) {
-                // Undo the optimistic bubble: text and attachments go back to the composer for a retry.
-                setChat { c -> c.copy(items = c.items.filterNot { it.id == localId }, status = unlessOffline(c.status, AgentStatus.Idle)) }
-                _state.update { if (it.input.isEmpty()) it.copy(input = text) else it }
-                attachments.restore(sent)
-                backend.toast("Message not sent: ${e.message ?: "gateway error"}")
-            }
+        launch { submit(live, localId, text, sent) }
+    }
+
+    /**
+     * Submits user message [localId]. A failure keeps the bubble, marked failed with Retry and Dismiss; its text
+     * and attachments wait in [failedSends] (not back in the composer, which would show them twice).
+     */
+    private suspend fun submit(live: String, localId: String, text: String, sent: List<PendingAttachment>) {
+        try {
+            session.submit(live, Attachments.promptText(text, sent))
+            attachments.sent(sent)
+        } catch (c: CancellationException) {
+            throw c
+        } catch (e: Exception) {
+            failedSends[localId] = FailedSend(text, sent)
+            setChat { c -> c.copy(items = c.items.markFailed(localId, true), status = unlessOffline(c.status, AgentStatus.Idle)) }
+            backend.toast("Message not sent: ${e.message ?: "gateway error"}")
         }
     }
+
+    /**
+     * Retry on a failed bubble: submits the same text and attachments again. Images queued in a live session that
+     * has since been replaced are gone from the server, so such a send is put back in the composer instead (the
+     * images show as failed there, ready for their own retry).
+     */
+    fun retrySend(localId: String) {
+        val failed = failedSends[localId] ?: return
+        if (chat.items.none { it.id == localId }) {
+            failedSends.remove(localId) // the transcript was rebuilt from history meanwhile
+            return
+        }
+        if (!_state.value.writable) return backend.toast("Not connected to Hermes")
+        val live = chat.liveSessionId ?: return backend.toast("Still connecting to Hermes")
+        if (failed.attachments.any { it.kind == AttachmentKind.Image && it.liveSessionId != live }) {
+            dismissFailed(localId)
+            return backend.toast("Attach the images again, then send")
+        }
+        failedSends.remove(localId)
+        setChat { c -> c.copy(items = c.items.markFailed(localId, false), status = AgentStatus.Thinking(flair())) }
+        launch { submit(live, localId, failed.text, failed.attachments) }
+    }
+
+    /** Dismiss on a failed bubble: removes it; its text (if the composer is empty) and attachments go back to the composer. */
+    fun dismissFailed(localId: String) {
+        val failed = failedSends.remove(localId)
+        setChat { c -> c.copy(items = c.items.filterNot { it.id == localId && it is ChatItem.UserMessage && it.failed }) }
+        if (failed == null) return
+        _state.update { if (it.input.isEmpty()) it.copy(input = failed.text) else it }
+        attachments.restore(failed.attachments)
+        chat.liveSessionId?.let(attachments::onLiveSession)
+    }
+
+    private fun List<ChatItem>.markFailed(localId: String, failed: Boolean) =
+        map { if (it.id == localId && it is ChatItem.UserMessage) it.copy(failed = failed) else it }
 
     /** Uploads picked files at once (creating the session first if needed); see [ChatAttachments]. */
     fun attach(files: List<PickedFile>) = attachments.attach(files)
@@ -343,23 +388,91 @@ class ChatViewModel(
         }
     }
 
-    fun showDialog(dialog: ChatDialog?) = _state.update { it.copy(dialog = dialog, menu = null) }
+    /** Opens [dialog], or with null closes it (a dismissed model confirmation drops its pick). */
+    fun showDialog(dialog: ChatDialog?) =
+        _state.update { it.copy(dialog = dialog, menu = null, pendingModel = it.pendingModel.takeIf { dialog != null }) }
 
     /**
-     * Hermes has no live model switch: a new, still-empty chat is re-created with the model; otherwise the
-     * choice is saved for the next chat.
+     * Switches the live session to [model] of [provider] (`config.set key=model`, session-scoped) and saves the pair
+     * for new chats once the server took it. Without a live session the pair is only saved, for the next chat. A
+     * model the server's guards flag needs a confirmation first ([ChatDialog.ModelConfirm]); a switch asked for
+     * mid-turn applies when the next turn starts; any advice the server returns is toasted.
      */
     fun setModel(provider: String, model: String) {
         _state.update { it.copy(menu = null) }
-        launch {
-            backend.updateSettings { it.copy(model = model, modelProvider = provider) }
-            val live = chat.liveSessionId
-            if (storedSessionId != null || chat.items.isNotEmpty() || live == null) {
-                return@launch backend.toast("Model applies to the next chat")
+        val live = chat.liveSessionId
+        if (live == null) {
+            launch {
+                backend.updateSettings { it.copy(model = model, modelProvider = provider) }
+                backend.toast("Model applies to the next chat")
             }
-            attempt("Couldn’t switch the model") {
-                runCatching { session.close(live) }.onFailure { if (it is CancellationException) throw it }
-                create(model, provider)
+            return
+        }
+        launch { switchModel(live, provider, model, confirmed = false) }
+    }
+
+    /** Confirm on [ChatDialog.ModelConfirm]: sends the pick again with `confirm_expensive_model`. */
+    fun confirmModel() {
+        val pick = _state.value.pendingModel
+        _state.update { it.copy(dialog = null, pendingModel = null) }
+        val live = chat.liveSessionId ?: return
+        if (pick != null) launch { switchModel(live, pick.provider, pick.model, confirmed = true) }
+    }
+
+    private suspend fun switchModel(live: String, provider: String, model: String, confirmed: Boolean) {
+        attempt("Couldn’t switch the model") {
+            val r = session.switchModel(live, model, provider, confirmExpensive = confirmed)
+            if (r.confirmRequired) {
+                val why = r.confirmMessage.ifBlank { r.warning }.trim().ifEmpty { "Switch to $model?" }
+                _state.update { it.copy(dialog = ChatDialog.ModelConfirm, pendingModel = PendingModel(provider, model, why)) }
+                return@attempt
+            }
+            backend.updateSettings { it.copy(model = model, modelProvider = provider) }
+            _state.update { it.copy(model = r.value.ifBlank { model }, provider = provider) }
+            when {
+                r.deferred -> backend.toast("Model switches when this turn ends")
+                r.warning.isNotBlank() -> backend.toast(ChatSync.toastLine(r.warning))
+            }
+        }
+    }
+
+    /**
+     * Sets the live session's reasoning effort ([REASONING_LEVELS]); session-scoped on the server, nothing saved
+     * here. The server's `session.info` confirms it; the reported value is applied at once meanwhile.
+     */
+    fun setReasoning(level: String) {
+        _state.update { it.copy(menu = null) }
+        val live = chat.liveSessionId ?: return backend.toast("Still connecting to Hermes")
+        launch {
+            attempt("Couldn’t set the reasoning effort") {
+                val value = session.setReasoning(live, level) ?: level
+                setChat { it.copy(reasoningEffort = value) }
+            }
+        }
+    }
+
+    /**
+     * Compact context (`session.compress`): summarizes the conversation so far to free the context window. The
+     * status line says "Compacting context…" meanwhile; the outcome is toasted ([ChatSync.compacted]). Compaction
+     * can rotate the session onto a new stored id, which the chat then follows.
+     */
+    fun compact() {
+        _state.update { it.copy(menu = null) }
+        val live = chat.liveSessionId ?: return
+        if (_state.value.compacting) return
+        _state.update { it.copy(compacting = true) }
+        launch {
+            try {
+                attempt("Couldn’t compact the context") {
+                    val done = ChatSync.compacted(session.compress(live))
+                    setChat { c ->
+                        val info = done.info?.let { ChatReducer.onSessionInfo(c, it) } ?: c
+                        if (done.storedId != null && c.liveSessionId == live) info.copy(storedSessionId = done.storedId) else info
+                    }
+                    backend.toast(done.message)
+                }
+            } finally {
+                _state.update { it.copy(compacting = false) }
             }
         }
     }
@@ -390,6 +503,43 @@ class ChatViewModel(
     }
 
     fun archive() = finish("Archived", "Couldn’t archive the chat") { backend.archiveSession(it) }
+
+    /** Reads whether the opened session is archived; an archived chat is read-only until [unarchive]. */
+    private fun checkArchived(stored: String) {
+        launch { backend.sessionArchived(stored).onSuccess { a -> _state.update { it.copy(archived = a) } } }
+    }
+
+    /** "Unarchive" on the archived banner (PATCH `{archived:false}`): the chat becomes writable again. */
+    fun unarchive() {
+        _state.update { it.copy(menu = null) }
+        val stored = chat.storedSessionId ?: return
+        launch {
+            backend.unarchiveSession(stored)
+                .onSuccess {
+                    _state.update { it.copy(archived = false) }
+                    backend.toast("Unarchived")
+                }
+                .onFailure { backend.toast("Couldn’t unarchive the chat") }
+        }
+    }
+
+    /** Long-press on a message: opens (or with null closes) its copy menu. */
+    fun showMessageMenu(id: String?) = _state.update { it.copy(messageMenu = id) }
+
+    /**
+     * Copies message [id]'s text, or with [reasoning] its reasoning, through [copy] (the screen's clipboard) and
+     * confirms with a toast. Nothing is copied for an empty one.
+     */
+    fun copyMessage(id: String, reasoning: Boolean, copy: (String) -> Unit) {
+        _state.update { it.copy(messageMenu = null) }
+        val text = when (val item = chat.items.firstOrNull { it.id == id }) {
+            is ChatItem.UserMessage -> item.text.takeIf { !reasoning }
+            is ChatItem.AssistantMessage -> if (reasoning) item.reasoning else item.text
+            else -> null
+        }?.takeIf { it.isNotEmpty() } ?: return
+        copy(text)
+        backend.toast(if (reasoning) "Reasoning copied" else "Message copied")
+    }
 
     fun delete() = finish("Deleted", "Couldn’t delete the chat") { backend.deleteSession(it) }
 

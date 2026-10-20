@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import labs.suchattai.tsukaima.domain.markdown.Markdown
 import labs.suchattai.tsukaima.ui.components.IconName
 import labs.suchattai.tsukaima.ui.components.TsukaimaIcon
+import labs.suchattai.tsukaima.ui.components.longPressMenu
 import labs.suchattai.tsukaima.ui.theme.Dimens
 import labs.suchattai.tsukaima.ui.theme.Motion
 import labs.suchattai.tsukaima.ui.theme.TsukaimaType
@@ -33,7 +34,7 @@ import labs.suchattai.tsukaima.ui.theme.tsukaima
 
 /**
  * Assistant prose directly on the page: no bubble, 20dp gutters, 640dp max, optional reasoning, and file cards
- * for its `MEDIA:` deliveries ([media]).
+ * for its `MEDIA:` deliveries ([media]). [onLongPress] opens the message menu (copy).
  */
 @Composable
 fun AssistantMessage(
@@ -42,6 +43,7 @@ fun AssistantMessage(
     reasoning: String?,
     modifier: Modifier = Modifier,
     media: MediaHost = MediaHost(),
+    onLongPress: (() -> Unit)? = null,
 ) {
     val colors = MaterialTheme.tsukaima
     val blocks = remember(text, streaming) { Markdown.parse(text, streaming) }
@@ -49,6 +51,7 @@ fun AssistantMessage(
     Column(
         modifier = modifier
             .widthIn(max = 640.dp)
+            .then(if (onLongPress != null) Modifier.longPressMenu(onLongPress) else Modifier)
             .padding(horizontal = Dimens.gutter, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {

@@ -49,6 +49,13 @@ sealed interface AgentStatus {
         override val tone get() = StatusTone.Amber
     }
 
+    /** `session.compress` is summarizing the conversation (not a turn: Stop does not apply). */
+    data object Compacting : AgentStatus {
+        override val label = "Compacting context…"
+        override val tone = StatusTone.Accent
+        override val pulsing = true
+    }
+
     data object Stopped : AgentStatus {
         override val label = "Gateway stopped"
         override val tone = StatusTone.Red

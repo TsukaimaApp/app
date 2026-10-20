@@ -77,6 +77,7 @@ fun Composer(
     onRetryAttachment: (String) -> Unit = {},
     running: Boolean = false,
     onStop: () -> Unit = {},
+    disabledPlaceholder: String = "Hermes is unreachable",
 ) {
     val colors = MaterialTheme.tsukaima
     val shape = TsukaimaShapes.composer
@@ -132,7 +133,7 @@ fun Composer(
                     Box(Modifier.padding(horizontal = 4.dp, vertical = 11.dp)) {
                         if (value.isEmpty()) {
                             Text(
-                                text = if (enabled) placeholder else "Hermes is unreachable",
+                                text = if (enabled) placeholder else disabledPlaceholder,
                                 style = TsukaimaType.body,
                                 color = colors.ink3,
                             )

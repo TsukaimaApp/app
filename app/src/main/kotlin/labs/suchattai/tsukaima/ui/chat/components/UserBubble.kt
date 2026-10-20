@@ -16,6 +16,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.draw.alpha
+import labs.suchattai.tsukaima.ui.components.ButtonSize
+import labs.suchattai.tsukaima.ui.components.GhostButton
+import labs.suchattai.tsukaima.ui.components.IconName
+import labs.suchattai.tsukaima.ui.components.TsukaimaIcon
+import labs.suchattai.tsukaima.ui.components.longPressMenu
 import labs.suchattai.tsukaima.ui.theme.Dimens
 import labs.suchattai.tsukaima.ui.theme.TsukaimaType
 import labs.suchattai.tsukaima.ui.theme.tsukaima
@@ -24,10 +31,19 @@ private val BubbleShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, b
 
 /**
  * Right-aligned user message: pale lavender fill, 6dp tail corner, at most 82 % of the width. [attachments]
- * (names of files sent with it) are listed under the text in caption style.
+ * (names of files sent with it) are listed under the text in caption style. A [failed] send gets a
+ * "Not sent" line with Retry and Dismiss under the bubble. [onLongPress] opens the message menu (copy).
  */
 @Composable
-fun UserBubble(text: String, modifier: Modifier = Modifier, attachments: List<String> = emptyList()) {
+fun UserBubble(
+    text: String,
+    modifier: Modifier = Modifier,
+    attachments: List<String> = emptyList(),
+    failed: Boolean = false,
+    onRetry: () -> Unit = {},
+    onDismiss: () -> Unit = {},
+    onLongPress: (() -> Unit)? = null,
+) {
     val colors = MaterialTheme.tsukaima
     BoxWithConstraints(
         modifier = modifier
@@ -35,16 +51,29 @@ fun UserBubble(text: String, modifier: Modifier = Modifier, attachments: List<St
             .padding(horizontal = Dimens.gutter, vertical = 4.dp),
         contentAlignment = Alignment.CenterEnd,
     ) {
-        Column(
-            modifier = Modifier
-                .widthIn(max = maxWidth * 0.82f)
-                .background(colors.accentWash, BubbleShape)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            if (text.isNotBlank() || attachments.isEmpty()) Text(text = text, style = TsukaimaType.body, color = colors.ink1)
-            attachments.forEach { name ->
-                Text(name, style = TsukaimaType.caption, color = colors.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        val bubbleMax = maxWidth * 0.82f
+        Column(horizontalAlignment = Alignment.End) {
+            Column(
+                modifier = Modifier
+                    .widthIn(max = bubbleMax)
+                    .then(if (onLongPress != null) Modifier.longPressMenu(onLongPress) else Modifier)
+                    .alpha(if (failed) 0.7f else 1f)
+                    .background(colors.accentWash, BubbleShape)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                if (text.isNotBlank() || attachments.isEmpty()) Text(text = text, style = TsukaimaType.body, color = colors.ink1)
+                attachments.forEach { name ->
+                    Text(name, style = TsukaimaType.caption, color = colors.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (failed) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TsukaimaIcon(IconName.Error, size = 14.dp, tint = colors.danger)
+                    Text("Not sent", style = TsukaimaType.caption, color = colors.danger, modifier = Modifier.padding(start = 4.dp, end = 4.dp))
+                    GhostButton("Dismiss", onDismiss, size = ButtonSize.Sm)
+                    GhostButton("Retry", onRetry, size = ButtonSize.Sm, icon = IconName.Refresh)
+                }
             }
         }
     }
@@ -55,6 +84,7 @@ private fun UserBubblePreview(dark: Boolean) = PreviewPage(dark) {
     UserBubble("Restart the agent and tail the logs.")
     UserBubble("What is the first line?", attachments = listOf("notes.txt", "screenshot.png"))
     UserBubble("", attachments = listOf("photo.jpg"))
+    UserBubble("Restart the gateway please.", failed = true)
     UserBubble("A much longer message that should wrap well before it reaches the left edge of the screen, keeping the 82 percent cap.")
 }
 

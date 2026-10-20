@@ -647,4 +647,126 @@ class ChatReducerTest {
         assertFalse(smart.allowSession)
         assertFalse(smart.allowAlways)
     }
+
+    // ---- v0.5.0: usage, reasoning effort, output risk, subagents, resume progress ----------------------------
+
+    /** Live-probed `usage` object (`message.complete` / `session.usage` / `session.info`), trimmed. */
+    private val usageJson =
+        """{"model":"m","input":15882,"output":4,"total":31502,"calls":2,"context_used":15754,"context_max":1000000,"context_percent":2}"""
+
+    @Test
+    fun sessionUsageEventSetsTheCounters() {
+        val s = live.feed(ev("session.usage", """{"usage":$usageJson}""", seq = 3))
+        assertEquals(SessionUsage(contextPercent = 2, contextUsed = 15754, contextMax = 1000000, totalTokens = 31502), s.usage)
+        assertEquals("2% ctx · 31.5k tok", s.usage?.meter)
+    }
+
+    @Test
+    fun messageCompleteCarriesTheFinalUsage() {
+        val s = live.feed(
+            ev("message.start", seq = 1),
+            ev("message.delta", """{"text":"two"}""", seq = 2),
+            ev("message.complete", """{"text":"two","usage":$usageJson}""", seq = 3),
+        )
+        assertEquals("two", (s.items.single() as ChatItem.AssistantMessage).text)
+        assertEquals(31502L, s.usage?.totalTokens)
+        assertEquals(AgentStatus.Idle, s.status)
+    }
+
+    @Test
+    fun emptyUsageKeepsWhatIsKnown() {
+        val known = live.feed(ev("session.usage", """{"usage":$usageJson}""", seq = 1))
+        val after = known.feed(ev("session.usage", """{"usage":{}}""", seq = 2), ev("message.complete", """{"text":""}""", seq = 3))
+        assertEquals(known.usage, after.usage)
+    }
+
+    @Test
+    fun sessionInfoSetsReasoningEffortAndUsage() {
+        val s = live.feed(ev("session.info", """{"model":"m","reasoning_effort":"low","usage":$usageJson}""", seq = 1))
+        assertEquals("low", s.reasoningEffort)
+        assertEquals(2, s.usage?.contextPercent)
+        // A lazy session's info names neither: what is known stays.
+        val lazy = s.feed(ev("session.info", """{"model":"m","lazy":true}""", seq = 2))
+        assertEquals("low", lazy.reasoningEffort)
+        assertEquals(s.usage, lazy.usage)
+        // "" is the provider default, kept as such (not "unknown").
+        assertEquals("", lazy.feed(ev("session.info", """{"reasoning_effort":""}""", seq = 3)).reasoningEffort)
+    }
+
+    @Test
+    fun meterFormatsEitherHalf() {
+        assertEquals("42% ctx", SessionUsage(contextPercent = 42).meter)
+        assertEquals("950 tok", SessionUsage(totalTokens = 950).meter)
+        assertEquals("1.2M tok", SessionUsage(totalTokens = 1_234_567).meter)
+        assertNull(SessionUsage().meter)
+    }
+
+    @Test
+    fun outputRiskFlagsTheToolRow() {
+        val s = live.feed(
+            ev("tool.start", """{"tool_id":"t1","name":"web_extract","context":"example.com"}""", seq = 1),
+            ev("tool.complete", """{"tool_id":"t1","name":"web_extract","result":{"output":"…"}}""", seq = 2),
+            ev("tool.output_risk", """{"tool_id":"t1","name":"web_extract","risk":"high","findings":["prompt_injection"],"redacted":true}""", seq = 3),
+        )
+        val tool = s.items.single() as ChatItem.ToolCall
+        assertEquals(ToolRisk("high", listOf("prompt_injection"), redacted = true), tool.risk)
+        assertEquals(ToolStatus.Done, tool.status)
+        // An unknown tool id changes nothing.
+        assertEquals(s.items, s.feed(ev("tool.output_risk", """{"tool_id":"nope","risk":"low","findings":[]}""", seq = 4)).items)
+    }
+
+    /** Live-probed `subagent.*` payloads (trimmed): spawn, thinking, complete for one background child. */
+    private fun sub(type: String, extra: String = "", seq: Long) = ev(
+        type,
+        """{"goal":"Reply with pong","task_count":1,"task_index":0,"subagent_id":"sa-0-8cb3ad99","delegation_id":"deleg_1"$extra}""",
+        seq = seq,
+    )
+
+    @Test
+    fun subagentEventsKeepOneRowWithItsStatus() {
+        val started = live.feed(sub("subagent.start", seq = 1), sub("subagent.thinking", ""","text":"deliberating…"""", seq = 2))
+        val row = started.items.single() as ChatItem.Subagent
+        assertEquals("sub-sa-0-8cb3ad99", row.id)
+        assertEquals("Reply with pong", row.goal)
+        assertEquals(SubagentStatus.Running, row.status)
+        assertEquals("deliberating…", row.detail)
+        assertNull(row.position)
+        assertEquals("a subagent does not change the agent's status", AgentStatus.Idle, started.status)
+
+        val done = started.feed(sub("subagent.complete", ""","status":"completed","summary":"pong"""", seq = 3))
+        val finished = done.items.single() as ChatItem.Subagent
+        assertEquals(SubagentStatus.Done, finished.status)
+        assertEquals("pong", finished.summary)
+        assertEquals("deliberating…", finished.detail)
+
+        val failed = started.feed(sub("subagent.complete", ""","status":"timeout"""", seq = 3))
+        assertEquals(SubagentStatus.Failed, (failed.items.single() as ChatItem.Subagent).status)
+    }
+
+    @Test
+    fun subagentsOfOneDelegationAreSeparateRows() {
+        val s = live.feed(
+            ev("subagent.start", """{"goal":"a","task_count":2,"task_index":0,"delegation_id":"d"}""", seq = 1),
+            ev("subagent.start", """{"goal":"b","task_count":2,"task_index":1,"delegation_id":"d"}""", seq = 2),
+            ev("subagent.text", """{"goal":"b","task_count":2,"task_index":1,"delegation_id":"d","text":"x"}""", seq = 3),
+        )
+        val rows = s.items.map { it as ChatItem.Subagent }
+        assertEquals(listOf("sub-d-0", "sub-d-1"), rows.map { it.id })
+        assertEquals(listOf("1/2", "2/2"), rows.map { it.position })
+        assertNull("subagent.text is only for a watch window", rows[1].detail)
+    }
+
+    @Test
+    fun resumeProgressBecomesSkeletonText() {
+        val unbound = ChatState()
+        assertEquals("Loading history…", unbound.feed(ev("session.resume_progress", """{"phase":"history","status":"loading"}""")).resumeProgress)
+        assertEquals(
+            "Loaded 42 messages",
+            unbound.feed(ev("session.resume_progress", """{"phase":"history","status":"complete","message_count":42}""")).resumeProgress,
+        )
+        assertEquals(
+            "disk full",
+            unbound.feed(ev("session.resume_progress", """{"phase":"history","status":"failed","message":"disk full"}""")).resumeProgress,
+        )
+    }
 }

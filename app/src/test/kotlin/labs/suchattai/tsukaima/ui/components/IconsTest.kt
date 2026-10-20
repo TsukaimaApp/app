@@ -17,12 +17,13 @@ class IconsTest {
 
     /**
      * Added after the handoff (v0.2.0: clarify card, attachment chips; v0.3.0: `MEDIA:` file cards; v0.4.0: Stop,
-     * masked-prompt card, sign-out).
+     * masked-prompt card, sign-out; v0.5.0: compact context, subagent rows, output-risk note).
      */
     private val additions = listOf(
         "help", "attach_file", "image",
         "download", "description", "video_file", "audio_file", "folder_zip", "insert_drive_file",
         "stop", "key", "visibility", "visibility_off", "logout",
+        "compress", "account_tree", "warning",
     )
 
     @Test

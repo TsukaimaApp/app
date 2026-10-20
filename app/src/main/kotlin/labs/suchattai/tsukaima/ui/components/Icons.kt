@@ -10,6 +10,7 @@ import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
 import androidx.compose.material.icons.automirrored.rounded.Send
+import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Archive
 import androidx.compose.material.icons.rounded.AttachFile
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Compress
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
@@ -57,6 +59,7 @@ import androidx.compose.material.icons.rounded.Unarchive
 import androidx.compose.material.icons.rounded.VideoFile
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -144,6 +147,11 @@ enum class IconName(val symbol: String) {
 
     /** Not in the handoff (v0.4.0): Settings → Sign out. */
     Logout("logout"),
+
+    /** Not in the handoff (v0.5.0): Compact context, subagent rows, the tool output-risk note. */
+    Compress("compress"),
+    AccountTree("account_tree"),
+    Warning("warning"),
 }
 
 /** Pure lookup, safe from JVM unit tests (no Android context involved). */
@@ -203,6 +211,9 @@ fun iconFor(name: IconName): ImageVector = when (name) {
     IconName.Visibility -> Icons.Rounded.Visibility
     IconName.VisibilityOff -> Icons.Rounded.VisibilityOff
     IconName.Logout -> Icons.AutoMirrored.Rounded.Logout
+    IconName.Compress -> Icons.Rounded.Compress
+    IconName.AccountTree -> Icons.Rounded.AccountTree
+    IconName.Warning -> Icons.Rounded.Warning
 }
 
 /**

@@ -33,6 +33,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import labs.suchattai.tsukaima.domain.chat.ChatItem
+import labs.suchattai.tsukaima.domain.chat.ToolRisk
 import labs.suchattai.tsukaima.domain.chat.ToolStatus
 import labs.suchattai.tsukaima.ui.components.IconName
 import labs.suchattai.tsukaima.ui.components.TsukaimaIcon
@@ -97,6 +98,7 @@ fun ToolRow(item: ChatItem.ToolCall, modifier: Modifier = Modifier) {
             }
             TsukaimaIcon(IconName.ExpandMore, size = 18.dp, tint = colors.ink2, modifier = Modifier.rotate(rotation))
         }
+        item.risk?.let { RiskNote(it) }
         if (open) {
             Text(
                 text = item.output?.takeIf { it.isNotBlank() } ?: "No output",
@@ -110,6 +112,27 @@ fun ToolRow(item: ChatItem.ToolCall, modifier: Modifier = Modifier) {
     }
 }
 
+/** `tool.output_risk` under the header: a small amber line, always visible (not only when expanded). */
+@Composable
+private fun RiskNote(risk: ToolRisk) {
+    val colors = MaterialTheme.tsukaima
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        TsukaimaIcon(IconName.Warning, size = 14.dp, tint = colors.warn)
+        Text(riskText(risk), style = TsukaimaType.caption, color = colors.warn, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** "Output flagged: high risk · prompt injection · redacted". */
+internal fun riskText(risk: ToolRisk): String =
+    (listOf("Output flagged: ${risk.level} risk") + risk.findings.map { it.replace('_', ' ') } + listOfNotNull("redacted".takeIf { risk.redacted }))
+        .joinToString(" · ")
+
 private fun sample(status: ToolStatus, output: String? = "ok  agent.log: 50 lines") = ChatItem.ToolCall(
     id = "t-$status", name = "shell", context = "tail -n 50 /var/log/hermes/agent.log --follow --verbose --lines=50",
     args = null, status = status, output = output, exitCode = null, durationS = null,
@@ -120,6 +143,7 @@ private fun ToolRowPreview(dark: Boolean) = PreviewPage(dark) {
     ToolRow(sample(ToolStatus.Done))
     ToolRow(sample(ToolStatus.Running))
     ToolRow(sample(ToolStatus.Failed, null))
+    ToolRow(sample(ToolStatus.Done).copy(id = "t-risk", risk = ToolRisk("high", listOf("prompt_injection"), redacted = true)))
 }
 
 @Preview(name = "ToolRow light")

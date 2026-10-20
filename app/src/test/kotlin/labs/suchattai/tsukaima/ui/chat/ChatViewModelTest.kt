@@ -127,6 +127,12 @@ class ChatViewModelTest {
         override suspend fun workspaces() = Result.success(WorkspacesDto(defaultCwd = "/home/hermes"))
         override suspend fun renameSession(id: String, title: String) = Result.success(Unit).also { rest += "rename $id $title" }
         override suspend fun archiveSession(id: String) = Result.success(Unit).also { rest += "archive $id" }
+        var archived = false
+        override suspend fun unarchiveSession(id: String) = Result.success(Unit).also {
+            rest += "unarchive $id"
+            archived = false
+        }
+        override suspend fun sessionArchived(id: String) = Result.success(archived)
         override suspend fun deleteSession(id: String) = Result.success(Unit).also { rest += "delete $id" }
 
         val downloads = mutableListOf<String>()
@@ -748,9 +754,23 @@ class ChatViewModelTest {
         vm.setInput("hi")
         vm.send()
         advanceUntilIdle()
-        assertEquals("hi", vm.state.value.input)
+        val bubble = vm.state.value.chat.items.single() as ChatItem.UserMessage
+        assertTrue(bubble.failed)
+        assertTrue(vm.state.value.attachments.isEmpty())
+
+        vm.retrySend(bubble.id)
+        advanceUntilIdle()
+        assertTrue("the retry carries the file ref", b.transport.last("prompt.submit")["text"]!!.jsonPrimitive.content.contains("@file:"))
+
+        b.transport.failNext["prompt.submit"] = null
+        vm.attach(listOf(notes))
+        advanceUntilIdle()
+        vm.setInput("again")
+        vm.send()
+        advanceUntilIdle()
+        vm.dismissFailed(vm.state.value.chat.items.last().id)
+        assertEquals("again", vm.state.value.input)
         assertEquals(listOf(AttachmentStatus.Ready), vm.state.value.attachments.map { it.status })
-        assertTrue(vm.state.value.chat.items.isEmpty())
     }
 
     @Test
@@ -921,40 +941,230 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun pickingModelOnEmptyChatRecreatesSession() = runTest(dispatcher) {
-        val b = backend()
+    fun pickingModelSwitchesTheLiveSession() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("config.set", obj("""{"key":"model","value":"deepseek-v4","warning":"","confirm_required":false,"confirm_message":"","scope":"session"}"""))
+        }
         val vm = vm(b)
         advanceUntilIdle()
-        b.transport.on("session.create", obj("""{"session_id":"cafe0002","stored_session_id":"20261020_020000_aaaaaa","info":{},"messages":[]}"""))
 
         vm.setModel("melious", "deepseek-v4")
         advanceUntilIdle()
 
-        assertEquals(live, b.transport.last("session.close")["session_id"]!!.jsonPrimitive.content)
-        val create = b.transport.last("session.create")
-        assertEquals("deepseek-v4", create["model"]!!.jsonPrimitive.content)
-        assertEquals("melious", create["provider"]!!.jsonPrimitive.content)
-        assertEquals("cafe0002", vm.state.value.chat.liveSessionId)
+        val params = b.transport.last("config.set")
+        assertEquals(live, params["session_id"]!!.jsonPrimitive.content)
+        assertEquals("model", params["key"]!!.jsonPrimitive.content)
+        assertEquals("deepseek-v4 --provider melious --session", params["value"]!!.jsonPrimitive.content)
+        assertNull(params["confirm_expensive_model"])
+        assertFalse("no re-create any more", "session.close" in b.transport.methods())
+        assertEquals(1, b.transport.methods().count { it == "session.create" })
+        assertEquals("deepseek-v4", vm.state.value.model)
+        assertEquals("melious", vm.state.value.provider)
         assertEquals("deepseek-v4", b.settings.value?.model)
         assertEquals("melious", b.settings.value?.modelProvider)
         assertTrue(b.toasts.isEmpty())
     }
 
     @Test
-    fun pickingModelMidChatAppliesToNextChat() = runTest(dispatcher) {
-        val b = backend()
+    fun modelSwitchWarningAndDeferralAreToasted() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on(
+                "config.set",
+                obj("""{"key":"model","value":"big","warning":"Context will be compressed first.\nDetails…","confirm_required":false}"""),
+                obj("""{"key":"model","value":"big","deferred":true}"""),
+            )
+        }
         val vm = vm(b)
         advanceUntilIdle()
-        vm.setInput("hi")
-        vm.send()
+        vm.setModel("p", "big")
+        advanceUntilIdle()
+        vm.setModel("p", "big")
+        advanceUntilIdle()
+        assertEquals(listOf("Context will be compressed first.", "Model switches when this turn ends"), b.toasts)
+    }
+
+    @Test
+    fun modelThatNeedsConfirmationAsksFirst() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on(
+                "config.set",
+                obj("""{"key":"model","value":"opus","confirm_required":true,"confirm_message":"opus costs $75/M output tokens."}"""),
+                obj("""{"key":"model","value":"opus","confirm_required":false}"""),
+            )
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setModel("anthropic", "opus")
+        advanceUntilIdle()
+
+        assertEquals(ChatDialog.ModelConfirm, vm.state.value.dialog)
+        assertEquals(PendingModel("anthropic", "opus", "opus costs $75/M output tokens."), vm.state.value.pendingModel)
+        assertEquals("nothing saved before the confirmation", "m-1", b.settings.value?.model)
+
+        vm.confirmModel()
+        advanceUntilIdle()
+        assertEquals("true", b.transport.last("config.set")["confirm_expensive_model"]!!.jsonPrimitive.content)
+        assertNull(vm.state.value.dialog)
+        assertEquals("opus", b.settings.value?.model)
+        assertEquals("opus", vm.state.value.model)
+    }
+
+    @Test
+    fun dismissedModelConfirmationSwitchesNothing() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("config.set", obj("""{"value":"opus","confirm_required":true,"confirm_message":"why"}""")) }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setModel("anthropic", "opus")
+        advanceUntilIdle()
+        vm.showDialog(null)
+        vm.confirmModel()
+        advanceUntilIdle()
+        assertEquals(1, b.transport.methods().count { it == "config.set" })
+        assertNull(vm.state.value.pendingModel)
+    }
+
+    @Test
+    fun pickingModelWithoutALiveSessionAppliesToNextChat() = runTest(dispatcher) {
+        val b = backend().apply { transport.failing += "session.create" }
+        val vm = vm(b)
         advanceUntilIdle()
 
         vm.setModel("melious", "deepseek-v4")
         advanceUntilIdle()
-        assertFalse("session.close" in b.transport.methods())
-        assertEquals(1, b.transport.methods().count { it == "session.create" })
+        assertFalse("config.set" in b.transport.methods())
         assertEquals("deepseek-v4", b.settings.value?.model)
+        assertEquals("melious", b.settings.value?.modelProvider)
         assertEquals(listOf("Model applies to the next chat"), b.toasts)
+    }
+
+    @Test
+    fun failedModelSwitchKeepsTheOldModel() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.transport.failNext["config.set"] = null
+        vm.setModel("nope", "no-such-model")
+        advanceUntilIdle()
+        assertEquals("m-1", vm.state.value.model)
+        assertEquals("m-1", b.settings.value?.model)
+        assertTrue(b.toasts.single().startsWith("Couldn’t switch the model"))
+    }
+
+    @Test
+    fun reasoningSetsTheSessionScopedEffort() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("config.set", obj("""{"key":"reasoning","value":"low"}""")) }
+        val vm = vm(b)
+        advanceUntilIdle()
+
+        vm.setReasoning("low")
+        advanceUntilIdle()
+        val params = b.transport.last("config.set")
+        assertEquals("reasoning", params["key"]!!.jsonPrimitive.content)
+        assertEquals("low", params["value"]!!.jsonPrimitive.content)
+        assertEquals(live, params["session_id"]!!.jsonPrimitive.content)
+        assertNull("session scope: never the profile default", params["scope"])
+        assertEquals("low", vm.state.value.chat.reasoningEffort)
+        assertNull(vm.state.value.menu)
+
+        // The server's session.info is the source of truth from then on.
+        b.events.emit(ev("session.info", 7, """{"model":"m-1","reasoning_effort":"high"}"""))
+        advanceUntilIdle()
+        assertEquals("high", vm.state.value.chat.reasoningEffort)
+        assertEquals("Reasoning · High", reasoningMenuLabel(vm.state.value.chat.reasoningEffort))
+        assertEquals("Reasoning", reasoningMenuLabel(""))
+    }
+
+    @Test
+    fun compactShowsProgressThenTheHeadline() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val b = backend().apply {
+            transport.on(
+                "session.compress",
+                obj(
+                    """{"status":"compressed","removed":6,"before_messages":8,"after_messages":2,
+                       "summary":{"noop":false,"headline":"Compressed 8 → 2 messages"},
+                       "info":{"stored_session_id":"20261020_030000_bbbbbb","usage":{"total":900,"context_percent":1}}}""",
+                ),
+            )
+            transport.gateNext["session.compress"] = gate
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+
+        vm.compact()
+        advanceUntilIdle()
+        assertEquals(AgentStatus.Compacting, vm.state.value.status)
+        assertFalse("compaction is not a turn: no Stop", vm.state.value.status.running)
+        vm.compact() // ignored while one runs
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(1, b.transport.methods().count { it == "session.compress" })
+        assertEquals(live, b.transport.last("session.compress")["session_id"]!!.jsonPrimitive.content)
+        assertEquals(AgentStatus.Idle, vm.state.value.status)
+        assertEquals(listOf("Compressed 8 → 2 messages"), b.toasts)
+        assertEquals("compaction rotated the stored id", "20261020_030000_bbbbbb", vm.state.value.chat.storedSessionId)
+        assertEquals(900L, vm.state.value.chat.usage?.totalTokens)
+    }
+
+    @Test
+    fun compactOutcomesReadTheServerMessage() {
+        assertEquals("Compaction is already running elsewhere", ChatSync.compacted(obj("""{"compressed":false,"lock_held":true}""")).message)
+        assertEquals("busy", ChatSync.compacted(obj("""{"compressed":false,"message":"busy"}""")).message)
+        assertEquals("later", ChatSync.compacted(obj("""{"status":"pending","message":"later"}""")).message)
+        assertEquals("Context compacted", ChatSync.compacted(obj("""{"status":"compressed"}""")).message)
+        // Live-probed: a refused compression is still `compressed` with noop + a headline saying why.
+        val noop = ChatSync.compacted(
+            obj("""{"status":"compressed","removed":0,"summary":{"noop":true,"headline":"Compression refused (summary would grow the conversation): 8 messages preserved"},"info":{"stored_session_id":""}}"""),
+        )
+        assertEquals("Compression refused (summary would grow the conversation): 8 messages preserved", noop.message)
+        assertNull(noop.storedId)
+    }
+
+    @Test
+    fun failedCompactionToastsAndClearsTheStatus() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.transport.failNext["session.compress"] = null
+        vm.compact()
+        advanceUntilIdle()
+        assertFalse(vm.state.value.compacting)
+        assertEquals(AgentStatus.Idle, vm.state.value.status)
+        assertTrue(b.toasts.single().startsWith("Couldn’t compact the context"))
+    }
+
+    @Test
+    fun archivedSessionIsReadOnlyUntilUnarchived() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("session.resume", obj(resumeJson))
+            archived = true
+        }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value.archived)
+        assertFalse(vm.state.value.writable)
+        vm.setInput("hello")
+        assertFalse(vm.state.value.canSend)
+        vm.send()
+        advanceUntilIdle()
+        assertFalse("prompt.submit" in b.transport.methods())
+
+        vm.unarchive()
+        advanceUntilIdle()
+        assertEquals(listOf("unarchive $stored"), b.rest)
+        assertFalse(vm.state.value.archived)
+        assertTrue(vm.state.value.canSend)
+        assertEquals(listOf("Unarchived"), b.toasts)
+    }
+
+    @Test
+    fun aNewChatIsNeverArchived() = runTest(dispatcher) {
+        val b = backend().apply { archived = true }
+        val vm = vm(b)
+        advanceUntilIdle()
+        assertFalse(vm.state.value.archived)
     }
 
     @Test
@@ -1149,7 +1359,7 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun sendFailureRemovesLocalBubble() = runTest(dispatcher) {
+    fun sendFailureMarksTheBubbleAndRetryResubmits() = runTest(dispatcher) {
         val b = backend()
         val vm = vm(b)
         advanceUntilIdle()
@@ -1157,13 +1367,41 @@ class ChatViewModelTest {
         vm.setInput("hello")
         vm.send()
         advanceUntilIdle()
+        val failed = vm.state.value.chat.items.single() as ChatItem.UserMessage
+        assertTrue(failed.failed)
+        assertEquals("hello", failed.text)
+        assertEquals("the text waits on the bubble, not twice in the composer", "", vm.state.value.input)
+        assertEquals(AgentStatus.Idle, vm.state.value.chat.status)
+        assertTrue(b.toasts.single().startsWith("Message not sent"))
+
+        vm.retrySend(failed.id)
+        assertEquals(AgentStatus.Thinking("flair"), vm.state.value.chat.status)
+        advanceUntilIdle()
+        assertEquals(2, b.transport.methods().count { it == "prompt.submit" })
+        assertEquals("hello", b.transport.last("prompt.submit")["text"]!!.jsonPrimitive.content)
+        val sent = vm.state.value.chat.items.single() as ChatItem.UserMessage
+        assertFalse(sent.failed)
+        assertEquals(failed.id, sent.id)
+
+        vm.retrySend(failed.id) // nothing left to retry
+        advanceUntilIdle()
+        assertEquals(2, b.transport.methods().count { it == "prompt.submit" })
+    }
+
+    @Test
+    fun dismissingAFailedSendPutsItBackInTheComposer() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.transport.failNext["prompt.submit"] = null
+        vm.setInput("hello")
+        vm.send()
+        advanceUntilIdle()
+        val id = vm.state.value.chat.items.single().id
+
+        vm.dismissFailed(id)
         assertTrue(vm.state.value.chat.items.isEmpty())
         assertEquals("hello", vm.state.value.input)
-        assertEquals(AgentStatus.Idle, vm.state.value.chat.status)
-
-        vm.send() // retry
-        advanceUntilIdle()
-        assertEquals(listOf("hello"), vm.state.value.chat.items.map { (it as ChatItem.UserMessage).text })
     }
 
     @Test
@@ -1183,8 +1421,10 @@ class ChatViewModelTest {
 
         assertEquals(AgentStatus.Offline, vm.state.value.chat.status)
         assertTrue(vm.state.value.offline)
-        assertTrue(vm.state.value.chat.items.isEmpty())
-        assertEquals("hello", vm.state.value.input)
+        assertTrue((vm.state.value.chat.items.single() as ChatItem.UserMessage).failed)
+        val toasts = b.toasts.size
+        vm.retrySend(vm.state.value.chat.items.single().id)
+        assertEquals(listOf("Not connected to Hermes"), b.toasts.drop(toasts))
     }
 
     @Test
@@ -1547,5 +1787,56 @@ class ChatViewModelTest {
         vm.copySessionId { copied = it }
         assertEquals(live, copied)
         assertEquals(listOf("Session ID copied"), b.toasts)
+    }
+
+    @Test
+    fun copyMessageCopiesTextOrReasoning() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.events.emit(ev("message.start", 1))
+        b.events.emit(ev("reasoning.delta", 2, """{"text":"think first"}"""))
+        b.events.emit(ev("message.delta", 3, """{"text":"the answer"}"""))
+        b.events.emit(ev("message.complete", 4, """{"text":"the answer"}"""))
+        advanceUntilIdle()
+        val id = vm.state.value.chat.items.single().id
+        val copied = mutableListOf<String>()
+
+        vm.showMessageMenu(id)
+        assertEquals(id, vm.state.value.messageMenu)
+        vm.copyMessage(id, reasoning = false) { copied += it }
+        assertNull(vm.state.value.messageMenu)
+        vm.copyMessage(id, reasoning = true) { copied += it }
+        vm.copyMessage("missing", reasoning = false) { copied += it }
+        assertEquals(listOf("the answer", "think first"), copied)
+        assertEquals(listOf("Message copied", "Reasoning copied"), b.toasts)
+    }
+
+    @Test
+    fun notificationShowIsToastedOnceNotOnReplay() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        val notice = ev("notification.show", 5, """{"text":"Stayed on m-1: switching needs confirmation.\nmore","level":"warn","kind":"ttl","key":"model_switch.dropped"}""")
+        b.events.emit(notice)
+        advanceUntilIdle()
+        b.events.emit(notice) // replayed after a reconnect: at the watermark
+        advanceUntilIdle()
+        assertEquals(listOf("Stayed on m-1: switching needs confirmation."), b.toasts)
+        assertEquals(5L, vm.state.value.chat.lastSeq)
+    }
+
+    @Test
+    fun createAndResumeInfoSeedTheMeterAndEffort() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on(
+                "session.resume",
+                obj(resumeJson.replace("\"running\":false", "\"running\":false,\"info\":{\"reasoning_effort\":\"medium\",\"usage\":{\"total\":12345,\"context_percent\":42}}")),
+            )
+        }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        assertEquals("medium", vm.state.value.chat.reasoningEffort)
+        assertEquals("42% ctx · 12.3k tok", vm.state.value.chat.usage?.meter)
     }
 }

@@ -57,6 +57,10 @@ interface ChatBackend {
     suspend fun workspaces(): Result<WorkspacesDto>
     suspend fun renameSession(id: String, title: String): Result<Unit>
     suspend fun archiveSession(id: String): Result<Unit>
+    suspend fun unarchiveSession(id: String): Result<Unit>
+
+    /** Whether stored session [id] is archived (`GET /api/sessions/{id}`). */
+    suspend fun sessionArchived(id: String): Result<Boolean>
     suspend fun deleteSession(id: String): Result<Unit>
 
     /** A `MEDIA:` file, streaming (`/api/files/download`); the caller closes it. */
@@ -99,6 +103,8 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override suspend fun workspaces() = c.repository.workspaces()
     override suspend fun renameSession(id: String, title: String) = c.repository.renameSession(id, title)
     override suspend fun archiveSession(id: String) = c.repository.archiveSession(id, archived = true)
+    override suspend fun unarchiveSession(id: String) = c.repository.archiveSession(id, archived = false)
+    override suspend fun sessionArchived(id: String) = c.repository.sessionArchived(id)
     override suspend fun deleteSession(id: String) = c.repository.deleteSession(id)
     override suspend fun download(path: String) = c.repository.download(path)
     override val fileSaver get() = c.fileSaver
@@ -115,8 +121,40 @@ internal data class Replay(
     val openRequests: List<JsonObject>,
 )
 
+/**
+ * What a `session.compress` came to: [message] for the toast, [storedId] when compaction rotated the session onto a
+ * new stored id, and the [info] snapshot (token counters) when the server sent one.
+ */
+internal data class Compacted(val message: String, val storedId: String?, val info: JsonObject?)
+
 /** Pure helpers for decoding gateway snapshots into frames the reducer understands. */
 internal object ChatSync {
+    /**
+     * Reads a `session.compress` result (live-probed shape, see the v0.5.0 rulings): the summary's `headline` when
+     * present ("Compressed 42 → 12 messages…", or why nothing was removed), else a line from `status`; a lock held
+     * elsewhere (`compressed: false`) or a background run (`status: pending`) report the server's `message`.
+     */
+    fun compacted(result: JsonObject): Compacted {
+        val info = result["info"] as? JsonObject
+        val status = result.string("status")
+        val message = when {
+            (result["compressed"] as? JsonPrimitive)?.contentOrNull == "false" ->
+                result.string("message") ?: "Compaction is already running elsewhere"
+            status == "pending" -> result.string("message") ?: "Compacting in the background"
+            else -> (result["summary"] as? JsonObject)?.string("headline")
+                ?: if (status == "aborted") "Compaction was aborted" else "Context compacted"
+        }
+        return Compacted(message, info?.string("stored_session_id")?.takeIf { it.isNotBlank() }, info)
+    }
+
+    /** The first line of a server notice, trimmed to a toast's length. */
+    fun toastLine(text: String): String {
+        val line = text.trim().lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+        return if (line.length > TOAST_MAX) line.take(TOAST_MAX - 1) + "…" else line
+    }
+
+    private const val TOAST_MAX = 160
+
     /** Card id for a resume's `pending_approval`, which has no server-request id. */
     const val PENDING_PREFIX = "pending-"
 
