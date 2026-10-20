@@ -344,25 +344,27 @@ class HermesApi(
 
     /**
      * The bytes of an `http(s)` image a reply shows (`![alt](url)`), at most [IMAGE_MAX_BYTES]. A [url] on the
-     * server's own origin (scheme, host and port of [baseUrl]) goes through the authed client, so a server-hosted
-     * image gets the bearer; any other goes through [plainClient] tagged [NoAuth], so no credential leaves for a
-     * third party. Non-2xx (401 included: it is that host's verdict, not a sign-in prompt) → [ApiException]; a
-     * body over the cap (by `Content-Length` or as it arrives) → [IOException]; not http(s) → [IllegalArgumentException].
+     * server's own origin ([ImageOrigin.sameOrigin] with [baseUrl]) goes through the authed client, so a
+     * server-hosted image gets the bearer; any other goes through [plainClient] tagged [NoAuth], so no credential
+     * leaves for a third party. Non-2xx (401 included: it is that host's verdict, not a sign-in prompt) →
+     * [ApiException]; a body over the cap (by `Content-Length` or as it arrives) → [ImageTooLargeException]; not
+     * http(s) → [IllegalArgumentException]; anything else is a (transient) [IOException].
      */
     suspend fun fetchImage(url: String): ByteArray {
         val target = url.toHttpUrlOrNull() ?: throw IllegalArgumentException("Not an http(s) URL")
-        val own = baseUrl().toHttpUrlOrNull()
-        val sameOrigin = own != null && own.scheme == target.scheme && own.host == target.host && own.port == target.port
+        val sameOrigin = ImageOrigin.sameOrigin(url, baseUrl())
         val builder = Request.Builder().url(target)
         if (!sameOrigin) builder.tag(NoAuth::class.java, NoAuth())
         val response = (if (sameOrigin) client else plainClient).newCall(builder.build()).await()
-        return withContext(Dispatchers.IO) {
-            response.use {
+        // `use` first: a cancellation at the dispatcher hop would otherwise discard the response unclosed.
+        return response.use {
+            withContext(Dispatchers.IO) {
                 if (!it.isSuccessful) throw ApiException(it.code, "Image unavailable (${it.code})")
                 val body = it.body
-                if (body.contentLength() > IMAGE_MAX_BYTES) throw IOException("Image over ${IMAGE_MAX_BYTES / 1_000_000} MB")
+                val tooLarge = "Image over ${IMAGE_MAX_BYTES / 1_000_000} MB"
+                if (body.contentLength() > IMAGE_MAX_BYTES) throw ImageTooLargeException(tooLarge)
                 val source = body.source()
-                if (source.request(IMAGE_MAX_BYTES + 1)) throw IOException("Image over ${IMAGE_MAX_BYTES / 1_000_000} MB")
+                if (source.request(IMAGE_MAX_BYTES + 1)) throw ImageTooLargeException(tooLarge)
                 source.readByteArray()
             }
         }
@@ -514,7 +516,7 @@ class HermesApi(
 
     companion object {
         /** [fetchImage] reads at most this much; a bigger image is a failure. */
-        const val IMAGE_MAX_BYTES = 8_000_000L
+        internal const val IMAGE_MAX_BYTES = 8_000_000L
 
         private const val SESSION_COOKIE = "hermes_session_at"
         private val DISPOSITION_PARAM = Regex(""";\s*([^=;\s]+)\s*=\s*(\"((?:[^\"\\]|\\.)*)\"|[^;]*)""")

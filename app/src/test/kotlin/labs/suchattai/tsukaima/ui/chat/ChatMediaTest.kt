@@ -10,9 +10,14 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import labs.suchattai.tsukaima.data.api.ApiException
+import labs.suchattai.tsukaima.data.api.ImageTooLargeException
+import labs.suchattai.tsukaima.data.prefs.Settings
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
 import java.lang.reflect.Proxy
@@ -30,8 +35,9 @@ class ChatMediaTest {
         override fun prepareToDraw() = Unit
     }
 
-    /** Everything but [fetchImage] and [decodePreview] is unexpected. */
+    /** Everything but [settings], [fetchImage] and [decodePreview] is unexpected. */
     private class Backend : ChatBackend by unexpected() {
+        override val settings = MutableStateFlow<Settings?>(Settings(serverUrl = "https://hermes.example.com"))
         val fetched = mutableListOf<String>()
         var gate: CompletableDeferred<Unit>? = null
         var result: (String) -> Result<ByteArray> = { Result.success(byteArrayOf(1, 2, 3)) }
@@ -46,49 +52,82 @@ class ChatMediaTest {
         override fun decodePreview(bytes: ByteArray): ImageBitmap? = Bitmap.also { decoded++ }
     }
 
-    private class Harness(scope: TestScope) {
-        val backend = Backend()
+    private class Harness(scope: TestScope, backend: ChatBackend = Backend()) {
         val media = ChatMedia(backend, scope, StandardTestDispatcher(scope.testScheduler), MutableStateFlow(ChatUiState()))
     }
 
-    private val url = "https://example.com/chart.png"
+    private val url = "https://hermes.example.com/api/files/chart.png"
+    private val foreign = "https://tiles.example.org/chart.png"
 
     @Test
     fun imageLoadIsSharedAndCached() = runTest {
-        val h = Harness(this)
-        h.backend.gate = CompletableDeferred()
+        val b = Backend().apply { gate = CompletableDeferred() }
+        val h = Harness(this, b)
         val first = async { h.media.imagePreview(url) }
         val second = async { h.media.imagePreview(url) } // concurrent: shares the fetch
         advanceUntilIdle()
-        h.backend.gate!!.complete(Unit)
+        b.gate!!.complete(Unit)
         advanceUntilIdle()
         assertSame(Bitmap, first.await())
         assertSame(Bitmap, second.await())
         assertSame(Bitmap, h.media.imagePreview(url))
-        assertEquals(listOf(url), h.backend.fetched)
-        assertEquals(1, h.backend.decoded)
+        assertEquals(listOf(url), b.fetched)
+        assertEquals(1, b.decoded)
     }
 
     @Test
     fun imageLoadFailureIsCached() = runTest {
-        val h = Harness(this)
-        h.backend.result = { Result.failure(IOException("connection reset")) }
+        // The server's answer is final: one fetch.
+        val b = Backend().apply { result = { Result.failure(ApiException(404, "gone")) } }
+        val h = Harness(this, b)
         assertNull(h.media.imagePreview(url))
-        assertNull(h.media.imagePreview(url)) // no retry storm: even a network failure stays failed for the session
-        assertEquals(1, h.backend.fetched.size)
-        assertEquals(0, h.backend.decoded)
+        assertNull(h.media.imagePreview(url))
+        assertEquals(1, b.fetched.size)
 
-        // Undecodable bytes are a failure too, and another URL is its own entry.
-        val other = "https://example.com/not-an-image.png"
-        val h2 = Harness(this)
-        h2.backend.result = { Result.success(byteArrayOf(0)) }
-        val undecodable = object : ChatBackend by h2.backend {
+        // Over the cap and undecodable bytes are final too.
+        b.result = { Result.failure(ImageTooLargeException("Image over 8 MB")) }
+        val big = "$url?big"
+        assertNull(h.media.imagePreview(big))
+        assertNull(h.media.imagePreview(big))
+        assertEquals(2, b.fetched.size)
+
+        val inner = Backend()
+        val undecodable = object : ChatBackend by inner {
             override fun decodePreview(bytes: ByteArray): ImageBitmap? = null
         }
-        val media = ChatMedia(undecodable, this, StandardTestDispatcher(testScheduler), MutableStateFlow(ChatUiState()))
-        assertNull(media.imagePreview(other))
-        assertNull(media.imagePreview(other))
-        assertEquals(listOf(other), h2.backend.fetched)
+        val u = Harness(this, undecodable)
+        assertNull(u.media.imagePreview(url))
+        assertNull(u.media.imagePreview(url))
+        assertEquals(1, inner.fetched.size)
+    }
+
+    @Test
+    fun transientFailureIsRetriedLater() = runTest {
+        val b = Backend().apply { result = { Result.failure(IOException("connection reset")) } }
+        val h = Harness(this, b)
+        assertNull(h.media.imagePreview(url))
+        b.result = { Result.success(byteArrayOf(1)) }
+        assertSame(Bitmap, h.media.imagePreview(url))
+        assertEquals(2, b.fetched.size)
+    }
+
+    @Test
+    fun foreignImageLoadsOnlyAfterATap() = runTest {
+        val b = Backend()
+        val h = Harness(this, b)
+        assertTrue(h.media.imageAllowed(url))
+        assertFalse(h.media.imageAllowed(foreign))
+        assertNull(h.media.imagePreview(foreign))
+        assertEquals(emptyList<String>(), b.fetched) // never fetched unasked
+
+        h.media.allowImage(foreign)
+        assertTrue(h.media.imageAllowed(foreign))
+        assertSame(Bitmap, h.media.imagePreview(foreign))
+        assertEquals(listOf(foreign), b.fetched)
+
+        // No server configured yet: nothing is same-origin.
+        b.settings.value = null
+        assertFalse(h.media.imageAllowed(url))
     }
 
     private companion object {

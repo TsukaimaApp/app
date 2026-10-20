@@ -7,8 +7,11 @@ object SpeechText {
     private val fence = Regex("^\\s*(```|~~~)")
     private val media = Regex("^\\s*MEDIA:")
 
-    /** A whole-line `http(s)` image (the chat shows it as a card): nothing to say, not even the alt. */
-    private val imageLine = Regex("^\\s*!\\[[^\\]]*]\\(\\s*<?https?://[^)]*\\)\\s*$")
+    /**
+     * A whole-line `http(s)` image (the chat shows it as a card): nothing to say, not even the alt. The URL may hold
+     * `)` (`…/Foo_(bar))`) and a title may follow it, as in the parser.
+     */
+    private val imageLine = Regex("^\\s*!\\[[^\\]]*]\\(\\s*<?https?://\\S+?>?(?:\\s+\"[^\"]*\")?\\s*\\)\\s*$")
     private val heading = Regex("^\\s{0,3}#{1,6}\\s+")
     private val quote = Regex("^\\s*(?:>\\s?)+")
     private val listPrefix = Regex("^\\s*(?:[-*+]|\\d+[.)])\\s+")

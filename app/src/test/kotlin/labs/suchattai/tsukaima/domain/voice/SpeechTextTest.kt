@@ -12,6 +12,8 @@ class SpeechTextTest {
     @Test fun plainDropsWholeLineImages() {
         val md = "Here is the chart:\n  ![CPU load](https://e.com/cpu.png)  \nLoad peaked at 3. See ![it](https://e.com/x.png) inline."
         assertEquals("Here is the chart:\nLoad peaked at 3. See it inline.", SpeechText.plain(md))
+        val parens = "Map:\n![Foo](https://en.wikipedia.org/wiki/Foo_(bar))\n> ![q](https://e.com/q.png \"Title\")\nEnd."
+        assertEquals("Map:\nEnd.", SpeechText.plain(parens))
     }
 
     @Test fun plainStripsListAndHeadingMarkers() =

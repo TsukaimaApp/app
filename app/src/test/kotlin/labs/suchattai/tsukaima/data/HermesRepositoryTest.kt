@@ -11,6 +11,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import labs.suchattai.tsukaima.data.api.AuthException
 import labs.suchattai.tsukaima.data.api.HermesApi
+import labs.suchattai.tsukaima.data.api.ImageTooLargeException
 import labs.suchattai.tsukaima.data.gateway.GatewayClient
 import labs.suchattai.tsukaima.data.prefs.InMemoryCredentialStore
 import labs.suchattai.tsukaima.data.prefs.Settings
@@ -160,9 +161,9 @@ class HermesRepositoryTest {
             // The 8 MB cap, by Content-Length and by what actually arrives.
             val big = Buffer().write(ByteArray((HermesApi.IMAGE_MAX_BYTES + 1).toInt()))
             foreign.enqueue(MockResponse.Builder().body(big.clone()).build())
-            assertTrue(images.fetchImage(foreign.url("/big.png").toString()).isFailure)
+            assertTrue(images.fetchImage(foreign.url("/big.png").toString()).exceptionOrNull() is ImageTooLargeException)
             foreign.enqueue(MockResponse.Builder().chunkedBody(big, 64 * 1024).build())
-            assertTrue(images.fetchImage(foreign.url("/big-chunked.png").toString()).isFailure)
+            assertTrue(images.fetchImage(foreign.url("/big-chunked.png").toString()).exceptionOrNull() is ImageTooLargeException)
 
             // Exactly at the cap is fine; not http(s) is no fetch at all.
             foreign.enqueue(MockResponse.Builder().body(Buffer().write(ByteArray(HermesApi.IMAGE_MAX_BYTES.toInt()))).build())

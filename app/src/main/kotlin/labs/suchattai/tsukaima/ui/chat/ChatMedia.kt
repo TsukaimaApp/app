@@ -12,8 +12,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import labs.suchattai.tsukaima.data.api.ApiException
+import labs.suchattai.tsukaima.data.api.ImageOrigin
+import labs.suchattai.tsukaima.data.api.ImageTooLargeException
 import labs.suchattai.tsukaima.data.api.userMessage
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 
 enum class MediaKind { Image, Video, Audio, Document, Archive, Other }
 enum class MediaStatus { Downloading, Saved, Failed }
@@ -140,31 +143,51 @@ internal class ChatMedia(
         }
     }
 
+    /** Foreign-origin image URLs the user tapped to load (this chat's lifetime). */
+    private val allowedImages: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
     /**
-     * The decoded image at [url] (a reply's `![alt](url)`), or null when it failed (fetch, the 8 MB cap, or
-     * decoding). Concurrent callers share one fetch; every outcome is cached, a failure too, so a broken image is
-     * not refetched on every recomposition or scroll (no retry storm).
+     * Whether the image at [url] loads by itself: it is on the server's own origin, or the user tapped to load it.
+     * A foreign image waits for a tap: fetching it unasked would let a prompt-injected reply leak data in its URL.
+     */
+    fun imageAllowed(url: String): Boolean =
+        url in allowedImages || ImageOrigin.sameOrigin(url, backend.settings.value?.serverUrl.orEmpty())
+
+    /** The user tapped to load the foreign image at [url]; it loads from now on (see [imageAllowed]). */
+    fun allowImage(url: String) {
+        allowedImages += url
+    }
+
+    /**
+     * The decoded image at [url] (a reply's `![alt](url)`), or null when it is not [imageAllowed] or failed.
+     * Concurrent callers share one fetch. Final failures are cached (the server's answer, over the 8 MB cap, not
+     * http(s), undecodable), so a broken image is not refetched on every recomposition or scroll; a transient
+     * one (connection, timeout) is not, and a later call retries.
      */
     suspend fun imagePreview(url: String): ImageBitmap? {
+        if (!imageAllowed(url)) return null
         if (images.containsKey(url)) return images[url]
         return imageLoading.getOrPut(url) { scope.async { fetchImage(url) } }.await()
     }
 
     private suspend fun fetchImage(url: String): ImageBitmap? {
-        val bitmap = try {
+        try {
             val bytes = backend.fetchImage(url).getOrThrow()
-            withContext(io) { backend.decodePreview(bytes) }
+            val bitmap = withContext(io) { backend.decodePreview(bytes) }
+            images[url] = bitmap
+            return bitmap
         } catch (c: CancellationException) {
-            imageLoading.remove(url)
             throw c
         } catch (e: OutOfMemoryError) {
-            null
+            images[url] = null
+            return null
         } catch (e: Exception) {
-            null
+            val transient = e is IOException && e !is ApiException && e !is ImageTooLargeException
+            if (!transient) images[url] = null
+            return null
+        } finally {
+            imageLoading.remove(url)
         }
-        images[url] = bitmap
-        imageLoading.remove(url)
-        return bitmap
     }
 
     private fun set(path: String, value: MediaState?) = state.update {
@@ -173,7 +196,7 @@ internal class ChatMedia(
 
     private companion object {
         const val PREVIEW_CACHE = 8
-        const val IMAGE_CACHE = 16
+        const val IMAGE_CACHE = 8
 
         /** How long a card shows "Saved" before it is back to idle. */
         const val SAVED_MS = 3_000L

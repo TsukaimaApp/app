@@ -19,6 +19,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -38,6 +40,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.set
+import labs.suchattai.tsukaima.data.api.ImageOrigin
 import labs.suchattai.tsukaima.ui.components.IconName
 import labs.suchattai.tsukaima.ui.components.SkeletonBlock
 import labs.suchattai.tsukaima.ui.components.TsukaimaIcon
@@ -47,8 +50,12 @@ import labs.suchattai.tsukaima.ui.theme.TsukaimaShapes
 import labs.suchattai.tsukaima.ui.theme.TsukaimaType
 import labs.suchattai.tsukaima.ui.theme.tsukaima
 
-/** Where an [ImageCard] is: still loading, shown, or failed (then the alt text stands in). */
+/**
+ * Where an [ImageCard] is: waiting for a tap (a foreign origin), still loading, shown, or failed (then the alt text
+ * stands in).
+ */
 private sealed interface ImageLoad {
+    data object Blocked : ImageLoad
     data object Loading : ImageLoad
     data class Loaded(val bitmap: ImageBitmap) : ImageLoad
     data object Failed : ImageLoad
@@ -58,17 +65,36 @@ private sealed interface ImageLoad {
  * An image a reply shows with a whole-line `![alt](url)`: loaded through [MediaHost.previewImage] and fitted to the
  * width (at most 280dp tall) on the raised surface with a hairline. While it loads a skeleton pulses; when it fails,
  * the [alt] text (or "Image") stands in beside a broken-image icon. A tap opens [url] in the browser.
+ *
+ * An image on another origin than the server's does not load by itself ([MediaHost.imageAllowed]): a
+ * prompt-injected reply could leak data through its URL. It shows the alt and "From <host> — tap to load"; the tap
+ * ([MediaHost.allowImage]) loads it, and from then on it behaves like any other.
  */
 @Composable
 fun ImageCard(alt: String, url: String, host: MediaHost, modifier: Modifier = Modifier) {
-    val load by produceState<ImageLoad>(ImageLoad.Loading, url) {
+    var allowed by remember(url) { mutableStateOf(host.imageAllowed(url)) }
+    val load by produceState<ImageLoad>(if (allowed) ImageLoad.Loading else ImageLoad.Blocked, url, allowed) {
+        if (!allowed) {
+            value = ImageLoad.Blocked
+            return@produceState
+        }
+        value = ImageLoad.Loading
         value = host.previewImage(url)?.let { ImageLoad.Loaded(it) } ?: ImageLoad.Failed
     }
-    ImageCardContent(alt, url, load, modifier)
+    ImageCardContent(alt, url, load, modifier) {
+        host.allowImage(url)
+        allowed = true
+    }
 }
 
 @Composable
-private fun ImageCardContent(alt: String, url: String, load: ImageLoad, modifier: Modifier = Modifier) {
+private fun ImageCardContent(
+    alt: String,
+    url: String,
+    load: ImageLoad,
+    modifier: Modifier = Modifier,
+    onLoad: () -> Unit = {},
+) {
     val colors = MaterialTheme.tsukaima
     val uriHandler = LocalUriHandler.current
     val source = remember { MutableInteractionSource() }
@@ -82,7 +108,16 @@ private fun ImageCardContent(alt: String, url: String, load: ImageLoad, modifier
             .background(colors.surfaceRaised, shape)
             .border(1.dp, colors.hairline, shape)
             .pressWash(source, shape)
-            .clickable(interactionSource = source, indication = null, role = Role.Button, onClickLabel = "Open in browser") {
+            .clickable(
+                interactionSource = source,
+                indication = null,
+                role = Role.Button,
+                onClickLabel = if (load == ImageLoad.Blocked) "Load image" else "Open in browser",
+            ) {
+                if (load == ImageLoad.Blocked) {
+                    onLoad()
+                    return@clickable
+                }
                 try {
                     uriHandler.openUri(url)
                 } catch (e: Exception) {
@@ -94,6 +129,29 @@ private fun ImageCardContent(alt: String, url: String, load: ImageLoad, modifier
         contentAlignment = Alignment.Center,
     ) {
         when (load) {
+            ImageLoad.Blocked -> Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                TsukaimaIcon(IconName.Image, contentDescription = null, size = 20.dp, tint = colors.ink2)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = label,
+                        style = TsukaimaType.ui,
+                        color = colors.ink1,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = "From ${ImageOrigin.host(url) ?: "another site"} — tap to load",
+                        style = TsukaimaType.caption,
+                        color = colors.ink3,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
             ImageLoad.Loading -> SkeletonBlock(Modifier.fillMaxWidth().height(LOADING_HEIGHT), radius = 0.dp)
             is ImageLoad.Loaded -> Image(
                 bitmap = load.bitmap,
@@ -140,6 +198,7 @@ private fun ImageCardPreview(dark: Boolean) = PreviewPage(dark) {
         ImageCardContent("Memory", SampleUrl, ImageLoad.Loading)
         ImageCardContent("Disk usage by mount point", SampleUrl, ImageLoad.Failed)
         ImageCardContent("", SampleUrl, ImageLoad.Failed)
+        ImageCardContent("Satellite view of the site", "https://tiles.example.org/z/12/x.png", ImageLoad.Blocked)
     }
 }
 

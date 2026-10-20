@@ -104,6 +104,8 @@ class ChatActions(
     val onOpenMedia: (String) -> Unit = {},
     val previewMedia: suspend (String) -> ImageBitmap? = { null },
     val previewImage: suspend (String) -> ImageBitmap? = { null },
+    val imageAllowed: (String) -> Boolean = { false },
+    val onAllowImage: (String) -> Unit = {},
     val onApprove: (String) -> Unit = {},
     val onDeny: (String) -> Unit = {},
     val onApproveFor: (id: String, choice: ApprovalChoice) -> Unit = { _, _ -> },
@@ -196,6 +198,8 @@ fun ChatScreen(
             onOpenMedia = vm::openMedia,
             previewMedia = vm::preview,
             previewImage = vm::imagePreview,
+            imageAllowed = vm::imageAllowed,
+            onAllowImage = vm::allowImage,
             onApprove = vm::approve,
             onDeny = vm::deny,
             onApproveFor = vm::answerApproval,
@@ -371,7 +375,12 @@ private fun ChatColumn(
 @Composable
 private fun Transcript(state: ChatUiState, actions: ChatActions, listState: LazyListState) {
     val items = state.chat.items
-    val media = remember(state.mediaState, actions) { MediaHost(state.mediaState, actions.onOpenMedia, actions.previewMedia, actions.previewImage) }
+    val media = remember(state.mediaState, actions) {
+        MediaHost(
+            state.mediaState, actions.onOpenMedia, actions.previewMedia,
+            actions.previewImage, actions.imageAllowed, actions.onAllowImage,
+        )
+    }
     // Follow the bottom while the user is there; a manual scroll up stops following until they come back.
     var follow by rememberSaveable { mutableStateOf(true) }
     LaunchedEffect(listState) {

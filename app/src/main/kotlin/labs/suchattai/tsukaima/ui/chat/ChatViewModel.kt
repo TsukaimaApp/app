@@ -371,6 +371,12 @@ class ChatViewModel(
     /** A reply's `![alt](url)` image, decoded (null when it failed; cached either way). */
     suspend fun imagePreview(url: String): ImageBitmap? = withContext(dispatcher) { media.imagePreview(url) }
 
+    /** Whether a reply's image at [url] loads by itself (server origin, or tapped to load); see [ChatMedia.imageAllowed]. */
+    fun imageAllowed(url: String): Boolean = media.imageAllowed(url)
+
+    /** A tap on a foreign image's "tap to load" card. */
+    fun allowImage(url: String) = media.allowImage(url)
+
     /** The live session id; opens (creates or resumes) the session first and waits for it when there is none. */
     private suspend fun liveSession(): String? {
         chat.liveSessionId?.let { return it }

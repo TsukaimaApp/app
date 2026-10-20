@@ -82,7 +82,12 @@ fun VoiceScreen(
 ) {
     val colors = MaterialTheme.tsukaima
     val items = state.chat.items.drop(voice.startIndex)
-    val media = remember(state.mediaState, actions) { MediaHost(state.mediaState, actions.onOpenMedia, actions.previewMedia, actions.previewImage) }
+    val media = remember(state.mediaState, actions) {
+        MediaHost(
+            state.mediaState, actions.onOpenMedia, actions.previewMedia,
+            actions.previewImage, actions.imageAllowed, actions.onAllowImage,
+        )
+    }
     val scroll = rememberScrollState()
     // Every new item, revealed word and partial result grows the column: follow its bottom.
     LaunchedEffect(scroll) { snapshotFlow { scroll.maxValue }.collectLatest { scroll.animateScrollTo(it) } }
