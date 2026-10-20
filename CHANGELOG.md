@@ -3,6 +3,12 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.7.1 — 2026-10-20 (versionCode 17)
+
+### Fixed
+- Replies render GFM tables (scrollable when wide), headings, numbered and nested lists, block quotes, horizontal
+  rules, links (tappable) and strikethrough; previously these showed as raw markdown.
+
 ## 0.7.0 — 2026-10-20 (versionCode 16)
 
 ### Added
