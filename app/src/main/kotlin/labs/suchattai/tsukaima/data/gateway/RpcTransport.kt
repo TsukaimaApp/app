@@ -1,0 +1,24 @@
+package labs.suchattai.tsukaima.data.gateway
+
+import kotlinx.serialization.json.JsonObject
+import java.io.IOException
+
+/** What chat features need from the gateway connection: client→server requests and answers to server requests. */
+interface RpcTransport {
+    /**
+     * Sends [method] and suspends until the matching response.
+     * @throws RpcException the server answered with an error frame.
+     * @throws GatewayClosedException the connection closed (or was never wanted) while the request was pending.
+     * @throws IOException (plain, not a subclass) when no response arrives within the implementation's timeout.
+     */
+    suspend fun request(method: String, params: JsonObject = JsonObject(emptyMap())): JsonObject
+
+    /** Answers a server→client request ([Frame.ServerRequest]) with [result], echoing its [id]. */
+    fun respond(id: String, result: JsonObject)
+}
+
+/** The server answered a request with a JSON-RPC error frame. */
+class RpcException(val code: Int, message: String) : IOException(message)
+
+/** The socket closed, or the client was disconnected, while a request was pending. */
+class GatewayClosedException : IOException("gateway closed")
