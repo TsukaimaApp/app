@@ -3,6 +3,48 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.5.1 — 2026-10-20 (versionCode 7)
+
+The Tier 3 batch (release hygiene) of the completeness pass, plus the deferred S-size minors. No new features.
+
+### Security
+- **Release signing from a local keystore**: `assembleRelease` signs with `.local/tsukaima-release.jks` when
+  `.local/keystore.properties` exists, else (CI) with the debug key and a build warning. `*.jks`, `*.keystore` and
+  `keystore.properties` are git-ignored. The first release-key install over a debug-signed build needs an uninstall.
+- **Cleartext guard**: plain `http://` is refused, before anything is sent, for hosts outside loopback, RFC 1918,
+  100.64/10, `*.ts.net` and single-label names (`CleartextGuard` on every request and redirect hop; the WebSocket
+  does not connect). Settings and first run say so inline on Test connection and Sign in. Before, the bearer token
+  went to any http host.
+- `network_security_config.xml`: cleartext stays permitted (the guard decides per host), trust anchors are the
+  system CAs only (user-installed CAs are no longer trusted).
+- `data_extraction_rules.xml` / `full_backup_content.xml` exclude everything (`allowBackup` stays false).
+- The bearer and the origin it is bound to are read in one consistent snapshot.
+
+### Changed
+- With every notification kind switched off, the app no longer keeps the foreground service (and the socket)
+  running in the background; switching a kind back on hands off again.
+- `vault.save_login` is declined with 4404 (another attached window may still answer) and `vault.code` answered
+  "no code entered", instead of JSON-RPC "method not found".
+- "Simulate Hermes unreachable" is in debug builds only.
+- Approval card: Deny is a secondary button with danger ink, as designed. The attachment chip's remove button is
+  a 44 dp target. The onboarding wisp uses the design's dark asset in dark mode, untinted at 80 %.
+- Pairing Approve / Revoke toast their outcome and ignore a double tap (Settings and Status).
+- The Status offline card names the host; the stop confirmation lists platforms as "A, B and C".
+- The Logs filter chips wrap on narrow screens.
+- Markdown: a one-line ```` ```x``` ```` is inline code (it used to swallow the rest of the message as a code
+  block); a 4-backtick fence closes, and can hold a ```` ``` ```` fence; inline code spans use matching backtick runs.
+- Code block "Copied" restarts its 1.5 s on a re-tap.
+- Cron schedules are validated per field (`+5 * * * *` is refused), still five fields.
+- JSON-RPC: a pathologically deep frame is dropped instead of failing the connection; a string `seq` is ignored; an
+  `"error": null` response without a `result` is an error, not an empty success. `session.most_recent` with a
+  non-string id is "none". A quoted session cookie value is unquoted.
+- The e2e smoke requires a new `session.info` within 10 s of `config.set` (it used to pass vacuously).
+
+### Removed
+- Dead code: `GatewaySession.list` / `SessionSummary`, the placeholder screen, unused `material3-adaptive` entries;
+  the file-wide deprecation suppression in `CredentialStore.kt` (now on the one call that needs it).
+- Lint: 38 → 18 warnings, all of them dependency-version notices.
+
 ## 0.5.0 — 2026-10-20 (versionCode 6)
 
 The Tier 2 batch of the completeness pass ([`docs/superpowers/2026-10-20-completeness-pass.md`](docs/superpowers/2026-10-20-completeness-pass.md)).

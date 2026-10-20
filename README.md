@@ -46,8 +46,21 @@ export ANDROID_HOME=$HOME/android-sdk JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd
 ./gradlew :app:assembleRelease                    # app/build/outputs/apk/release/app-release.apk
 ```
 
-The release build is minified (R8) and currently signed with the debug keystore so it is installable.
-Replace that with a real keystore before distribution.
+The release build is minified (R8).
+
+### Release signing
+
+`assembleRelease` signs with the release key when `.local/keystore.properties` exists (`storeFile`, relative to the
+repo root, `storePassword`, `keyAlias`, `keyPassword`); the keystore itself lives next to it in `.local/` (here
+`.local/tsukaima-release.jks`, PKCS12, `CN=Tsukaima, O=suchattai-labs`). Neither is ever committed: `.local/`,
+`*.jks`, `*.keystore` and `keystore.properties` are git-ignored, so keep a backup of the keystore elsewhere (losing
+it means no further updates over an installed build). Without the properties file (CI, a fresh clone) the build
+logs a warning and signs with the debug keystore; CI's `tsukaima-release-debugsigned` artifact is that build.
+Check a build with `apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk`.
+
+Android refuses an update signed by a different key, so the first install of a release-key build over a
+debug-signed one (any build before 0.5.1, or a CI artifact) needs an uninstall first (`adb uninstall
+labs.suchattai.tsukaima`), which also clears the stored sign-in.
 
 Server-side smoke test (uses `.local/hermes-test-creds.env`; run against a test Hermes only):
 
@@ -62,9 +75,17 @@ gives it) and the dashboard basic-auth username and password. The app logs in, s
 on-device, and re-logs in automatically when the session expires (see the tailnet note below for which hosts).
 Settings → Sign out forgets the password and token, disconnects, clears notifications and returns to first run.
 
-Tailnet note: plain `http://` works (the tailnet is WireGuard-encrypted), but automatic re-login, which
-replays the stored password, over `http://` is allowed only for loopback, RFC 1918, Tailscale (100.64/10),
-`*.ts.net` and single-label hosts. For any other host use `https://`.
+### Cleartext policy
+
+Plain `http://` works for hosts that are local or private: loopback, RFC 1918, Tailscale (100.64/10), `*.ts.net`
+and single-label names (`http://hermes:9119`); the tailnet is WireGuard-encrypted. Any other host must use
+`https://`: the app refuses plain http to it before anything is sent (no bearer token, no password), with "Plain
+http is only allowed for LAN, tailnet and single-label hosts — use https", shown inline on Test connection and
+Sign in. The rule is enforced in code (`CleartextGuard` on every HTTP request and redirect hop, and before the
+WebSocket connects) because Android's network security config can allowlist domains but not address ranges; that
+config (`res/xml/network_security_config.xml`) keeps cleartext permitted and trusts only the system CAs, so a
+user-installed CA cannot intercept https (a reverse proxy with a private CA needs a publicly trusted certificate,
+e.g. Tailscale Serve's).
 
 ## Permissions
 

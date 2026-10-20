@@ -120,7 +120,12 @@ reply; when true it is ignored), `approval.cancelled`,
   - `secret {env_var, prompt, metadata?}` — a value for a named env var (skills / setup flows); a non-empty value
     is saved to the profile's `.env`.
   - `vault.unlock_prompt {backend, display_name}` — master password for an external password manager.
-  - `vault.save_login` / `vault.code` exist too; the app answers them "method not found".
+  - `vault.save_login` / `vault.code` exist too. Since 0.5.1 the app declines `vault.save_login` with 4404 (a desktop
+    window attached to the session can still answer; once every client declined, Hermes resolves it with a
+    `{"success":false}` refusal, which the vault reads as "not saved"), and answers `vault.code` `{"value":""}` ("no
+    code entered"). Not 4404 for the code: with the phone as the only client, Hermes would pass the refusal JSON to
+    the browser tool as the one-time code (`tui_gateway/server_requests.py` `_decline`, `server._ask`,
+    `tools/browser_vault_tool.py`).
 - `session.resume` while a turn runs (`running: true`, `status: "working"`) returns `messages` up to the running
   turn's user row only; the partial reply is `inflight {assistant, streaming, user, …}`, where `assistant` is every
   `message.delta` of the turn so far (`tui_gateway/session_history.py` `_append_inflight_delta`). Verified live
