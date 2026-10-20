@@ -33,6 +33,15 @@ class ChatAttachmentsTest {
         val errors = mutableMapOf<String, RpcException>()
         var gate: CompletableDeferred<Unit>? = null
 
+        /** 1-based calls of `image.detach` that fail. */
+        val failingDetaches = mutableSetOf<Int>()
+        val timeouts = mutableMapOf<String, Long>()
+
+        override suspend fun requestSlow(method: String, params: JsonObject, timeoutMs: Long): JsonObject {
+            timeouts[method] = timeoutMs
+            return request(method, params)
+        }
+
         fun last(method: String) = calls.last { it.first == method }.second
         fun count(method: String) = calls.count { it.first == method }
 
@@ -40,6 +49,7 @@ class ChatAttachmentsTest {
             calls += method to params
             if (method == "pdf.attach") gate?.await()
             errors.remove(method)?.let { throw it }
+            if (method == "image.detach" && count(method) in failingDetaches) throw RpcException(4040, "not queued")
             return results[method] ?: JsonObject(emptyMap())
         }
 
@@ -99,11 +109,40 @@ class ChatAttachmentsTest {
         assertEquals(live, chip.liveSessionId)
         assertNull("the pages ride as queued images", chip.refText)
         assertTrue(chip.queued)
+        assertEquals("rendering needs longer than the default deadline", GatewaySession.PDF_TIMEOUT_MS, h.transport.timeouts["pdf.attach"])
+    }
+
+    @Test
+    fun pageCountFallsBackToThePagePaths() = runTest {
+        val h = Harness(this, live)
+        h.transport.results["pdf.attach"] = obj(pdfResult(2).toString().replace("\"pages_attached\":2", "\"pages_attached\":0"))
+        h.attachments.attach(listOf(pdf))
+        advanceUntilIdle()
+        assertEquals(2, h.chips.single().pages)
+        assertEquals(AttachmentStatus.Ready, h.chips.single().status)
+    }
+
+    @Test
+    fun aFailedPageDetachStillDetachesTheRest() = runTest {
+        val h = Harness(this, live)
+        h.transport.results["pdf.attach"] = pdfResult(4)
+        h.transport.failingDetaches += 2
+        h.attachments.attach(listOf(pdf))
+        advanceUntilIdle()
+
+        h.attachments.remove(h.chips.single().localId)
+        advanceUntilIdle()
+        assertEquals(
+            (1..4).map { "/h/images/pdf_p$it.png" },
+            h.transport.calls.filter { it.first == "image.detach" }.map { it.second["path"]!!.jsonPrimitive.content },
+        )
+        assertEquals(listOf("Couldn’t remove 1 page of report.pdf"), h.toasts)
     }
 
     @Test
     fun pdfKindFromMimeOrName() {
         assertEquals(AttachmentKind.Pdf, Attachments.kindFor("application/pdf", "x"))
+        assertEquals(AttachmentKind.Pdf, Attachments.kindFor("application/x-pdf", "x"))
         assertEquals(AttachmentKind.Pdf, Attachments.kindFor(null, "Scan.PDF"))
         assertEquals(AttachmentKind.Pdf, Attachments.kindFor("application/octet-stream", "scan.pdf"))
         assertEquals(AttachmentKind.File, Attachments.kindFor("text/plain", "notes.pdf"))
@@ -114,7 +153,7 @@ class ChatAttachmentsTest {
     @Test
     fun pdfPageCapNote() {
         val stock = "[User attached PDF: report.pdf (25 page(s))]"
-        assertEquals("Only the first 25 pages", Attachments.pdfPageCapNote(Attachments.PDF_MAX_PAGES, stock))
+        assertEquals("First 25 pages attached", Attachments.pdfPageCapNote(Attachments.PDF_MAX_PAGES, stock))
         assertNull(Attachments.pdfPageCapNote(3, "[User attached PDF: report.pdf (3 page(s))]"))
         assertNull(Attachments.pdfPageCapNote(3, null))
         assertNull(Attachments.pdfPageCapNote(3, " "))
@@ -129,7 +168,7 @@ class ChatAttachmentsTest {
         h.transport.results["pdf.attach"] = pdfResult(Attachments.PDF_MAX_PAGES)
         h.attachments.attach(listOf(pdf))
         advanceUntilIdle()
-        assertEquals("Only the first 25 pages", h.chips.single().note)
+        assertEquals("First 25 pages attached", h.chips.single().note)
     }
 
     @Test

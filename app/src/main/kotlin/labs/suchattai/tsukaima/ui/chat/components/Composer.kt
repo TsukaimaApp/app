@@ -314,7 +314,7 @@ private fun ComposerPreview(dark: Boolean) = PreviewPage(dark) {
             PendingAttachment("p1", "invoice.pdf", AttachmentKind.Pdf, 240_000, AttachmentStatus.Ready, pages = 2),
             PendingAttachment(
                 "p2", "annual_report_2025.pdf", AttachmentKind.Pdf, 8_400_000, AttachmentStatus.Ready,
-                pages = 25, note = "Only the first 25 pages",
+                pages = 25, note = "First 25 pages attached",
             ),
         ),
     )

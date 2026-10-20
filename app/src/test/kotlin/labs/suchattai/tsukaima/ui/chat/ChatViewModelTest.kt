@@ -1426,6 +1426,62 @@ class ChatViewModelTest {
         assertEquals(2, b.transport.methods().count { it == "prompt.submit" })
     }
 
+    private val pdf = FakeFile("report.pdf", "application/pdf", "%PDF-1.7\n".toByteArray())
+    private val pdfAttached = """{"attached":true,"filename":"report.pdf","pages_attached":1,
+        "pages":[{"path":"/h/images/pdf_p1.png","page":1,"width":1,"height":1}],"count":1,
+        "text":"[User attached PDF: report.pdf (1 page(s))]"}"""
+
+    @Test
+    fun aPdfSendCountsAsQueuedImages() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("pdf.attach", obj(pdfAttached))
+            transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":5}"""))
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.attach(listOf(pdf))
+        advanceUntilIdle()
+        vm.send()
+        advanceUntilIdle()
+        assertEquals("See the attached PDF.", b.transport.last("prompt.submit")["text"]!!.jsonPrimitive.content)
+        assertTrue((vm.state.value.chat.items.single() as ChatItem.UserMessage).imagesSent)
+        b.events.emit(ev("message.start", 1))
+        b.events.emit(ev("message.complete", 2, """{"text":"A report."}"""))
+        advanceUntilIdle()
+
+        // The server consumed the pages: Regenerate cannot replay them.
+        vm.regenerate(vm.state.value.chat.items.last().id)
+        advanceUntilIdle()
+        assertEquals(1, b.transport.methods().count { it == "prompt.submit" })
+    }
+
+    @Test
+    fun aFailedPdfSendIsNotRetriedIntoANewLiveSession() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("pdf.attach", obj(pdfAttached)) }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.attach(listOf(pdf))
+        advanceUntilIdle()
+        b.transport.failNext["prompt.submit"] = null
+        vm.send()
+        advanceUntilIdle()
+        val failed = vm.state.value.chat.items.single() as ChatItem.UserMessage
+        assertTrue(failed.failed)
+
+        b.transport.on("session.resume", obj(resumeJson.replace(live, "beef0001")))
+        b.transport.on("session.events.since", obj("""{"events":[],"latest_seq":0,"truncated":false,"open_requests":[]}"""))
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+        assertEquals("beef0001", vm.state.value.chat.liveSessionId)
+
+        vm.retrySend(failed.id)
+        advanceUntilIdle()
+        assertEquals("the pages were left in the old live session", 1, b.transport.methods().count { it == "prompt.submit" })
+        assertEquals("Attach the images again, then send", b.toasts.last())
+    }
+
     @Test
     fun failedSendSurvivesAReconnectThatRebuildsTheTranscript() = runTest(dispatcher) {
         val b = backend()

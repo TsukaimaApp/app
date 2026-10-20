@@ -86,7 +86,7 @@ object Attachments {
         val type = mime?.lowercase()?.takeUnless { it.isBlank() || it == "application/octet-stream" }
         return when {
             type in IMAGE_TYPES -> AttachmentKind.Image
-            type == "application/pdf" -> AttachmentKind.Pdf
+            type == "application/pdf" || type == "application/x-pdf" -> AttachmentKind.Pdf
             type == null && name.lowercase().endsWith(".pdf") -> AttachmentKind.Pdf
             else -> AttachmentKind.File
         }
@@ -99,11 +99,11 @@ object Attachments {
 
     /**
      * The chip's second line for a `pdf.attach` result, or null: at the [PDF_MAX_PAGES] cap the server silently
-     * drops the rest of the document, so say so; otherwise the server's [text] when it is more than its stock
+     * drops any further pages (it does not report the total), so say how many went; otherwise the server's [text] when it is more than its stock
      * `[User attached PDF: name (N page(s))]` line.
      */
     fun pdfPageCapNote(pagesAttached: Int, text: String?): String? {
-        if (pagesAttached >= PDF_MAX_PAGES) return "Only the first $PDF_MAX_PAGES pages"
+        if (pagesAttached >= PDF_MAX_PAGES) return "First $PDF_MAX_PAGES pages attached"
         val t = text?.trim().orEmpty()
         return t.takeIf { it.isNotEmpty() && !STOCK_PDF_TEXT.matches(it) }
     }
@@ -241,12 +241,23 @@ internal class ChatAttachments(
         val paths = if (chip.kind == AttachmentKind.Pdf) chip.pagePaths else listOfNotNull(chip.serverPath)
         if (paths.isEmpty()) return
         scope.launch {
-            try {
-                paths.forEach { session.detachImage(live, it) }
-            } catch (c: CancellationException) {
-                throw c
-            } catch (e: Exception) {
-                backend.toast("Couldn’t remove ${chip.name}: ${e.message ?: "gateway error"}")
+            // Every page is attempted: one that stays queued would ride along with the next turn.
+            var error: Exception? = null
+            var failed = 0
+            for (path in paths) {
+                try {
+                    session.detachImage(live, path)
+                } catch (c: CancellationException) {
+                    throw c
+                } catch (e: Exception) {
+                    failed++
+                    error = error ?: e
+                }
+            }
+            when {
+                failed == 0 -> Unit
+                chip.kind == AttachmentKind.Pdf -> backend.toast("Couldn’t remove ${Attachments.pageCount(failed)} of ${chip.name}")
+                else -> backend.toast("Couldn’t remove ${chip.name}: ${error?.message ?: "gateway error"}")
             }
         }
     }
