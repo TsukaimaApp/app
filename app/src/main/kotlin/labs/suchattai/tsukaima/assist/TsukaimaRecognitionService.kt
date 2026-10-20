@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
 import android.os.RemoteException
 import android.speech.RecognitionListener
 import android.speech.RecognitionService
@@ -25,8 +26,9 @@ import labs.suchattai.tsukaima.voice.systemRecognizer
  * [SpeechRecognizer.ERROR_CLIENT]. Voice mode itself never uses this service
  * ([labs.suchattai.tsukaima.voice.AndroidSpeechInput] skips it); it is not selectable as the default. Recognised
  * text is never logged. Only callers holding `RECORD_AUDIO` are served (the manifest permission plus a per-request
- * uid check answering [SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS]), because the relay records under
- * Tsukaima's own microphone grant. Stop and cancel from any callback but the current request's are ignored.
+ * `checkPermission` on the caller's uid, which package visibility does not filter, answering
+ * [SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS] before any live delegate is touched), because the relay records
+ * under Tsukaima's own microphone grant. Stop and cancel from any callback but the current request's are ignored.
  */
 class TsukaimaRecognitionService : RecognitionService() {
     private val main = Handler(Looper.getMainLooper())
@@ -36,13 +38,19 @@ class TsukaimaRecognitionService : RecognitionService() {
     private var client: Callback? = null
 
     override fun onStartListening(recognizerIntent: Intent?, listener: Callback) = onMain {
-        release()
         val uid = listener.callingUid
-        if (!mayRecord(uid)) {
+        val granted = checkPermission(Manifest.permission.RECORD_AUDIO, Process.myPid(), uid)
+        if (granted != PackageManager.PERMISSION_GRANTED) {
             Log.w(TAG, "Recognition refused: uid $uid lacks RECORD_AUDIO")
-            relay(listener) { error(SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) }
+            // Not relay(): a refused caller's dead callback must not release the live delegate either.
+            try {
+                listener.error(SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS)
+            } catch (_: RemoteException) {
+                // The refused caller is gone; nothing to tell it.
+            }
             return@onMain
         }
+        release()
         val target = systemRecognizer(this)
         if (target == null || target.packageName == packageName) {
             relay(listener) { error(SpeechRecognizer.ERROR_CLIENT) }
@@ -108,15 +116,6 @@ class TsukaimaRecognitionService : RecognitionService() {
         client = null
         current.cancel()
         current.destroy()
-    }
-
-    /** True when every package sharing [uid] holds `RECORD_AUDIO` (the system and this app pass). */
-    private fun mayRecord(uid: Int): Boolean {
-        val packages = packageManager.getPackagesForUid(uid)
-        if (packages.isNullOrEmpty()) return false
-        return packages.all {
-            packageManager.checkPermission(Manifest.permission.RECORD_AUDIO, it) == PackageManager.PERMISSION_GRANTED
-        }
     }
 
     private fun onMain(block: () -> Unit) {
