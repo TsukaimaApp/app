@@ -62,6 +62,8 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        // Robolectric Compose UI tests (ui/*UiTest) read the merged resources and manifest.
+        unitTests.isIncludeAndroidResources = true
     }
 }
 
@@ -88,11 +90,16 @@ dependencies {
     implementation(libs.androidx.security.crypto)
     implementation(libs.okhttp)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    // The empty ComponentActivity that createComposeRule() launches (debug only; the release APK never has it).
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
     testImplementation(libs.okhttp.mockwebserver3)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.robolectric)
 }
 
 // Reproduce a small CI runner locally: TSUKAIMA_TEST_CPUS=2 makes the test JVM report that many processors

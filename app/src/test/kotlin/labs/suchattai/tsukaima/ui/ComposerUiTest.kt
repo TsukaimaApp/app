@@ -1,0 +1,42 @@
+package labs.suchattai.tsukaima.ui
+
+import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertWidthIsAtLeast
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
+import labs.suchattai.tsukaima.ui.chat.components.Composer
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+class ComposerUiTest : ComposeUiTest() {
+
+    @Test
+    fun `an empty composer with voice shows a 44dp mic labelled Voice`() {
+        var voiceTaps = 0
+        setThemed { Composer("", {}, {}, {}, enabled = true, onVoice = { voiceTaps++ }) }
+
+        compose.onNodeWithContentDescription("Voice")
+            .assertIsEnabled()
+            .assertWidthIsAtLeast(44.dp)
+            .assertHeightIsAtLeast(44.dp)
+            .performClick()
+        compose.onNodeWithContentDescription("Send").assertDoesNotExist()
+        assertEquals(1, voiceTaps)
+    }
+
+    @Test
+    fun `typed text turns the mic into a 44dp Send`() {
+        var sends = 0
+        setThemed { Composer("Restart the agent", {}, { sends++ }, {}, enabled = true, onVoice = {}) }
+
+        compose.onNodeWithContentDescription("Send")
+            .assertIsEnabled()
+            .assertWidthIsAtLeast(44.dp)
+            .assertHeightIsAtLeast(44.dp)
+            .performClick()
+        compose.onNodeWithContentDescription("Voice").assertDoesNotExist()
+        assertEquals(1, sends)
+    }
+}
