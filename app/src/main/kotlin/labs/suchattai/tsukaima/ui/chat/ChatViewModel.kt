@@ -270,7 +270,7 @@ class ChatViewModel(
         _state.update {
             val chat = ChatReducer.onSubmitted(
                 it.chat, text, localId, flair, sent.map(PendingAttachment::name),
-                promptText = Attachments.promptText(text, sent), imagesSent = sent.any { a -> a.kind == AttachmentKind.Image },
+                promptText = Attachments.promptText(text, sent), imagesSent = sent.any { a -> a.queued },
             )
             if (fromComposer) it.copy(input = "", chat = chat) else it.copy(chat = chat)
         }
@@ -311,7 +311,7 @@ class ChatViewModel(
         }
         if (!_state.value.writable) return backend.toast("Not connected to Hermes")
         val live = chat.liveSessionId ?: return backend.toast("Still connecting to Hermes")
-        if (failed.attachments.any { it.kind == AttachmentKind.Image && it.liveSessionId != live }) {
+        if (failed.attachments.any { it.queued && it.liveSessionId != live }) {
             dismissFailed(localId)
             return backend.toast("Attach the images again, then send")
         }

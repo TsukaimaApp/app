@@ -221,20 +221,45 @@ private fun AttachmentChip(a: PendingAttachment, onRemove: () -> Unit, onRetry: 
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             TsukaimaIcon(
-                if (failed) IconName.Refresh else if (a.kind == AttachmentKind.Image) IconName.Image else IconName.AttachFile,
+                when {
+                    failed -> IconName.Refresh
+                    a.kind == AttachmentKind.Image -> IconName.Image
+                    a.kind == AttachmentKind.Pdf -> IconName.PictureAsPdf
+                    else -> IconName.AttachFile
+                },
                 contentDescription = null,
                 size = 16.dp,
                 tint = ink,
             )
-            Text(
-                text = a.name,
-                style = TsukaimaType.caption,
-                color = if (failed) colors.danger else colors.ink1,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 160.dp),
-            )
-            Text(Attachments.humanSize(a.sizeBytes), style = TsukaimaType.caption, color = ink)
+            // A PDF that landed shows its page count (and the server's note, e.g. the page cap, under it).
+            val pdfReady = a.kind == AttachmentKind.Pdf && a.status == AttachmentStatus.Ready
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = a.name,
+                        style = TsukaimaType.caption,
+                        color = if (failed) colors.danger else colors.ink1,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 160.dp),
+                    )
+                    Text(
+                        if (pdfReady) Attachments.pageCount(a.pages) else Attachments.humanSize(a.sizeBytes),
+                        style = TsukaimaType.caption,
+                        color = ink,
+                    )
+                }
+                if (pdfReady && a.note != null) {
+                    Text(
+                        a.note,
+                        style = TsukaimaType.caption,
+                        color = ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 220.dp),
+                    )
+                }
+            }
         }
         Box(
             modifier = Modifier
@@ -280,7 +305,17 @@ private fun ComposerPreview(dark: Boolean) = PreviewPage(dark) {
         attachments = listOf(
             PendingAttachment("a1", "notes.txt", AttachmentKind.File, 2_048, AttachmentStatus.Ready, refText = "@file:notes.txt"),
             PendingAttachment("a2", "screenshot_2026-10-20.png", AttachmentKind.Image, 1_400_000, AttachmentStatus.Uploading),
-            PendingAttachment("a3", "report.pdf", AttachmentKind.File, 9_000_000, AttachmentStatus.Failed),
+            PendingAttachment("a3", "report.pdf", AttachmentKind.Pdf, 9_000_000, AttachmentStatus.Failed),
+        ),
+    )
+    Composer(
+        "Summarize these.", {}, {}, {}, enabled = true,
+        attachments = listOf(
+            PendingAttachment("p1", "invoice.pdf", AttachmentKind.Pdf, 240_000, AttachmentStatus.Ready, pages = 2),
+            PendingAttachment(
+                "p2", "annual_report_2025.pdf", AttachmentKind.Pdf, 8_400_000, AttachmentStatus.Ready,
+                pages = 25, note = "Only the first 25 pages",
+            ),
         ),
     )
 }

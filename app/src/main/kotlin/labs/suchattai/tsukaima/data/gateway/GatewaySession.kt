@@ -197,6 +197,18 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
             put("filename", filename)
         }))
 
+    /**
+     * Attaches a PDF (raw base64, no `data:` prefix) by having the server render its pages to images and queue
+     * them for the next turn (`pdf.attach`, at most 25 pages per call). An unreadable PDF answers an RPC error.
+     * Rendering may take up to the server's 120 s `pdftoppm` limit, so the deadline is [PDF_TIMEOUT_MS].
+     */
+    suspend fun attachPdf(sessionId: String, contentBase64: String, filename: String): PdfAttached =
+        decode("pdf.attach", rpc("pdf.attach", buildJsonObject {
+            put("session_id", sessionId)
+            put("content_base64", contentBase64)
+            put("filename", filename)
+        }, PDF_TIMEOUT_MS))
+
     /** Drops a queued image ([path] as `image.attach_bytes` returned it) before the next turn. */
     suspend fun detachImage(sessionId: String, path: String) {
         rpc("image.detach", buildJsonObject {
@@ -267,6 +279,9 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
 
         /** `compression.context_total_ceiling_seconds` (600 s by default) plus a minute of slack. */
         const val COMPRESS_TIMEOUT_MS = 660_000L
+
+        /** `pdf.attach` renders pages with `pdftoppm`, which the server allows 120 s; plus upload and queueing. */
+        const val PDF_TIMEOUT_MS = 180_000L
         private const val DEFAULT_PROFILE = "default"
     }
 }

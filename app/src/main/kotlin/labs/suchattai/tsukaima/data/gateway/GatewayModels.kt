@@ -70,6 +70,28 @@ data class ImageAttached(
     val message: String? = null,
 )
 
+/** One rendered page of a `pdf.attach` result; [path] is what `image.detach` takes. */
+@Serializable
+data class PdfPage(val path: String = "", val page: Int = 0, val width: Int = 0, val height: Int = 0)
+
+/**
+ * `pdf.attach` result: the PDF's pages are rendered to PNGs and queued as images for the next turn. [count] is
+ * the session's whole image queue; [text] is the server's line about the attach (normally
+ * `[User attached PDF: name (N page(s))]`).
+ */
+@Serializable
+data class PdfAttached(
+    val attached: Boolean = false,
+    val filename: String = "",
+    @SerialName("pages_attached") val pagesAttached: Int = 0,
+    val pages: List<PdfPage> = emptyList(),
+    val count: Int = 0,
+    val text: String? = null,
+) {
+    /** The queued page images, in page order. */
+    val pagePaths: List<String> get() = pages.map(PdfPage::path).filter(String::isNotBlank)
+}
+
 /**
  * `config.set key=model` result. [warning] is advice to show (e.g. the context-compression preflight);
  * [confirmRequired] means nothing switched yet and [confirmMessage] says why; [deferred] means a turn is running

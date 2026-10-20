@@ -15,13 +15,15 @@ import java.io.IOException
 import java.io.InputStream
 import java.util.Base64
 
-enum class AttachmentKind { Image, File }
+/** [Pdf] pages are rendered by the server and queued like images; [File] lands in the workspace. */
+enum class AttachmentKind { Image, File, Pdf }
 enum class AttachmentStatus { Uploading, Ready, Failed }
 
 /**
  * A picked file on its way into the session. Images are queued server-side for the next turn ([serverPath] is
- * what `image.detach` takes, in the live session [liveSessionId] that holds the queue); files land in the
- * workspace and the prompt carries their [refText] (`@file:…`).
+ * what `image.detach` takes, in the live session [liveSessionId] that holds the queue); a PDF's [pages] are
+ * queued the same way, one image per page ([pagePaths]), with the server's [note] (e.g. the page cap); files land
+ * in the workspace and the prompt carries their [refText] (`@file:…`).
  */
 data class PendingAttachment(
     val localId: String,
@@ -32,7 +34,13 @@ data class PendingAttachment(
     val serverPath: String? = null,
     val refText: String? = null,
     val liveSessionId: String? = null,
-)
+    val pages: Int = 0,
+    val note: String? = null,
+    val pagePaths: List<String> = emptyList(),
+) {
+    /** Queued on the server for the next turn (image or PDF pages), so tied to [liveSessionId]. */
+    val queued: Boolean get() = kind == AttachmentKind.Image || kind == AttachmentKind.Pdf
+}
 
 /** Name, MIME type and size (null when unknown) of a picked file. */
 data class FileInfo(val name: String, val mime: String?, val size: Long?)
@@ -58,6 +66,9 @@ object Attachments {
     )
     private val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")
 
+    /** Hermes `_PDF_ATTACH_MAX_PAGES`: `pdf.attach` renders at most this many pages per call. */
+    const val PDF_MAX_PAGES = 25
+
     fun tooLarge(size: Long?): Boolean = size != null && size > MAX_BYTES
 
     /** "820 B", "12 KB", "1.4 MB" (decimal units, like the 12 MB cap). */
@@ -67,8 +78,35 @@ object Attachments {
         else -> String.format(java.util.Locale.ROOT, "%.1f MB", bytes / 1_000_000.0)
     }
 
-    /** Images Hermes can queue for the model; everything else (HEIC included) is uploaded as a file. */
-    fun kindFor(mime: String?): AttachmentKind = if (mime?.lowercase() in IMAGE_TYPES) AttachmentKind.Image else AttachmentKind.File
+    /**
+     * Images Hermes can queue for the model; PDFs (by MIME type, or a `.pdf` [name] when the type is missing or
+     * generic) are rendered to page images; everything else (HEIC included) is uploaded as a file.
+     */
+    fun kindFor(mime: String?, name: String): AttachmentKind {
+        val type = mime?.lowercase()?.takeUnless { it.isBlank() || it == "application/octet-stream" }
+        return when {
+            type in IMAGE_TYPES -> AttachmentKind.Image
+            type == "application/pdf" -> AttachmentKind.Pdf
+            type == null && name.lowercase().endsWith(".pdf") -> AttachmentKind.Pdf
+            else -> AttachmentKind.File
+        }
+    }
+
+    /** "1 page", "3 pages". */
+    fun pageCount(pages: Int): String = if (pages == 1) "1 page" else "$pages pages"
+
+    private val STOCK_PDF_TEXT = Regex("""^\[User attached PDF: .*\(\d+ page\(s\)\)]$""")
+
+    /**
+     * The chip's second line for a `pdf.attach` result, or null: at the [PDF_MAX_PAGES] cap the server silently
+     * drops the rest of the document, so say so; otherwise the server's [text] when it is more than its stock
+     * `[User attached PDF: name (N page(s))]` line.
+     */
+    fun pdfPageCapNote(pagesAttached: Int, text: String?): String? {
+        if (pagesAttached >= PDF_MAX_PAGES) return "Only the first $PDF_MAX_PAGES pages"
+        val t = text?.trim().orEmpty()
+        return t.takeIf { it.isNotEmpty() && !STOCK_PDF_TEXT.matches(it) }
+    }
 
     /** [name] with an extension Hermes accepts: the server picks the image type from the filename suffix. */
     fun imageFilename(name: String, mime: String?): String {
@@ -81,14 +119,22 @@ object Attachments {
 
     /**
      * The prompt text: file refs joined by "\n", a blank line, then the typed text (Hermes desktop
-     * `buildContextText`). With no text and no file, a stock line for the queued image(s).
+     * `buildContextText`). With no text and no file, a stock line for the queued image(s) or PDF(s); PDFs add no
+     * ref (their pages ride as queued images).
      */
     fun promptText(text: String, sent: List<PendingAttachment>): String {
         val refs = sent.mapNotNull { it.refText?.takeIf(String::isNotBlank) }.joinToString("\n")
         val joined = listOf(refs, text).filter { it.isNotBlank() }.joinToString("\n\n")
         if (joined.isNotEmpty()) return joined
         val images = sent.count { it.kind == AttachmentKind.Image }
-        return if (images > 1) "See the attached images." else "See the attached image."
+        val pdfs = sent.count { it.kind == AttachmentKind.Pdf }
+        return when {
+            images > 0 && pdfs > 0 -> "See the attachments."
+            pdfs > 1 -> "See the attached PDFs."
+            pdfs == 1 -> "See the attached PDF."
+            images > 1 -> "See the attached images."
+            else -> "See the attached image."
+        }
     }
 
     /** Reads at most [MAX_BYTES]; null when the stream holds more. */
@@ -145,7 +191,7 @@ internal class ChatAttachments(
                 }
                 val id = "att-${++counter}"
                 sources[id] = file to info
-                val chip = PendingAttachment(id, info.name, Attachments.kindFor(info.mime), info.size ?: 0, AttachmentStatus.Uploading)
+                val chip = PendingAttachment(id, info.name, Attachments.kindFor(info.mime, info.name), info.size ?: 0, AttachmentStatus.Uploading)
                 state.update { it.copy(attachments = it.attachments + chip) }
                 upload(id)
             }
@@ -159,24 +205,28 @@ internal class ChatAttachments(
         upload(localId)
     }
 
-    /** Images are detached from the next turn; files stay in the workspace, so they are only dropped here. */
+    /**
+     * Images and PDF pages are detached from the next turn; files stay in the workspace, so they are only dropped
+     * here.
+     */
     fun remove(localId: String) {
         val chip = find(localId) ?: return
         drop(localId)
-        // An image still uploading is detached when its upload lands (see [upload]).
-        if (chip.kind == AttachmentKind.Image && chip.status == AttachmentStatus.Ready) detach(chip)
+        // One still uploading is detached when its upload lands (see [upload]).
+        if (chip.queued && chip.status == AttachmentStatus.Ready) detach(chip)
     }
 
     /**
-     * A resume that came back with a different live session id left queued images behind in the old one: mark
-     * them failed so a retry re-queues them where the next turn will run. Files stay valid (workspace paths).
+     * A resume that came back with a different live session id left queued images (and PDF pages) behind in the
+     * old one: mark them failed so a retry re-queues them where the next turn will run. Files stay valid
+     * (workspace paths).
      */
     fun onLiveSession(live: String) {
         state.update { s ->
             s.copy(
                 attachments = s.attachments.map {
-                    if (it.kind == AttachmentKind.Image && it.status == AttachmentStatus.Ready && it.liveSessionId != live) {
-                        it.copy(status = AttachmentStatus.Failed, serverPath = null, liveSessionId = null)
+                    if (it.queued && it.status == AttachmentStatus.Ready && it.liveSessionId != live) {
+                        it.copy(status = AttachmentStatus.Failed, serverPath = null, liveSessionId = null, pagePaths = emptyList())
                     } else {
                         it
                     }
@@ -185,12 +235,14 @@ internal class ChatAttachments(
         }
     }
 
+    /** Detaches [chip]'s queued image, or every page of a PDF. */
     private fun detach(chip: PendingAttachment) {
         val live = chip.liveSessionId ?: return
-        val path = chip.serverPath ?: return
+        val paths = if (chip.kind == AttachmentKind.Pdf) chip.pagePaths else listOfNotNull(chip.serverPath)
+        if (paths.isEmpty()) return
         scope.launch {
             try {
-                session.detachImage(live, path)
+                paths.forEach { session.detachImage(live, it) }
             } catch (c: CancellationException) {
                 throw c
             } catch (e: Exception) {
@@ -234,18 +286,30 @@ internal class ChatAttachments(
             }
             val base64 = withContext(io) { Base64.getEncoder().encodeToString(bytes) }
             val live = liveSession() ?: throw IOException("no chat session yet")
-            val done = if (chip.kind == AttachmentKind.Image) {
-                val r = session.attachImage(live, base64, Attachments.imageFilename(info.name, info.mime))
-                if (!r.attached) throw IOException(r.message ?: "not attached")
-                chip.copy(status = AttachmentStatus.Ready, serverPath = r.path, liveSessionId = live)
-            } else {
-                val r = session.attachFile(live, Attachments.dataUrl(info.mime, base64), info.name)
-                if (!r.attached || r.refText.isBlank()) throw IOException("not attached")
-                chip.copy(status = AttachmentStatus.Ready, serverPath = r.path, refText = r.refText)
+            val done = when (chip.kind) {
+                AttachmentKind.Image -> {
+                    val r = session.attachImage(live, base64, Attachments.imageFilename(info.name, info.mime))
+                    if (!r.attached) throw IOException(r.message ?: "not attached")
+                    chip.copy(status = AttachmentStatus.Ready, serverPath = r.path, liveSessionId = live)
+                }
+                AttachmentKind.Pdf -> {
+                    val r = session.attachPdf(live, base64, info.name)
+                    if (!r.attached || r.pagePaths.isEmpty()) throw IOException("no pages attached")
+                    chip.copy(
+                        status = AttachmentStatus.Ready, liveSessionId = live, pagePaths = r.pagePaths,
+                        pages = r.pagesAttached.takeIf { it > 0 } ?: r.pagePaths.size,
+                        note = Attachments.pdfPageCapNote(r.pagesAttached, r.text),
+                    )
+                }
+                AttachmentKind.File -> {
+                    val r = session.attachFile(live, Attachments.dataUrl(info.mime, base64), info.name)
+                    if (!r.attached || r.refText.isBlank()) throw IOException("not attached")
+                    chip.copy(status = AttachmentStatus.Ready, serverPath = r.path, refText = r.refText)
+                }
             }
             if (find(localId) == null) {
-                // Removed while uploading: an image would otherwise ride along with the next turn.
-                if (done.kind == AttachmentKind.Image) detach(done)
+                // Removed while uploading: an image (or PDF page) would otherwise ride along with the next turn.
+                if (done.queued) detach(done)
             } else {
                 set(localId) { done }
             }

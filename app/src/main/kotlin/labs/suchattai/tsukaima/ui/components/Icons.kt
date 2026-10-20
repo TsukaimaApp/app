@@ -43,6 +43,7 @@ import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.MonitorHeart
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PauseCircle
+import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Psychology
@@ -168,6 +169,9 @@ enum class IconName(val symbol: String) {
 
     /** Not in the handoff (v0.7.0): speech recognition (phone or Hermes). */
     GraphicEq("graphic_eq"),
+
+    /** Not in the handoff (v0.8.0): PDF attachment chips. */
+    PictureAsPdf("picture_as_pdf"),
 }
 
 /** Pure lookup, safe from JVM unit tests (no Android context involved). */
@@ -228,6 +232,7 @@ fun iconFor(name: IconName): ImageVector = when (name) {
     IconName.Keyboard -> Icons.Rounded.Keyboard
     IconName.Translate -> Icons.Rounded.Translate
     IconName.GraphicEq -> Icons.Rounded.GraphicEq
+    IconName.PictureAsPdf -> Icons.Rounded.PictureAsPdf
     IconName.Key -> Icons.Rounded.Key
     IconName.Visibility -> Icons.Rounded.Visibility
     IconName.VisibilityOff -> Icons.Rounded.VisibilityOff
