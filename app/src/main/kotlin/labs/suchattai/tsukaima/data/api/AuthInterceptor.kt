@@ -76,6 +76,8 @@ class AuthInterceptor(
             throw e
         }
         failedLogin = null
+        // A sign-out that raced the login must win: never write the old credentials back.
+        if (creds.password() != password || creds.origin() != storedOrigin) throw AuthException("Signed out")
         creds.save(password, fresh, storedOrigin)
         fresh
     }

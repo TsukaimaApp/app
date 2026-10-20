@@ -136,3 +136,4 @@ Every decision the build controller made on the user's behalf, in order, with wh
 - A rotation while typing a masked value clears it (deliberately not saveable).
 - Stop is not offered while the turn waits on an approval/question/password card.
 
+- v0.4.0 review fixes: a reconnect before any seq was seen sends `last_seen: 0` (the `-1` sentinel read as "evicted" and forced a history rebuild that dropped the optimistic bubble); Cancel on the masked card clears the typed value; sign-out resets the server-request replay cache and the notification coordinator so the old sign-in's approvals/prompts cannot resurface after the next sign-in; a re-login that raced a sign-out no longer writes the old credentials back. Still open: `vault.save_login`/`vault.code` answered "method not found"; a few characters of a partial reply can be missing after a truncated-replay rebuild until `message.complete`.

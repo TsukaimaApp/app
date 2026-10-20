@@ -155,6 +155,15 @@ class NotificationCoordinator(
         cronSnapshot = null
     }
 
+    /** Sign-out: nothing of the old sign-in may be notified, or bind the next one's live ids. */
+    @Synchronized
+    fun reset() {
+        cronSnapshot = null
+        notified.clear()
+        closedIds.clear()
+        storedByLive.clear()
+    }
+
     @Synchronized
     fun onCronJobs(jobs: List<CronJobDto>): List<NotificationSpec> {
         val prev = cronSnapshot

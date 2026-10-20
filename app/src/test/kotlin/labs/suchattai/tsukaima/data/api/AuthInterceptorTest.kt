@@ -117,6 +117,18 @@ class AuthInterceptorTest {
     }
 
     @Test
+    fun signOutDuringReloginIsNotWrittenBack() {
+        // The user signs out while a re-login is in flight: the fresh token must not resurrect the old credentials.
+        creds.save("pw", "old", baseUrl())
+        loginResult = { creds.clear(); "new-token" }
+        server.enqueue(ok(401))
+        assertThrows(AuthException::class.java) { get(client()) }
+        assertEquals(1, loginCalls.get())
+        assertNull(creds.password())
+        assertNull(creds.accessToken())
+    }
+
+    @Test
     fun secondFailureThrowsAuthException() {
         creds.save("pw", "old", baseUrl())
         loginResult = { throw AuthException() }

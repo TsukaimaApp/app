@@ -256,6 +256,8 @@ class ConnectionManager(
         synchronized(lock) {
             val running = pollJob?.isActive == true
             stop()
+            // Requests of the old sign-in must not resurface as notifications after the next sign-in.
+            _serverRequests.resetReplayCache()
             _authRequired.value = false
             if (running) run(intervalMs)
         }

@@ -172,6 +172,7 @@ class NotificationHub(
     fun signedOut() {
         stopBackground()
         poster.cancelAll()
+        coordinator.reset()
     }
 
     fun post(spec: NotificationSpec) = poster.post(spec)

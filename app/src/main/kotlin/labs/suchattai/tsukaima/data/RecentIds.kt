@@ -14,6 +14,9 @@ class RecentIds(val capacity: Int = 64) {
     fun contains(id: String): Boolean = ids.containsKey(id)
 
     @Synchronized
+    fun clear() = ids.clear()
+
+    @Synchronized
     fun remove(id: String) {
         ids.remove(id)
     }

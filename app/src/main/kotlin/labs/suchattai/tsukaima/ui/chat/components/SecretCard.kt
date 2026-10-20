@@ -147,7 +147,7 @@ fun SecretCard(
                     modifier = Modifier.weight(1f),
                 )
             }
-            GhostButton("Cancel", onCancel, enabled = !item.answered)
+            GhostButton("Cancel", { value = ""; visible = false; onCancel() }, enabled = !item.answered)
             PrimaryButton("Send", send, icon = IconName.Check, enabled = !item.answered && value.isNotEmpty())
         }
     }

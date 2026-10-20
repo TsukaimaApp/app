@@ -792,6 +792,25 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun reconnectBeforeAnyEventAsksForSeqZeroNotTheSentinel() = runTest(dispatcher) {
+        // A negative `last_seen` reads as "evicted" on the server and would force a rebuild from history.
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("hi")
+        vm.send()
+        advanceUntilIdle()
+        b.transport.on("session.resume", obj(resumeJson.replace("\"running\":false", "\"running\":true")))
+        b.transport.on("session.events.since", obj("""{"events":[],"latest_seq":0,"truncated":false,"open_requests":[]}"""))
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+        assertEquals(0L, b.transport.last("session.events.since")["last_seen"]!!.jsonPrimitive.long)
+        assertTrue("the optimistic bubble survives", vm.state.value.chat.items.any { it is ChatItem.UserMessage })
+    }
+
+    @Test
     fun reconnectWithNewLiveIdRebuildsFromHistoryAndReplaysAll() = runTest(dispatcher) {
         val b = backend()
         val vm = vm(b)

@@ -36,6 +36,15 @@ class NotificationCoordinatorTest {
         Frame.Event(type, session, null, payload)
 
     @Test
+    fun resetForgetsTheOldSignIn() {
+        assertNotNull(c.onServerRequest(approval("srq-2"), foreground = false))
+        assertNull(c.onServerRequest(approval("srq-2"), foreground = false))
+        c.reset()
+        // The replay of the next sign-in may legitimately carry the same id again.
+        assertNotNull(c.onServerRequest(approval("srq-2"), foreground = false))
+    }
+
+    @Test
     fun alreadyAnsweredRequestNotNotified() {
         answered += "srq-1"
         assertNull(c.onServerRequest(approval("srq-1"), foreground = false))

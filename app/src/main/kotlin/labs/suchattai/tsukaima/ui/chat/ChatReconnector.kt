@@ -90,7 +90,9 @@ internal class ChatReconnector(
             val r = session.resume(stored)
             val sameLive = r.sessionId == previousLive
             bindResumed(r, rebuild = !sameLive)
-            val replay = ChatSync.replay(session.eventsSince(r.sessionId, if (sameLive) chat.lastSeq else 0))
+            // A chat that saw no seq yet sends 0, not the NO_SEQ sentinel: the server reads a negative
+            // `last_seen` as "evicted" and would report truncation, replacing an optimistic bubble with history.
+            val replay = ChatSync.replay(session.eventsSince(r.sessionId, if (sameLive) maxOf(chat.lastSeq, 0) else 0))
             if (replay.truncated) {
                 // The ring lost events we never saw: trust the stored history instead of a replay with holes.
                 setChat { it.copy(items = ChatSync.transcript(r), lastSeq = replay.latestSeq ?: it.lastSeq) }
