@@ -38,6 +38,11 @@ class DrawerViewModelTest {
             calls += "delete:$id"
             return Result.success(Unit)
         }
+        var hits: List<SessionDto> = emptyList()
+        override suspend fun search(query: String): Result<List<SessionDto>> {
+            calls += "search:$query"
+            return Result.success(hits)
+        }
     }
 
     private val sessions = listOf(

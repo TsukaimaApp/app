@@ -8,4 +8,7 @@ interface SessionsSource {
     suspend fun rename(id: String, title: String): Result<Unit>
     suspend fun archive(id: String, archived: Boolean): Result<Unit>
     suspend fun delete(id: String): Result<Unit>
+
+    /** Server-side search (`/api/sessions/search`); rows carry a [SessionDto.snippet]. */
+    suspend fun search(query: String): Result<List<SessionDto>>
 }

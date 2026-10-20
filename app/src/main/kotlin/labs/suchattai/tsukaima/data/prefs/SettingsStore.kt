@@ -10,6 +10,19 @@ import kotlinx.coroutines.flow.map
 
 enum class ThemeMode { Warm, Dark, System }
 
+/**
+ * Which kinds of notification the app posts (Settings → Notifications); all on by default. Android's own channel
+ * switches still apply on top. [alerts] covers the gateway going down and a cron job failing.
+ */
+data class NotificationPrefs(
+    /** Approvals, questions (`clarify`) and password/secret prompts. */
+    val approvals: Boolean = true,
+    val pairing: Boolean = true,
+    /** "Hermes finished the task" when a reply completes while the app is in the background. */
+    val replies: Boolean = true,
+    val alerts: Boolean = true,
+)
+
 data class Settings(
     val serverUrl: String = "",
     val username: String = "",
@@ -24,6 +37,7 @@ data class Settings(
     val onboarded: Boolean = false,
     /** Whether the app has already asked for `POST_NOTIFICATIONS` (asked once, after onboarding). */
     val askedNotifications: Boolean = false,
+    val notifications: NotificationPrefs = NotificationPrefs(),
 )
 
 class SettingsStore(private val dataStore: DataStore<Preferences>) {
@@ -43,6 +57,10 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             prefs.putOrRemove(LAST_SESSION_ID, next.lastSessionId)
             prefs[ONBOARDED] = next.onboarded
             prefs[ASKED_NOTIFICATIONS] = next.askedNotifications
+            prefs[NOTIFY_APPROVALS] = next.notifications.approvals
+            prefs[NOTIFY_PAIRING] = next.notifications.pairing
+            prefs[NOTIFY_REPLIES] = next.notifications.replies
+            prefs[NOTIFY_ALERTS] = next.notifications.alerts
         }
     }
 
@@ -68,6 +86,12 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             lastSessionId = this[LAST_SESSION_ID],
             onboarded = this[ONBOARDED] ?: defaults.onboarded,
             askedNotifications = this[ASKED_NOTIFICATIONS] ?: defaults.askedNotifications,
+            notifications = NotificationPrefs(
+                approvals = this[NOTIFY_APPROVALS] ?: defaults.notifications.approvals,
+                pairing = this[NOTIFY_PAIRING] ?: defaults.notifications.pairing,
+                replies = this[NOTIFY_REPLIES] ?: defaults.notifications.replies,
+                alerts = this[NOTIFY_ALERTS] ?: defaults.notifications.alerts,
+            ),
         )
     }
 
@@ -83,5 +107,9 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
         val LAST_SESSION_ID = stringPreferencesKey("last_session_id")
         val ONBOARDED = booleanPreferencesKey("onboarded")
         val ASKED_NOTIFICATIONS = booleanPreferencesKey("asked_notifications")
+        val NOTIFY_APPROVALS = booleanPreferencesKey("notify_approvals")
+        val NOTIFY_PAIRING = booleanPreferencesKey("notify_pairing")
+        val NOTIFY_REPLIES = booleanPreferencesKey("notify_replies")
+        val NOTIFY_ALERTS = booleanPreferencesKey("notify_alerts")
     }
 }

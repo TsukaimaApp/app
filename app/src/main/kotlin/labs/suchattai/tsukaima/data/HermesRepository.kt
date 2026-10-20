@@ -110,6 +110,9 @@ class HermesRepository(
     override suspend fun rename(id: String, title: String): Result<Unit> = renameSession(id, title)
     override suspend fun archive(id: String, archived: Boolean): Result<Unit> = archiveSession(id, archived)
     override suspend fun delete(id: String): Result<Unit> = deleteSession(id)
+    override suspend fun search(query: String): Result<List<SessionDto>> = call { api.searchSessions(query) }
+
+    suspend fun sessionArchived(id: String): Result<Boolean> = call { api.sessionArchived(id) }
 
     suspend fun modelOptions(): Result<ModelOptionsDto> = call { api.modelOptions() }
     suspend fun workspaces(): Result<WorkspacesDto> = call { api.workspaces() }
@@ -131,6 +134,7 @@ class HermesRepository(
     suspend fun skills(): Result<List<SkillDto>> = call { api.skills() }
     suspend fun toggleSkill(name: String, enabled: Boolean): Result<Unit> = call { api.toggleSkill(name, enabled) }
     suspend fun toolsets(): Result<List<ToolsetDto>> = call { api.toolsets() }
+    suspend fun toggleToolset(name: String, enabled: Boolean): Result<Unit> = call { api.toggleToolset(name, enabled) }
     suspend fun profiles(): Result<ProfilesDto> = call { api.profiles() }
     suspend fun activeProfile(): Result<String> = call { api.activeProfile() }
 

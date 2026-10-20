@@ -171,6 +171,9 @@ class GatewayClient(
     override suspend fun request(method: String, params: JsonObject): JsonObject =
         request(method, params, DEFAULT_TIMEOUT_MS)
 
+    override suspend fun requestSlow(method: String, params: JsonObject, timeoutMs: Long): JsonObject =
+        request(method, params, timeoutMs)
+
     /**
      * Sends [method] once the gateway is [ConnectionState.Connected] (waiting through a reconnect if needed)
      * and suspends for the response; [timeoutMs] covers both the wait and the round trip.

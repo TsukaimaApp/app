@@ -56,6 +56,8 @@ data class SessionDto(
     val archived: Boolean = false,
     val profile: String? = null,
     @SerialName("profile_name") val profileName: String? = null,
+    /** Search hits only: the matching text with `>>>` / `<<<` around the match. */
+    val snippet: String? = null,
 )
 
 @Serializable

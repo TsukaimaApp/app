@@ -14,6 +14,12 @@ interface RpcTransport {
     suspend fun request(method: String, params: JsonObject = JsonObject(emptyMap())): JsonObject
 
     /**
+     * [request] with its own deadline [timeoutMs], for methods that legitimately run long (`session.compress`
+     * summarizes with a model call). Implementations without a deadline of their own just [request].
+     */
+    suspend fun requestSlow(method: String, params: JsonObject, timeoutMs: Long): JsonObject = request(method, params)
+
+    /**
      * Answers a server→client request ([Frame.ServerRequest]) with [result], echoing its [id]. Returns
      * whether the frame was enqueued on a live connection; false means it was not sent.
      */

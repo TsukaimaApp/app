@@ -421,4 +421,44 @@ class HermesApiTest {
         assertTrue("$e", e is ApiException)
         assertEquals("profiles/active: active missing in response", e!!.message)
     }
+
+    // ---- v0.5.0 --------------------------------------------------------------------------------------------
+
+    @Test
+    fun searchSendsQueryAndLimitAndReadsResults() = runBlocking {
+        // Live-probed shape (trimmed): session fields plus the match `snippet`.
+        json("""{"results":[{"snippet":">>>Hello<<<","role":"user","session_id":"20261020_074455_bdf032","id":"20261020_074455_bdf032","title":"Hello","started_at":1792475101.38,"archived":false,"profile":"default"}]}""")
+        val hits = api().searchSessions("hel lo")
+        val r = server.takeRequest(1, TimeUnit.SECONDS)!!
+        assertEquals("/api/sessions/search", r.url.encodedPath)
+        assertEquals("hel lo", r.url.queryParameter("q"))
+        assertEquals("20", r.url.queryParameter("limit"))
+        assertEquals("20261020_074455_bdf032", hits.single().id)
+        assertEquals(">>>Hello<<<", hits.single().snippet)
+    }
+
+    @Test
+    fun sessionArchivedReadsTheDatabaseFlag() = runBlocking {
+        json("""{"id":"s1","archived":1,"title":"x"}""")
+        json("""{"id":"s1","archived":0}""")
+        json("""{"id":"s1","archived":true}""")
+        json("""{"id":"s1"}""")
+        assertTrue(api().sessionArchived("s1"))
+        assertFalse(api().sessionArchived("s1"))
+        assertTrue(api().sessionArchived("s1"))
+        assertFalse(api().sessionArchived("s1"))
+        assertEquals("/api/sessions/s1", server.takeRequest(1, TimeUnit.SECONDS)!!.url.encodedPath)
+    }
+
+    @Test
+    fun toolsetToggleIsAPutWithTheFlag() = runBlocking {
+        json("""{"ok":true,"name":"todo","platform":"cli","enabled":false,"post_setup_started":null}""")
+        settings = Settings(profile = "ops")
+        api().toggleToolset("todo", false)
+        val r = server.takeRequest(1, TimeUnit.SECONDS)!!
+        assertEquals("PUT", r.method)
+        assertEquals("/api/tools/toolsets/todo", r.url.encodedPath)
+        assertEquals("ops", r.url.queryParameter("profile"))
+        assertEquals("""{"enabled":false}""", r.body!!.utf8())
+    }
 }

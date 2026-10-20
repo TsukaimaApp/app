@@ -95,6 +95,43 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
     suspend fun modelOptions(sessionId: String): ModelOptionsDto =
         decode("model.options", rpc("model.options", idParams(sessionId)))
 
+    /**
+     * Switches live session [sessionId] to [model] of [provider] (`config.set key=model`), for this session only:
+     * the value is `"<model> --provider <slug> --session"`, as the desktop picker sends it, so the profile default
+     * is never rewritten. While a turn runs the server queues the switch for the next turn (`deferred`); a model
+     * its selection guards flag comes back `confirm_required` (nothing switched) until it is re-sent with
+     * [confirmExpensive].
+     */
+    suspend fun switchModel(sessionId: String, model: String, provider: String, confirmExpensive: Boolean = false): ModelSwitched =
+        decode("config.set", rpc("config.set", buildJsonObject {
+            put("session_id", sessionId)
+            put("key", "model")
+            put("value", "$model --provider $provider --session")
+            if (confirmExpensive) put("confirm_expensive_model", true)
+        }))
+
+    /**
+     * Sets the session's reasoning effort (`config.set key=reasoning`, session-scoped: no `scope`, so the server
+     * keeps it on the session and never writes the profile default). Returns the value the server reports.
+     */
+    suspend fun setReasoning(sessionId: String, level: String): String? =
+        (rpc("config.set", buildJsonObject {
+            put("session_id", sessionId)
+            put("key", "reasoning")
+            put("value", level)
+        })["value"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
+
+    /** `session.usage`: the session's token counters and context occupancy (`context_percent`, …). */
+    suspend fun usage(sessionId: String): JsonObject = rpc("session.usage", idParams(sessionId))
+
+    /**
+     * Compacts the idle session's context (`session.compress`): the result has `status` (`compressed` /
+     * `aborted` / `pending`), a `summary` with a `headline`, `info` and `usage`; a lock held elsewhere answers
+     * `compressed: false` with a `message`. Summarizing is a model call, so the deadline is [COMPRESS_TIMEOUT_MS].
+     */
+    suspend fun compress(sessionId: String): JsonObject =
+        rpc("session.compress", idParams(sessionId), COMPRESS_TIMEOUT_MS)
+
     suspend fun eventsSince(sessionId: String, lastSeen: Long): JsonObject =
         rpc("session.events.since", buildJsonObject {
             put("session_id", sessionId)
@@ -168,9 +205,10 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
     }
 
     /** Every request goes through here: adds `profile` when one other than "default" is active. */
-    private suspend fun rpc(method: String, params: JsonObject): JsonObject {
+    private suspend fun rpc(method: String, params: JsonObject, timeoutMs: Long? = null): JsonObject {
         val active = profile()?.takeIf { it.isNotBlank() && it != DEFAULT_PROFILE }
-        return transport.request(method, if (active == null) params else JsonObject(params + ("profile" to JsonPrimitive(active))))
+        val withProfile = if (active == null) params else JsonObject(params + ("profile" to JsonPrimitive(active)))
+        return if (timeoutMs == null) transport.request(method, withProfile) else transport.requestSlow(method, withProfile, timeoutMs)
     }
 
     private fun idParams(id: String) = buildJsonObject { put("session_id", id) }
@@ -186,6 +224,9 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
 
     companion object {
         const val SOURCE = "tsukaima"
+
+        /** `compression.context_total_ceiling_seconds` (600 s by default) plus a minute of slack. */
+        const val COMPRESS_TIMEOUT_MS = 660_000L
         private const val DEFAULT_PROFILE = "default"
     }
 }

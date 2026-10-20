@@ -36,6 +36,8 @@ data class SessionResumed(
     @SerialName("open_requests") val openRequests: List<JsonObject> = emptyList(),
     /** The running turn's state (`InflightTurn`): `assistant` is the reply text streamed so far. */
     val inflight: JsonObject? = null,
+    /** The `session.info` snapshot (model, reasoning effort, token `usage`, …). */
+    val info: JsonObject = JsonObject(emptyMap()),
 )
 
 @Serializable
@@ -63,6 +65,21 @@ data class ImageAttached(
     val attached: Boolean = false,
     val path: String = "",
     val message: String? = null,
+)
+
+/**
+ * `config.set key=model` result. [warning] is advice to show (e.g. the context-compression preflight);
+ * [confirmRequired] means nothing switched yet and [confirmMessage] says why; [deferred] means a turn is running
+ * and the switch applies when the next one starts.
+ */
+@Serializable
+data class ModelSwitched(
+    val value: String = "",
+    val warning: String = "",
+    @SerialName("confirm_required") val confirmRequired: Boolean = false,
+    @SerialName("confirm_message") val confirmMessage: String = "",
+    val deferred: Boolean = false,
+    val scope: String? = null,
 )
 
 /** Answer to an `approval` server request; [wire] is the exact string the server expects. */

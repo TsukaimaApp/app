@@ -63,4 +63,15 @@ class SettingsStoreTest {
         assertNull(s.lastSessionId)
         assertEquals(ThemeMode.Dark, s.theme)
     }
+
+    @Test
+    fun notificationPrefsDefaultOnAndRoundTrip() = runTest {
+        val store = store()
+        assertEquals(NotificationPrefs(), store.settings.first().notifications)
+        val off = NotificationPrefs(approvals = false, pairing = true, replies = false, alerts = false)
+        store.update { it.copy(notifications = off) }
+        assertEquals(off, store.settings.first().notifications)
+        store.update { it.copy(notifications = it.notifications.copy(approvals = true)) }
+        assertEquals(off.copy(approvals = true), store.settings.first().notifications)
+    }
 }

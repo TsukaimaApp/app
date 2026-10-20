@@ -9,7 +9,9 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -120,6 +122,29 @@ class HermesApi(
         sendUnit("DELETE", "api/sessions", id)
     }
 
+    /**
+     * `GET /api/sessions/search?q=&limit=` (session ids first, then FTS over message text, then titles): the
+     * `results` array, rows shaped like [SessionDto] plus a `snippet` with `>>>`/`<<<` around the match. A blank
+     * [query] answers no results. [limit] is clamped to the server's `1..100`.
+     */
+    suspend fun searchSessions(query: String, limit: Int = SEARCH_LIMIT): List<SessionDto> =
+        get(
+            "api/sessions/search", "results", SessionDto.serializer(),
+            "q" to query, "limit" to limit.coerceIn(1, MAX_SESSIONS).toString(),
+        )
+
+    /**
+     * Whether stored session [id] is archived (`GET /api/sessions/{id}`). The detail row is the raw database row,
+     * where `archived` is `0`/`1`, so it is read as a number or a boolean; a missing flag reads as not archived.
+     */
+    suspend fun sessionArchived(id: String): Boolean {
+        val row = call(newRequest("GET", "api/sessions", null, true, true, emptyArray(), arrayOf(id))) {
+            HermesJson.parseToJsonElement(it).jsonObject
+        }
+        val flag = row["archived"] as? JsonPrimitive ?: return false
+        return flag.booleanOrNull ?: ((flag.intOrNull ?: 0) != 0)
+    }
+
     suspend fun modelOptions(): ModelOptionsDto = get("api/model/options", ModelOptionsDto.serializer())
 
     suspend fun workspaces(): WorkspacesDto = get("api/chat/workspaces", WorkspacesDto.serializer())
@@ -199,6 +224,14 @@ class HermesApi(
     }
 
     suspend fun toolsets(): List<ToolsetDto> = get("api/tools/toolsets", ListSerializer(ToolsetDto.serializer()))
+
+    /**
+     * `PUT /api/tools/toolsets/{name}` `{"enabled": bool}`: the toolset's configuration platform (`cli` for most)
+     * gains or loses it, for sessions started afterwards. Unknown name → 400.
+     */
+    suspend fun toggleToolset(name: String, enabled: Boolean) {
+        sendUnit("PUT", "api/tools/toolsets", name, body = buildJsonObject { put("enabled", enabled) })
+    }
 
     suspend fun profiles(): ProfilesDto = get("api/profiles", ProfilesDto.serializer(), managed = false)
 
@@ -407,6 +440,7 @@ class HermesApi(
         const val DEFAULT_PROFILE = "default"
         /** `le=100` on the server's `limit` query. */
         const val MAX_SESSIONS = 100
+        const val SEARCH_LIMIT = 20
         val JSON = "application/json; charset=utf-8".toMediaType()
         val EMPTY_BODY = JsonObject(emptyMap())
         const val OCTET_STREAM = "application/octet-stream"
