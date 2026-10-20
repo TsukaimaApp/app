@@ -15,6 +15,8 @@ data class Settings(
     val username: String = "",
     val profile: String = "default",
     val model: String? = null,
+    /** Provider slug of [model] (`model.options`); sent with it so the server routes the model correctly. */
+    val modelProvider: String? = null,
     val workspace: String? = null,
     val theme: ThemeMode = ThemeMode.System,
     val materialYou: Boolean = false,
@@ -32,6 +34,7 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             prefs[USERNAME] = next.username
             prefs[PROFILE] = next.profile
             prefs.putOrRemove(MODEL, next.model)
+            prefs.putOrRemove(MODEL_PROVIDER, next.modelProvider)
             prefs.putOrRemove(WORKSPACE, next.workspace)
             prefs[THEME] = next.theme.name
             prefs[MATERIAL_YOU] = next.materialYou
@@ -54,6 +57,7 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             username = this[USERNAME] ?: defaults.username,
             profile = this[PROFILE] ?: defaults.profile,
             model = this[MODEL],
+            modelProvider = this[MODEL_PROVIDER],
             workspace = this[WORKSPACE],
             theme = this[THEME]?.let { name -> ThemeMode.entries.firstOrNull { it.name == name } }
                 ?: defaults.theme,
@@ -68,6 +72,7 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
         val USERNAME = stringPreferencesKey("username")
         val PROFILE = stringPreferencesKey("profile")
         val MODEL = stringPreferencesKey("model")
+        val MODEL_PROVIDER = stringPreferencesKey("model_provider")
         val WORKSPACE = stringPreferencesKey("workspace")
         val THEME = stringPreferencesKey("theme")
         val MATERIAL_YOU = booleanPreferencesKey("material_you")

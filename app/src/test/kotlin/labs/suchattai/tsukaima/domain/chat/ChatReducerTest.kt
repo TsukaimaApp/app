@@ -382,4 +382,35 @@ class ChatReducerTest {
         assertEquals("subagent", ChatReducer.humanName("delegate_task"))
         assertEquals("read file", ChatReducer.humanName("read_file"))
     }
+
+    @Test
+    fun sessionBoundResetsSeqAndCounter() {
+        val before = ChatState(liveSessionId = "old1", storedSessionId = "20261020_010916_48c967", lastSeq = 42, localCounter = 7)
+        val bound = ChatReducer.onSessionBound(before, liveId = "d4fb0dea", storedId = "20261020_010916_48c967")
+        assertEquals("d4fb0dea", bound.liveSessionId)
+        assertEquals("20261020_010916_48c967", bound.storedSessionId)
+        assertEquals(0L, bound.lastSeq)
+        assertEquals(0L, bound.localCounter)
+        // The new live session's seq restarts at 1, and must not be swallowed by the old watermark.
+        val next = bound.feed(ev("message.start", seq = 1, session = "d4fb0dea"))
+        assertEquals(1L, next.lastSeq)
+        assertEquals("a-1", next.items.single().id)
+    }
+
+    @Test
+    fun sessionBoundKeepsStoredIdWhenNull() {
+        val bound = ChatReducer.onSessionBound(ChatState(storedSessionId = "20261020_010916_48c967"), "d4fb0dea", null)
+        assertEquals("20261020_010916_48c967", bound.storedSessionId)
+    }
+
+    @Test
+    fun sessionBoundToSameLiveIdKeepsWatermark() {
+        // The server re-attached the same live session (reconnect within its grace window): its seq did not
+        // restart, so the watermark and counter stay and a replay is a true delta.
+        val before = ChatState(liveSessionId = sid, lastSeq = 6, localCounter = 2)
+        val bound = ChatReducer.onSessionBound(before, sid, "20261020_010916_48c967")
+        assertEquals(6L, bound.lastSeq)
+        assertEquals(2L, bound.localCounter)
+        assertEquals("20261020_010916_48c967", bound.storedSessionId)
+    }
 }

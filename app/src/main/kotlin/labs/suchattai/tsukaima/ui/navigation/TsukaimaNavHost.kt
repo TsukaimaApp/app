@@ -35,6 +35,9 @@ import androidx.navigation.navArgument
 import labs.suchattai.tsukaima.ui.components.IconButton44
 import labs.suchattai.tsukaima.ui.components.IconName
 import labs.suchattai.tsukaima.di.AppContainer
+import labs.suchattai.tsukaima.ui.chat.ChatScreen
+import labs.suchattai.tsukaima.ui.chat.ChatViewModel
+import labs.suchattai.tsukaima.ui.chat.ContainerChatBackend
 import labs.suchattai.tsukaima.ui.onboarding.OnboardingScreen
 import labs.suchattai.tsukaima.ui.settings.SettingsScreen
 import labs.suchattai.tsukaima.ui.settings.SettingsViewModel
@@ -99,8 +102,20 @@ fun TsukaimaNavHost(
                     defaultValue = null
                 },
             ),
-        ) {
-            PlaceholderScreen("Chat", menu = showMenu, onMenu = onMenu)
+        ) { entry ->
+            val session = entry.arguments?.getString(Route.ARG_SESSION)
+            // Keyed by the session too, so a VM is never reused for a different chat.
+            val vm: ChatViewModel = viewModel(
+                key = "chat-$session",
+                factory = viewModelFactory { initializer { ChatViewModel(ContainerChatBackend(container), session) } },
+            )
+            ChatScreen(
+                vm = vm,
+                onMenu = onMenu,
+                showMenu = showMenu,
+                onStatus = { navController.navigateTop(Route.Status.path) },
+                onDeleted = { navController.navigateTop(Route.Chat.create()) },
+            )
         }
         composable(Route.Cron.path) { PlaceholderScreen("Cron", onBack = back) }
         composable(
@@ -155,7 +170,7 @@ fun TsukaimaNavHost(
 
 /**
  * Navigates to a drawer destination. Status is home: the target replaces everything above Status (a chat
- * replaces the previous chat), so Back from any drawer destination returns to Status. When Status is not on
+ * replaces the previous chat with a new back-stack entry), so Back from any drawer destination returns to Status. When Status is not on
  * the back stack (first run started at Onboarding), the stack is rebuilt as Status → [route].
  */
 fun NavController.navigateTop(route: String) {
@@ -172,7 +187,9 @@ fun NavController.navigateTop(route: String) {
     }
     navigate(route) {
         popUpTo(Route.Status.path)
-        launchSingleTop = true
+        // A chat always gets a fresh entry (and so a fresh ChatViewModel): single-top would hand chat X's
+        // entry the arguments of chat Y. popUpTo already keeps chats from stacking.
+        launchSingleTop = route != Route.Chat.create() && !route.startsWith(Route.Chat.create() + "?")
     }
 }
 

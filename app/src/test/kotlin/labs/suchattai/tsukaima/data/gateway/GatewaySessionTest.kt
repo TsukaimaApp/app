@@ -107,4 +107,25 @@ class GatewaySessionTest {
         val t = FakeTransport(obj("""{"session_id":null}"""))
         assertNull(GatewaySession(t).mostRecent())
     }
+
+    @Test
+    fun createSendsProviderWhenGiven() = runBlocking {
+        val t = FakeTransport(obj("""{"session_id":"s1","stored_session_id":"st1","info":{},"messages":[]}"""))
+        GatewaySession(t).create(cwd = null, model = "deepseek-v4", provider = "melious")
+        val params = t.calls.single().second
+        assertEquals("deepseek-v4", params["model"]!!.jsonPrimitive.content)
+        assertEquals("melious", params["provider"]!!.jsonPrimitive.content)
+        assertFalse(params.containsKey("cwd"))
+    }
+
+    @Test
+    fun approvalRespondUsesRestFallbackMethod() = runBlocking {
+        val t = FakeTransport()
+        GatewaySession(t).approvalRespond("d4fb0dea", "req-9", ApprovalChoice.once)
+        val (method, params) = t.calls.single()
+        assertEquals("approval.respond", method)
+        assertEquals("d4fb0dea", params["session_id"]!!.jsonPrimitive.content)
+        assertEquals("req-9", params["request_id"]!!.jsonPrimitive.content)
+        assertEquals("once", params["choice"]!!.jsonPrimitive.content)
+    }
 }

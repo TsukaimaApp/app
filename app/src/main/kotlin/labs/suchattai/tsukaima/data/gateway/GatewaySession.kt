@@ -15,11 +15,12 @@ import java.io.IOException
 /** Typed wrappers over the gateway's session JSON-RPC methods. Optional null params are omitted. */
 class GatewaySession(private val transport: RpcTransport) {
 
-    suspend fun create(cwd: String?, model: String?, source: String = SOURCE): SessionCreated {
+    suspend fun create(cwd: String?, model: String?, provider: String? = null, source: String = SOURCE): SessionCreated {
         val params = buildJsonObject {
             put("source", source)
             cwd?.let { put("cwd", it) }
             model?.let { put("model", it) }
+            provider?.let { put("provider", it) }
         }
         return decode("session.create", transport.request("session.create", params))
     }
@@ -97,6 +98,18 @@ class GatewaySession(private val transport: RpcTransport) {
 
     fun respondApproval(requestId: String, choice: ApprovalChoice) {
         transport.respond(requestId, buildJsonObject { put("choice", JsonPrimitive(choice.wire)) })
+    }
+
+    /**
+     * Answers an approval by its `request_id` rather than a server-request id: for the `pending_approval` a
+     * resume reports, which has no `srq-…` id to [respondApproval] to.
+     */
+    suspend fun approvalRespond(sessionId: String, requestId: String?, choice: ApprovalChoice) {
+        transport.request("approval.respond", buildJsonObject {
+            put("session_id", sessionId)
+            put("choice", choice.wire)
+            requestId?.let { put("request_id", it) }
+        })
     }
 
     private fun idParams(id: String) = buildJsonObject { put("session_id", id) }

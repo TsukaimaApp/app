@@ -28,6 +28,7 @@ import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.data.prefs.SettingsStore
 import labs.suchattai.tsukaima.ui.components.ToastState
 import okhttp3.OkHttpClient
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
@@ -134,6 +135,13 @@ class AppContainer(context: Context) {
     )
 
     val toastState = ToastState()
+
+    /**
+     * Ids of server requests (approvals) already answered from any surface: chat screens and notifications.
+     * [ConnectionManager.serverRequests] replays recent requests to late subscribers, so each consumer skips
+     * ids in this set and adds the id when it answers.
+     */
+    val answeredRequestIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     private companion object {
         const val TAG = "Tsukaima"

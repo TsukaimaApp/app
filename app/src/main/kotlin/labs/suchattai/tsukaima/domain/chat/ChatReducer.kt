@@ -66,6 +66,18 @@ object ChatReducer {
         return state.copy(items = items, status = statusAfterApproval(state.status, items, flair))
     }
 
+    /**
+     * Binds the chat to a live session ([liveId]) and its stored id; called after every `session.create` and
+     * `session.resume`, including the resume after a reconnect. A new live id has its own seq numbering that
+     * restarts at 1, so the replay watermark and the local id counter reset. When the server re-attached the
+     * same live session (a reconnect inside its grace window) the seq continues, so both are kept and a
+     * `session.events.since(lastSeq)` replay stays a true delta. A null [storedId] keeps the known one.
+     */
+    fun onSessionBound(state: ChatState, liveId: String, storedId: String?): ChatState {
+        val ids = state.copy(liveSessionId = liveId, storedSessionId = storedId ?: state.storedSessionId)
+        return if (state.liveSessionId == liveId) ids else ids.copy(lastSeq = 0, localCounter = 0)
+    }
+
     fun onConnectionLost(state: ChatState): ChatState =
         state.copy(items = finalizeStreaming(state.items), status = AgentStatus.Offline)
 
