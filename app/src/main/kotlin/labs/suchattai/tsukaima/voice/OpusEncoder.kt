@@ -18,43 +18,58 @@ data class EncodedAudio(val bytes: ByteArray, val mime: String)
 /**
  * [AudioEncoder] to Opus in an Ogg container (`audio/ogg`) with the platform's `MediaCodec` and `MediaMuxer`: 16 kHz
  * mono at 24 kbps, about a twentieth of the WAV's size. The muxer needs a file, so the utterance passes through a
- * temporary file in [cacheDir] that is deleted before [encode] returns. Never throws: a phone without an Opus encoder,
- * or any codec failure, yields null, logged once per instance (without any audio).
+ * temporary file in [cacheDir] that is deleted before [encode] returns; files a killed process left behind are swept
+ * when the encoder is created. Never throws: a phone without an Opus encoder, any codec failure, an empty result or
+ * running out of memory yields null, logged once per instance (without any audio).
  */
 class OpusEncoder(private val cacheDir: File) : AudioEncoder {
     @Volatile private var warned = false
+
+    init {
+        runCatching {
+            cacheDir.listFiles { f -> f.name.startsWith(PREFIX) && f.name.endsWith(SUFFIX) }?.forEach { it.delete() }
+        }
+    }
 
     override fun encode(pcm16kMono: ByteArray): EncodedAudio? {
         var file: File? = null
         var codec: MediaCodec? = null
         var muxer: MediaMuxer? = null
         return try {
-            val out = File.createTempFile("utterance", ".ogg", cacheDir).also { file = it }
+            val out = File.createTempFile(PREFIX, SUFFIX, cacheDir).also { file = it }
             val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_OPUS, SAMPLE_RATE, 1).apply {
                 setInteger(MediaFormat.KEY_BIT_RATE, BIT_RATE)
             }
-            codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_OPUS).apply {
-                configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-                start()
-            }
-            muxer = MediaMuxer(out.path, MediaMuxer.OutputFormat.MUXER_OUTPUT_OGG)
-            drain(codec, muxer, pcm16kMono)
-            muxer.stop()
-            muxer.release()
+            // Assigned before configure/start, so the finally block releases it when either throws.
+            val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_OPUS).also { codec = it }
+            encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            encoder.start()
+            val ogg = MediaMuxer(out.path, MediaMuxer.OutputFormat.MUXER_OUTPUT_OGG).also { muxer = it }
+            drain(encoder, ogg, pcm16kMono)
+            ogg.stop()
+            ogg.release()
             muxer = null
-            EncodedAudio(out.readBytes(), MIME)
+            val bytes = out.readBytes()
+            check(bytes.isNotEmpty()) { "empty output" }
+            EncodedAudio(bytes, MIME)
         } catch (e: Exception) {
-            if (!warned) {
-                warned = true
-                Log.w(TAG, "Opus encoding failed, uploading WAV (${e.javaClass.simpleName})")
-            }
-            null
+            fallback(e)
+        } catch (e: OutOfMemoryError) {
+            fallback(e)
         } finally {
             runCatching { codec?.stop() }
             runCatching { codec?.release() }
             runCatching { muxer?.release() }
             runCatching { file?.delete() }
         }
+    }
+
+    private fun fallback(e: Throwable): EncodedAudio? {
+        if (!warned) {
+            warned = true
+            Log.w(TAG, "Opus encoding failed, uploading WAV (${e.javaClass.simpleName})")
+        }
+        return null
     }
 
     /** Feeds [pcm] through [codec] in input-buffer-sized chunks, then writes every encoded packet until end of stream. */
@@ -99,9 +114,9 @@ class OpusEncoder(private val cacheDir: File) : AudioEncoder {
     }
 
     private companion object {
-        const val TAG = "Tsukaima"
         const val MIME = "audio/ogg"
-        const val SAMPLE_RATE = 16_000
+        const val PREFIX = "utterance"
+        const val SUFFIX = ".ogg"
         const val BIT_RATE = 24_000
         const val TIMEOUT_US = 10_000L
 

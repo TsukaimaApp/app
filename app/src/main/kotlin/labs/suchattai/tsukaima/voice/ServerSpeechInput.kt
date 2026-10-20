@@ -30,8 +30,9 @@ import java.nio.ByteOrder
  * encoding fails, and reports the server's text as the [SpeechEvent.Final]. There are no live partials: the provider
  * does not stream, so the run reports [SpeechEvent.Transcribing] while the upload is in flight.
  *
- * The audio stays in memory for one utterance only (trimmed to [LEAD_IN_MS] before the first speech frame; the Opus
- * encoder's temporary file is deleted as soon as it is read back) and is never logged; neither is the transcript.
+ * The audio stays in memory for one utterance only (trimmed to [LEAD_IN_MS] before the first speech frame) and is
+ * never logged; neither is the transcript. The only copy on disk is the Opus encoder's temporary file, deleted right
+ * after muxing and swept when the encoder is created (in case the process died mid-encode).
  * The voice language setting does not apply: the request carries no language, so the server's STT setting (Whisper
  * auto-detection) decides.
  *
@@ -166,5 +167,8 @@ internal class Uploader(
     }
 }
 
-private const val TAG = "Tsukaima"
-private const val SAMPLE_RATE = 16_000
+/** Log tag of the server speech-input path ([ServerSpeechInput], [Uploader], [OpusEncoder]). */
+internal const val TAG = "Tsukaima"
+
+/** Sample rate of recorded utterances (16-bit mono PCM), as recorded, encoded and uploaded. */
+internal const val SAMPLE_RATE = 16_000
