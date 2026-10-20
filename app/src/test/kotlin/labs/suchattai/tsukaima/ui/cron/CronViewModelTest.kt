@@ -136,6 +136,22 @@ class CronViewModelTest {
     }
 
     @Test
+    fun unchangedScheduleOfAnOldJobIsNotValidated() = runTest {
+        // A job without a schedule kind carries a display string; it must still be renameable.
+        val old = job("o").copy(schedule = CronScheduleDto(kind = null, expr = null, display = "every 30m"), deliver = null)
+        val src = FakeSource().apply { jobs = listOf(old) }
+        val vm = vm(src)
+        advanceUntilIdle()
+        vm.startEdit(old)
+        assertTrue(vm.state.value.scheduleEditable)
+        assertNull(vm.state.value.scheduleError)
+        assertTrue(vm.state.value.canSave)
+        vm.updateDraft(schedule = "+5 * * * *")
+        assertNotNull("a changed schedule is validated", vm.state.value.scheduleError)
+        assertFalse(vm.state.value.canSave)
+    }
+
+    @Test
     fun intervalJobEditableWithoutTouchingSchedule() = runTest {
         val interval = job("i").copy(schedule = CronScheduleDto(kind = "interval", expr = null, display = "every 60m"), deliver = null)
         val src = FakeSource().apply { jobs = listOf(interval) }

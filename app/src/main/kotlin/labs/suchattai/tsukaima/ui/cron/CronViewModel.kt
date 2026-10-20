@@ -90,8 +90,9 @@ data class CronUiState(
     /** Interval and once jobs carry a display string, not a cron expression; the dashboard edits those. */
     val scheduleEditable: Boolean get() = editing == null || editing.schedule?.kind.let { it == null || it == "cron" }
 
+    /** Only a schedule the user changed is validated: an existing job's own expression must not block a rename. */
     val scheduleError: String?
-        get() = if (!scheduleEditable) null else cronScheduleError(draft.schedule)
+        get() = if (!scheduleEditable || (editing != null && draft.schedule == baseline.schedule)) null else cronScheduleError(draft.schedule)
 
     val canSave: Boolean
         get() = draft.name.isNotBlank() && draft.prompt.isNotBlank() && scheduleError == null && !saving

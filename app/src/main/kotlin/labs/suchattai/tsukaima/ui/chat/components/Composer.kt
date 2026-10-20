@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -22,7 +23,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -166,34 +166,42 @@ private fun AttachmentChip(a: PendingAttachment, onRemove: () -> Unit, onRetry: 
         modifier = Modifier
             .alpha(if (a.status == AttachmentStatus.Uploading) 0.55f else 1f)
             .clip(shape)
-            .border(1.dp, if (failed) colors.danger else colors.hairline, shape)
-            .clickable(enabled = failed, role = Role.Button, onClickLabel = "Retry upload", onClick = onRetry)
-            .semantics(mergeDescendants = true) {
-                stateDescription = when (a.status) {
-                    AttachmentStatus.Uploading -> "Uploading"
-                    AttachmentStatus.Ready -> "Attached"
-                    AttachmentStatus.Failed -> "Upload failed, tap to retry"
-                }
-            }
-            .padding(start = 10.dp),
+            .border(1.dp, if (failed) colors.danger else colors.hairline, shape),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        TsukaimaIcon(
-            if (failed) IconName.Refresh else if (a.kind == AttachmentKind.Image) IconName.Image else IconName.AttachFile,
-            contentDescription = null,
-            size = 16.dp,
-            tint = ink,
-        )
-        Text(
-            text = a.name,
-            style = TsukaimaType.caption,
-            color = if (failed) colors.danger else colors.ink1,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.widthIn(max = 160.dp),
-        )
-        Text(Attachments.humanSize(a.sizeBytes), style = TsukaimaType.caption, color = ink)
+        // The label is one merged node (its Retry action when failed); Remove stays a sibling so TalkBack
+        // reaches it separately instead of losing it inside the merge.
+        Row(
+            modifier = Modifier
+                .clickable(enabled = failed, role = Role.Button, onClickLabel = "Retry upload", onClick = onRetry)
+                .semantics(mergeDescendants = true) {
+                    stateDescription = when (a.status) {
+                        AttachmentStatus.Uploading -> "Uploading"
+                        AttachmentStatus.Ready -> "Attached"
+                        AttachmentStatus.Failed -> "Upload failed, tap to retry"
+                    }
+                }
+                .padding(start = 10.dp)
+                .heightIn(min = Dimens.hit),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            TsukaimaIcon(
+                if (failed) IconName.Refresh else if (a.kind == AttachmentKind.Image) IconName.Image else IconName.AttachFile,
+                contentDescription = null,
+                size = 16.dp,
+                tint = ink,
+            )
+            Text(
+                text = a.name,
+                style = TsukaimaType.caption,
+                color = if (failed) colors.danger else colors.ink1,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 160.dp),
+            )
+            Text(Attachments.humanSize(a.sizeBytes), style = TsukaimaType.caption, color = ink)
+        }
         Box(
             modifier = Modifier
                 .size(Dimens.hit) // the 44dp hit minimum; the pill grows to match
