@@ -1,0 +1,8 @@
+/** Voice-mode presence orb: lavender wash disc with amplitude bars (listening/speaking), breathing dot (thinking), mic glyph (idle/muted). */
+export interface VoiceIndicatorProps {
+  /** default "listening" */
+  state?: 'idle' | 'listening' | 'thinking' | 'speaking' | 'muted';
+  /** outer px size, default 160 (disc is 62%) */
+  size?: number;
+  style?: React.CSSProperties;
+}
