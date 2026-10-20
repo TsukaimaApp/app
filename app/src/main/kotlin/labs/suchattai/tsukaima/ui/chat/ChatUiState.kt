@@ -71,7 +71,7 @@ data class ChatUiState(
      * submit would ride along with the next turn instead) and Hermes is reachable.
      */
     val canSend: Boolean
-        get() = writable && attachments.none { it.status == AttachmentStatus.Uploading } &&
+        get() = writable && !compacting && attachments.none { it.status == AttachmentStatus.Uploading } &&
             (input.isNotBlank() || attachments.any { it.status == AttachmentStatus.Ready })
 
     /** A new chat with nothing in it yet (shows the working-directory picker). */

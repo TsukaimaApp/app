@@ -131,7 +131,7 @@ class HermesApi(
         get(
             "api/sessions/search", "results", SessionDto.serializer(),
             "q" to query, "limit" to limit.coerceIn(1, MAX_SESSIONS).toString(),
-        )
+        ).distinctBy { it.id } // FTS can return several rows of one session; the drawer keys rows by id
 
     /**
      * Whether stored session [id] is archived (`GET /api/sessions/{id}`). The detail row is the raw database row,

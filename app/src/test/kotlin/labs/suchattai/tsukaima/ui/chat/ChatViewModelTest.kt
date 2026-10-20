@@ -1389,6 +1389,58 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun failedSendSurvivesAReconnectThatRebuildsTheTranscript() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.transport.failNext["prompt.submit"] = null
+        vm.setInput("hello")
+        vm.send()
+        advanceUntilIdle()
+        val failed = vm.state.value.chat.items.single() as ChatItem.UserMessage
+        assertTrue(failed.failed)
+
+        // The server session expired: the resume comes back with a new live id and the transcript is rebuilt.
+        b.transport.on("session.resume", obj(resumeJson.replace(live, "beef0001")))
+        b.transport.on("session.events.since", obj("""{"events":[],"latest_seq":0,"truncated":false,"open_requests":[]}"""))
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+        assertEquals("beef0001", vm.state.value.chat.liveSessionId)
+        val kept = vm.state.value.chat.items.last() as ChatItem.UserMessage
+        assertEquals(failed.id, kept.id)
+        assertTrue("the unsent text is still on its bubble", kept.failed)
+        assertEquals("hello", kept.text)
+
+        vm.retrySend(failed.id)
+        advanceUntilIdle()
+        val submit = b.transport.last("prompt.submit")
+        assertEquals("beef0001", submit["session_id"]!!.jsonPrimitive.content)
+        assertEquals("hello", submit["text"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun sendIsHeldWhileCompacting() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val b = backend().apply {
+            transport.on("session.compress", obj("""{"status":"compressed","summary":{"headline":"ok"},"usage":{"context_percent":3,"total":40}}"""))
+            transport.gateNext["session.compress"] = gate
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("hello")
+        assertTrue(vm.state.value.canSend)
+        vm.compact()
+        advanceUntilIdle()
+        assertFalse("no prompt may race the compaction", vm.state.value.canSend)
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertTrue(vm.state.value.canSend)
+        assertEquals("the result's own usage drives the meter", 3, vm.state.value.chat.usage?.contextPercent)
+    }
+
+    @Test
     fun dismissingAFailedSendPutsItBackInTheComposer() = runTest(dispatcher) {
         val b = backend()
         val vm = vm(b)

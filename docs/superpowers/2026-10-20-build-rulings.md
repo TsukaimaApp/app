@@ -171,3 +171,4 @@ shapes are in `docs/protocol/README.md` §4 "v0.5.0 additions".
 - Search hits are not grouped by profile; no search in the archived view.
 - A toolset toggle does not refresh an open chat's tools (applies to new sessions).
 - Still open from earlier: `vault.save_login`/`vault.code` answered "method not found"; a few characters of a partial reply can be missing after a truncated-replay rebuild.
+- v0.5.0 review fixes: a failed server search shows "Search failed" instead of "Searching…" forever; failed (never sent) bubbles are re-appended after a reconnect rebuilds the transcript from history (`ChatReconnector.onRebuilt`); Send is held while compacting; search hits are deduped by session id (FTS can return several rows per session; the drawer keys by id); the compress result's own `usage` drives the meter. Still open: the smoke's `config.set` check passes vacuously when no new `session.info` arrives.

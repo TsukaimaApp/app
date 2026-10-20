@@ -73,6 +73,7 @@ class ChatViewModel(
     private val failedSends = mutableMapOf<String, FailedSend>()
     private val sync = ChatReconnector(
         session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), storedSessionId, flair, _state,
+        onRebuilt = ::restoreFailedSends,
     )
 
     private val attachments = ChatAttachments(
@@ -231,6 +232,16 @@ class ChatViewModel(
         failedSends.remove(localId)
         setChat { c -> c.copy(items = c.items.markFailed(localId, false), status = AgentStatus.Thinking(flair())) }
         launch { submit(live, localId, failed.text, failed.attachments) }
+    }
+
+    /** A rebuilt transcript holds only what the server stored: the failed bubbles (never sent) are put back at the end. */
+    private fun restoreFailedSends() {
+        if (failedSends.isEmpty()) return
+        setChat { c ->
+            val missing = failedSends.filterKeys { id -> c.items.none { it.id == id } }
+            if (missing.isEmpty()) c
+            else c.copy(items = c.items + missing.map { (id, f) -> ChatItem.UserMessage(id, f.text, f.attachments.map { it.name }, failed = true) })
+        }
     }
 
     /** Dismiss on a failed bubble: removes it; its text (if the composer is empty) and attachments go back to the composer. */
@@ -467,7 +478,8 @@ class ChatViewModel(
                     val done = ChatSync.compacted(session.compress(live))
                     setChat { c ->
                         val info = done.info?.let { ChatReducer.onSessionInfo(c, it) } ?: c
-                        if (done.storedId != null && c.liveSessionId == live) info.copy(storedSessionId = done.storedId) else info
+                        val fresh = ChatReducer.withUsage(info, done.usage) // the result's own usage is the post-compaction one
+                        if (done.storedId != null && c.liveSessionId == live) fresh.copy(storedSessionId = done.storedId) else fresh
                     }
                     backend.toast(done.message)
                 }

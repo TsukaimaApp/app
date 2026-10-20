@@ -365,6 +365,12 @@ class HermesApiTest {
     }
 
     @Test
+    fun searchDedupesRowsOfOneSession() = runBlocking {
+        json("""{"results":[{"id":"s1","title":"a"},{"id":"s1","title":"a (older hit)"},{"id":"s2","title":"b"}]}""")
+        assertEquals(listOf("s1", "s2"), authedApi().searchSessions("a").map { it.id })
+    }
+
+    @Test
     fun downloadKeepsQuotedFilenamesIntact() = runBlocking {
         // RFC 6266 quoted-string: `;` and `\"` inside the quotes belong to the name.
         file("x", "Content-Disposition" to "attachment; filename=\"report;final.pdf\"; size=1")

@@ -125,7 +125,7 @@ internal data class Replay(
  * What a `session.compress` came to: [message] for the toast, [storedId] when compaction rotated the session onto a
  * new stored id, and the [info] snapshot (token counters) when the server sent one.
  */
-internal data class Compacted(val message: String, val storedId: String?, val info: JsonObject?)
+internal data class Compacted(val message: String, val storedId: String?, val info: JsonObject?, val usage: JsonObject? = null)
 
 /** Pure helpers for decoding gateway snapshots into frames the reducer understands. */
 internal object ChatSync {
@@ -144,7 +144,7 @@ internal object ChatSync {
             else -> (result["summary"] as? JsonObject)?.string("headline")
                 ?: if (status == "aborted") "Compaction was aborted" else "Context compacted"
         }
-        return Compacted(message, info?.string("stored_session_id")?.takeIf { it.isNotBlank() }, info)
+        return Compacted(message, info?.string("stored_session_id")?.takeIf { it.isNotBlank() }, info, result["usage"] as? JsonObject)
     }
 
     /** The first line of a server notice, trimmed to a toast's length. */

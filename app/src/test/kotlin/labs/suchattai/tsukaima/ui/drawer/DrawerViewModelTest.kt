@@ -15,6 +15,7 @@ import labs.suchattai.tsukaima.data.api.SessionDto
 import labs.suchattai.tsukaima.data.prefs.Settings
 import org.junit.After
 import org.junit.Assert.assertEquals
+import kotlinx.coroutines.test.advanceUntilIdle
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -43,9 +44,10 @@ class DrawerViewModelTest {
             return Result.success(Unit)
         }
         var hits: List<SessionDto> = emptyList()
+        var failSearch = false
         override suspend fun search(query: String): Result<List<SessionDto>> {
             calls += "search:$query"
-            return Result.success(hits)
+            return if (failSearch) Result.failure(java.io.IOException("down")) else Result.success(hits)
         }
     }
 
@@ -82,6 +84,26 @@ class DrawerViewModelTest {
         )
         // The default profile always leads; the rest keep server order.
         assertEquals(listOf("default", "ops", "research"), state.grouped.keys.toList())
+    }
+
+    @Test
+    fun searchFailureIsShownAndClearedByTheNextQuery() = runTest {
+        val fake = FakeSessions(sessions).apply { failSearch = true }
+        val vm = DrawerViewModel(fake, settings)
+        advanceUntilIdle()
+        vm.setQuery("cron")
+        advanceUntilIdle()
+        val s = vm.state.value
+        assertTrue("not stuck on Searching…", s.searchFailed)
+        assertFalse(s.searching)
+        assertNull(s.searchResults)
+
+        fake.failSearch = false
+        fake.hits = sessions.take(1)
+        vm.setQuery("cron job")
+        assertFalse(vm.state.value.searchFailed)
+        advanceUntilIdle()
+        assertEquals(listOf("a"), vm.state.value.searchResults?.map { it.id })
     }
 
     @Test

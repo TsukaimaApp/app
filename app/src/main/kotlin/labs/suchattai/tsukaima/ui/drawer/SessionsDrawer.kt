@@ -94,7 +94,7 @@ fun SessionsDrawer(
             if (state.searchActive && !state.showArchived) {
                 val hits = state.searchResults
                 if (hits == null) {
-                    item(key = "searching") { EmptyCaption("Searching…") }
+                    item(key = "searching") { EmptyCaption(if (state.searchFailed) "Search failed. Keep typing to retry." else "Searching…") }
                 } else {
                     items(hits, key = { "q:${it.id}" }) { s ->
                         ConversationItem(

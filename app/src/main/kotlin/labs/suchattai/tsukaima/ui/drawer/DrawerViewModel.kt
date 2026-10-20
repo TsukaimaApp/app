@@ -38,6 +38,8 @@ data class DrawerUiState(
     /** Server search hits for [query] (null: none yet for it); shown in place of the list while [searchActive]. */
     val searchResults: List<SessionDto>? = null,
     val searching: Boolean = false,
+    /** The last server search for [query] failed (shown instead of "Searching…"; cleared by the next query). */
+    val searchFailed: Boolean = false,
 ) {
     /** [query] is long enough for the server search ([MIN_SEARCH] characters); shorter filters the list locally. */
     val searchActive: Boolean get() = query.trim().length >= MIN_SEARCH
@@ -155,10 +157,10 @@ class DrawerViewModel(
         if (q == previous && (_state.value.searchResults != null || _state.value.searching)) return
         searchJob?.cancel()
         if (q.length < MIN_SEARCH) {
-            _state.update { it.copy(searchResults = null, searching = false) }
+            _state.update { it.copy(searchResults = null, searching = false, searchFailed = false) }
             return
         }
-        _state.update { it.copy(searchResults = null) }
+        _state.update { it.copy(searchResults = null, searchFailed = false) }
         searchJob = viewModelScope.launch {
             delay(searchDebounceMs)
             search(q)
@@ -169,7 +171,10 @@ class DrawerViewModel(
         _state.update { it.copy(searching = true) }
         repo.search(q)
             .onSuccess { hits -> _state.update { if (it.query.trim() == q) it.copy(searchResults = hits) else it } }
-            .onFailure { if (isReachable()) _errors.trySend("Couldn't search sessions") }
+            .onFailure {
+                _state.update { if (it.query.trim() == q) it.copy(searchFailed = true) else it }
+                if (isReachable()) _errors.trySend("Couldn't search sessions")
+            }
         _state.update { it.copy(searching = false) }
     }
 

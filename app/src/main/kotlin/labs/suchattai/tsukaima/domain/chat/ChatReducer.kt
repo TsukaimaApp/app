@@ -204,7 +204,7 @@ object ChatReducer {
     }
 
     /** [state] with the counters of a `usage` object; an empty or absent one changes nothing. */
-    private fun withUsage(state: ChatState, usage: JsonElement?): ChatState {
+    fun withUsage(state: ChatState, usage: JsonElement?): ChatState {
         val u = usage as? JsonObject ?: return state
         fun long(key: String) = (u[key] as? JsonPrimitive)?.longOrNull
         val parsed = SessionUsage(
