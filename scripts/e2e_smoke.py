@@ -109,8 +109,8 @@ async def ws_part(token):
 
 async def model_switch_part(rpc, sid, infos):
     """The chat's live model switch: `config.set key=model` with the model the session already runs (so nothing
-    changes), `--provider` and `--session` exactly as ChatViewModel sends it; the reply is session-scoped and the
-    next `session.info` still names that model."""
+    changes), `--provider` and `--session` exactly as ChatViewModel sends it; the reply is session-scoped and a
+    new `session.info` (one that arrived after the call, within 10 s) still names that model."""
     current = next((i for i in reversed(infos) if i.get("model") and i.get("provider")), None)
     if current is None:
         opts = await rpc("model.options", {"session_id": sid})
@@ -120,13 +120,15 @@ async def model_switch_part(rpc, sid, infos):
     r = await rpc("config.set", {"session_id": sid, "key": "model", "value": f"{model} --provider {provider} --session"})
     if r.get("value") != model or r.get("scope") != "session" or r.get("confirm_required"):
         fail(f"config.set model: unexpected result {r!r}")
-    for _ in range(50):
+    for _ in range(100):  # up to 10 s for the session.info the switch emits
         if len(infos) > seen:
             break
         await asyncio.sleep(0.1)
-    after = infos[seen:] or infos
-    if not after or after[-1].get("model") != model:
-        fail(f"session.info after config.set does not name {model!r}: {after[-1:]!r}")
+    after = infos[seen:]
+    if not after:
+        fail("no new session.info within 10 s of config.set model")
+    if after[-1].get("model") != model:
+        fail(f"session.info after config.set does not name {model!r}: {after[-1]!r}")
     step(f"config.set model round trip ({model} via {provider}, scope=session)")
 
 
