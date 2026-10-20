@@ -74,7 +74,7 @@ sentence); a forwarding recogniser for Android 10/11 (the stub recogniser takes 
 
 - Controller: no timeout if the status never leaves Idle after a sent final; a message rebuilt under the same id
   mid-stream is re-spoken; stop() during the hand-off line drops the approval callback; assist hand-off is once per
-  id, not strictly the first card; an unguarded `current` clear in drain().
+  id, not strictly the first card.
 - Speech adapters: stop() does not end a multi-chunk speak (> 4000 chars); a cancelled speak can stop a following
   one (no join); the TTS engine is never shut down.
 - UI: haptic can fire again after rotation; orb ring easing is not `Motion.easing`; `ChatScreen` is 639 lines
