@@ -9,6 +9,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import labs.suchattai.tsukaima.data.ServerRequestRouter
 import labs.suchattai.tsukaima.data.gateway.ConnectionState
 import labs.suchattai.tsukaima.data.gateway.Frame
 import labs.suchattai.tsukaima.data.gateway.GatewaySession
@@ -92,7 +93,7 @@ internal class ChatReconnector(
             val replay = ChatSync.replay(session.eventsSince(r.sessionId, if (sameLive) chat.lastSeq else 0))
             if (replay.truncated) {
                 // The ring lost events we never saw: trust the stored history instead of a replay with holes.
-                setChat { it.copy(items = ChatReducer.fromHistory(r.messages), lastSeq = replay.latestSeq ?: it.lastSeq) }
+                setChat { it.copy(items = ChatSync.transcript(r), lastSeq = replay.latestSeq ?: it.lastSeq) }
             } else {
                 replay.events.forEach(::applyEvent)
             }
@@ -113,11 +114,14 @@ internal class ChatReconnector(
         }
     }
 
-    /** Binds a resume result; [rebuild] replaces the transcript with its history. */
+    /**
+     * Binds a resume result; [rebuild] replaces the transcript with its history plus, while a turn runs, the reply
+     * it has streamed so far ([ChatSync.transcript]); live deltas then append to that bubble.
+     */
     fun bindResumed(r: SessionResumed, rebuild: Boolean) {
         setChat { c ->
             val bound = ChatReducer.onSessionBound(c, r.sessionId, r.storedSessionId ?: routeStoredId)
-            val items = if (rebuild) bound.copy(items = ChatReducer.fromHistory(r.messages)) else bound
+            val items = if (rebuild) bound.copy(items = ChatSync.transcript(r)) else bound
             if (r.running) items.copy(status = AgentStatus.Thinking(flair())) else ChatReducer.onConnectionRestored(items)
         }
     }
@@ -176,7 +180,7 @@ internal class ChatReconnector(
     }
 
     /**
-     * Approvals and questions for this live session that nobody has answered yet; replays of answered ones are skipped, and
+     * Approvals, questions and masked prompts for this live session that nobody has answered yet; replays of answered ones are skipped, and
      * so are withdrawn ones unless a resume [snapshot] (authoritative) lists them as open again.
      */
     private fun adopt(req: Frame.ServerRequest, snapshot: Boolean = false) {
@@ -189,6 +193,6 @@ internal class ChatReconnector(
 
     private companion object {
         /** Server requests a chat shows and answers. */
-        val ADOPTED = setOf("approval", "clarify")
+        val ADOPTED = setOf("approval", "clarify") + ServerRequestRouter.SECRET_METHODS
     }
 }

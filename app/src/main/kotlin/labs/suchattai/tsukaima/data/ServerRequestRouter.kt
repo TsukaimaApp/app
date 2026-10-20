@@ -12,13 +12,14 @@ import labs.suchattai.tsukaima.domain.chat.ClarifyAnswers
 /**
  * Decides, for each server→client request, whether the app's screens see it. The client advertises
  * `server_requests: true`, so the agent waits for an answer to every request it sends us; a dropped one
- * would block it for the request's whole deadline (clarify: 300 s). So only `approval` and `clarify` are
- * forwarded to subscribers (chat and notifications answer them); everything else is answered here at once:
+ * would block it for the request's whole deadline (clarify: 300 s). So only `approval`, `clarify` and the
+ * masked prompts ([SECRET_METHODS]: `sudo`, `secret`, `vault.unlock_prompt`) are forwarded to subscribers (chat
+ * and notifications answer them); everything else is answered here at once:
  *
  * - `clarify` with no askable question: cancelled with `{}` (no `answers` = cancel all), as the TUI does.
  * - Window-owned bridges (`preview.*`, `terminal.read`, `window.read`, `tour`): declined with
  *   [NOT_SHOWN_CODE], the code by which a client says no window of it shows the session.
- * - `secret`, `sudo` and anything unknown: a JSON-RPC "method not found" error.
+ * - Anything else (`vault.save_login`, `vault.code`, unknown methods): a JSON-RPC "method not found" error.
  *
  * It also records requests the server withdrew (`request.cancel`, `approval.cancelled`) in [closed], shared
  * by chat and notifications so a withdrawn request replayed later is never shown again. Thread-safe.
@@ -33,7 +34,7 @@ class ServerRequestRouter(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > CAPACITY
     }
 
-    /** Returns true when [req] must be forwarded to subscribers (approvals, questions); otherwise it was answered here. */
+    /** Returns true when [req] must be forwarded to subscribers (approvals, questions, masked prompts); otherwise it was answered here. */
     fun route(req: Frame.ServerRequest): Boolean {
         val method = req.method
         val sent = when {
@@ -45,6 +46,7 @@ class ServerRequestRouter(
                 if (ClarifyAnswers.questions(req.params).isNotEmpty()) return true
                 transport.respond(req.id, JsonObject(emptyMap()))
             }
+            method in SECRET_METHODS -> return true
             method.startsWith("preview.") || method in WINDOW_OWNED ->
                 transport.respondError(req.id, NOT_SHOWN_CODE, NOT_SHOWN_MESSAGE)
             else -> transport.respondError(req.id, METHOD_NOT_FOUND, UNSUPPORTED_MESSAGE)
@@ -80,6 +82,9 @@ class ServerRequestRouter(
         private const val APPROVAL = "approval"
         private const val CLARIFY = "clarify"
         private const val CAPACITY = 64
+
+        /** Masked one-string prompts: the reply is `{"value": "<string>"}`, `""` = skipped / declined. */
+        val SECRET_METHODS = setOf("sudo", "secret", "vault.unlock_prompt")
         private val WINDOW_OWNED = setOf("terminal.read", "window.read", "tour")
     }
 }

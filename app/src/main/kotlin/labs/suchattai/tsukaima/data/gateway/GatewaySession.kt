@@ -59,9 +59,9 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
         })
     }
 
-    suspend fun interrupt(sessionId: String) {
-        rpc("session.interrupt", idParams(sessionId))
-    }
+    /** Stops the running turn; returns the server's `status` (`interrupted` / `not_interrupted`), null if absent. */
+    suspend fun interrupt(sessionId: String): String? =
+        (rpc("session.interrupt", idParams(sessionId))["status"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
 
     suspend fun setCwd(sessionId: String, cwd: String) {
         rpc("session.cwd.set", buildJsonObject {
@@ -146,6 +146,14 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
                 buildJsonObject { put("answers", JsonObject(answers.mapValues { (_, v) -> JsonPrimitive(v) })) }
             },
         )
+
+    /**
+     * Answers a masked one-string prompt (`sudo`, `secret`, `vault.unlock_prompt`) by its server-request id:
+     * `{"value": value}`, where `""` means skipped / declined (gateway-contract `ValueResult`). Returns whether the
+     * answer was enqueued on a live connection.
+     */
+    fun respondValue(srqId: String, value: String): Boolean =
+        transport.respond(srqId, buildJsonObject { put("value", value) })
 
     /**
      * Answers an approval by its `request_id` rather than a server-request id: for the `pending_approval` a

@@ -121,14 +121,15 @@ class ConnectionManager(
     private val _serverRequests = MutableSharedFlow<Frame.ServerRequest>(replay = 16, extraBufferCapacity = 64)
 
     /**
-     * Server→client approval and clarify requests (the rest are answered by [router]), hot and multicast. The last 16 are
-     * replayed so a screen or notification that subscribes late still sees them; subscribers must ignore
+     * Server→client approval, clarify and masked-prompt (sudo, secret, vault unlock) requests (the rest are
+     * answered by [router]), hot and multicast. The last 16 are replayed so a screen or notification that
+     * subscribes late still sees them; subscribers must ignore
      * requests already answered ([labs.suchattai.tsukaima.di.AppContainer.answeredRequestIds]) or withdrawn
      * ([closedRequestIds]).
      */
     val serverRequests: SharedFlow<Frame.ServerRequest> = _serverRequests.asSharedFlow()
 
-    /** Answers every server request except approvals and questions, and tracks withdrawn ones; see [ServerRequestRouter]. */
+    /** Answers every server request except approvals, questions and masked prompts, and tracks withdrawn ones; see [ServerRequestRouter]. */
     private val router = ServerRequestRouter(gateway, logger = logger)
 
     /**
@@ -166,7 +167,7 @@ class ConnectionManager(
 
     private fun run(interval: Long) {
         if (forwarding.compareAndSet(false, true)) {
-            // The single collector of the gateway's requests: only approvals and questions reach subscribers.
+            // The single collector of the gateway's requests: only approvals, questions and masked prompts reach subscribers.
             scope.launch { gateway.serverRequests.collect { if (router.route(it)) _serverRequests.emit(it) } }
             scope.launch { gateway.events.collect(router::onEvent) }
         }

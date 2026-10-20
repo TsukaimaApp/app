@@ -338,7 +338,7 @@ class ChatReducerTest {
         assertEquals(9L, s4.feed(ev("session.info", seq = 60, session = "other")).lastSeq)
         // Without a live session, nothing advances the watermark (session.title still applies).
         val unbound = ChatState().feed(ev("session.title", """{"title":"T"}""", 4))
-        assertEquals(0L, unbound.lastSeq)
+        assertEquals(NO_SEQ, unbound.lastSeq)
         assertEquals("T", unbound.title)
     }
 
@@ -453,7 +453,7 @@ class ChatReducerTest {
         assertEquals(live, s)
         // Global events (empty session id) pass through but never move the watermark.
         val g = live.feed(ev("sessions.changed", seq = 2, session = ""))
-        assertEquals(0L, g.lastSeq)
+        assertEquals(NO_SEQ, g.lastSeq)
     }
 
     @Test
@@ -485,7 +485,7 @@ class ChatReducerTest {
         val bound = ChatReducer.onSessionBound(before, liveId = "d4fb0dea", storedId = "20261020_010916_48c967")
         assertEquals("d4fb0dea", bound.liveSessionId)
         assertEquals("20261020_010916_48c967", bound.storedSessionId)
-        assertEquals(0L, bound.lastSeq)
+        assertEquals(NO_SEQ, bound.lastSeq)
         assertEquals(0L, bound.localCounter)
         // The new live session's seq restarts at 1, and must not be swallowed by the old watermark.
         val next = bound.feed(ev("message.start", seq = 1, session = "d4fb0dea"))
@@ -508,5 +508,143 @@ class ChatReducerTest {
         assertEquals(6L, bound.lastSeq)
         assertEquals(2L, bound.localCounter)
         assertEquals("20261020_010916_48c967", bound.storedSessionId)
+    }
+
+    // --- v0.4.0 ---
+
+    @Test
+    fun seqZeroOnAFreshSessionIsApplied() {
+        // The watermark starts at NO_SEQ, not 0: an event numbered 0 is new, not a replay.
+        val s = live.feed(ev("message.start", seq = 0), ev("message.delta", """{"text":"hi"}""", 1))
+        assertEquals(1L, s.lastSeq)
+        assertEquals("hi", (s.items.single() as ChatItem.AssistantMessage).text)
+        assertEquals("a-0", s.items.single().id)
+        // ...and its replay is then dropped.
+        assertEquals(s, s.feed(ev("message.delta", """{"text":"hi"}""", 0)))
+    }
+
+    @Test
+    fun interimNotStreamedBecomesItsOwnReplyBeforeTheNextTool() {
+        val s = live.feed(
+            ev("message.start", seq = 1),
+            ev("message.interim", """{"text":"Let me check the disk first.","already_streamed":false}""", 2),
+            ev("tool.start", """{"tool_id":"t1","name":"terminal","context":"df -h"}""", 3),
+            ev("message.delta", """{"text":"Plenty of space."}""", 4),
+            ev("message.complete", """{"text":"Plenty of space."}""", 5),
+        )
+        val kinds = s.items.map { it::class.simpleName }
+        assertEquals(listOf("AssistantMessage", "ToolCall", "AssistantMessage"), kinds)
+        val interim = s.items[0] as ChatItem.AssistantMessage
+        assertEquals("Let me check the disk first.", interim.text)
+        assertFalse(interim.streaming)
+        assertEquals("Plenty of space.", (s.items[2] as ChatItem.AssistantMessage).text)
+    }
+
+    @Test
+    fun interimAfterStreamedTextIsAppendedClosedAndAlreadyStreamedIgnored() {
+        val streamed = live.feed(ev("message.start", seq = 1), ev("message.delta", """{"text":"Checking."}""", 2))
+        // already_streamed: the text is in the bubble already.
+        assertEquals(streamed.copy(lastSeq = 3), streamed.feed(ev("message.interim", """{"text":"Checking.","already_streamed":true}""", 3)))
+        val s = streamed.feed(ev("message.interim", """{"text":"Now the logs.","already_streamed":false}""", 3))
+        assertEquals(listOf("Checking.", "Now the logs."), s.items.map { (it as ChatItem.AssistantMessage).text })
+        assertTrue(s.items.none { (it as ChatItem.AssistantMessage).streaming })
+        assertEquals("i-3", s.items.last().id)
+        // A blank interim changes nothing but the watermark.
+        assertEquals(streamed.copy(lastSeq = 3), streamed.feed(ev("message.interim", """{"text":" ","already_streamed":false}""", 3)))
+    }
+
+    @Test
+    fun interimFillsAReasoningOnlyBubble() {
+        val s = live.feed(
+            ev("message.start", seq = 1),
+            ev("reasoning.delta", """{"text":"think"}""", 2),
+            ev("message.interim", """{"text":"First, the config.","already_streamed":false}""", 3),
+        )
+        val only = s.items.single() as ChatItem.AssistantMessage
+        assertEquals("First, the config.", only.text)
+        assertEquals("think", only.reasoning)
+        assertFalse(only.streaming)
+    }
+
+    private fun prompt(id: String, method: String, params: String) =
+        Frame.ServerRequest(id, method, obj("""{"session_id":"$sid",$params}"""))
+
+    @Test
+    fun maskedPromptsAddCardsWithWaitingStatus() {
+        val sudo = live.feed(prompt("srq-u", "sudo", """"command":"sudo apt update""""))
+        val card = sudo.items.single() as ChatItem.SecretPrompt
+        assertEquals(SecretKind.Sudo, card.kind)
+        assertEquals("sudo apt update", card.subject)
+        assertEquals(AgentStatus.Secret(password = true), sudo.status)
+        assertEquals("Waiting for a password", sudo.status.label)
+        assertEquals(StatusTone.Amber, sudo.status.tone)
+
+        val secret = live.feed(prompt("srq-s", "secret", """"env_var":"API_KEY","prompt":"Weather API key""""))
+        val s = secret.items.single() as ChatItem.SecretPrompt
+        assertEquals(SecretKind.Secret, s.kind)
+        assertEquals("API_KEY", s.subject)
+        assertEquals("Weather API key", s.prompt)
+        assertEquals("Waiting for a secret", secret.status.label)
+
+        val vault = live.feed(prompt("srq-v", "vault.unlock_prompt", """"backend":"bw","display_name":"Bitwarden""""))
+        assertEquals("Bitwarden", (vault.items.single() as ChatItem.SecretPrompt).subject)
+        assertEquals(AgentStatus.Secret(password = true), vault.status)
+        // Other sessions' prompts and duplicates are ignored.
+        assertEquals(live, live.feed(Frame.ServerRequest("srq-x", "sudo", obj("""{"session_id":"other"}"""))))
+        assertEquals(sudo, sudo.feed(prompt("srq-u", "sudo", """"command":"sudo apt update"""")))
+    }
+
+    @Test
+    fun maskedPromptAnsweredRecordsOnlyDeclinedAndResumesThinking() {
+        val waiting = live.copy(status = AgentStatus.Thinking("x")).feed(prompt("srq-u", "sudo", """"command":"sudo -v""""))
+        val sent = ChatReducer.onSecretAnswered(waiting, "srq-u", declined = false, flair)
+        val card = sent.items.single() as ChatItem.SecretPrompt
+        assertTrue(card.answered)
+        assertFalse(card.declined)
+        assertTrue(sent.status is AgentStatus.Thinking)
+        assertEquals(sent, ChatReducer.onSecretAnswered(sent, "srq-u", declined = true, flair)) // idempotent
+        val declined = ChatReducer.onSecretAnswered(waiting, "srq-u", declined = true, flair)
+        assertTrue((declined.items.single() as ChatItem.SecretPrompt).declined)
+    }
+
+    @Test
+    fun requestCancelRemovesMaskedPromptAndTurnErrorDropsIt() {
+        val waiting = live.feed(prompt("srq-s", "secret", """"env_var":"K","prompt":"p""""))
+        val cancelled = waiting.feed(ev("request.cancel", """{"id":"srq-s","method":"secret","reason":"timeout"}""", 4))
+        assertTrue(cancelled.items.isEmpty())
+        assertTrue(cancelled.status is AgentStatus.Thinking)
+        val failed = waiting.feed(ev("error", """{"message":"boom"}""", 4))
+        assertTrue(failed.items.none { it is ChatItem.SecretPrompt })
+    }
+
+    @Test
+    fun approvalWaitsBeforeAMaskedPrompt() {
+        val both = live.feed(approvalRequest, prompt("srq-u", "sudo", """"command":"sudo -v""""))
+        assertEquals(AgentStatus.Approval, both.status)
+        val afterApproval = ChatReducer.onApprovalAnswered(both, "srq-1", flair)
+        assertEquals(AgentStatus.Secret(password = true), afterApproval.status)
+    }
+
+    @Test
+    fun approvalScopesFromChoicesOrFlags() {
+        val full = live.feed(approvalRequest).items.single() as ChatItem.Approval
+        assertTrue(full.allowSession)
+        assertTrue(full.allowAlways)
+        val onceOnly = live.feed(
+            Frame.ServerRequest("srq-2", "approval", obj("""{"session_id":"$sid","request_id":"r","choices":["once","deny"]}""")),
+        ).items.single() as ChatItem.Approval
+        assertFalse(onceOnly.allowSession)
+        assertFalse(onceOnly.allowAlways)
+        // No `choices`: derived like the server (allow_permanent=false hides always; smart_denied hides both).
+        val noPermanent = live.feed(
+            Frame.ServerRequest("srq-3", "approval", obj("""{"session_id":"$sid","request_id":"r","allow_permanent":false}""")),
+        ).items.single() as ChatItem.Approval
+        assertTrue(noPermanent.allowSession)
+        assertFalse(noPermanent.allowAlways)
+        val smart = live.feed(
+            Frame.ServerRequest("srq-4", "approval", obj("""{"session_id":"$sid","request_id":"r","smart_denied":true}""")),
+        ).items.single() as ChatItem.Approval
+        assertFalse(smart.allowSession)
+        assertFalse(smart.allowAlways)
     }
 }

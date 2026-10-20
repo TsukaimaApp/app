@@ -43,6 +43,12 @@ sealed interface AgentStatus {
         override val tone = StatusTone.Amber
     }
 
+    /** A `sudo` / `vault.unlock_prompt` (password) or `secret` request waits for the user. */
+    data class Secret(val password: Boolean) : AgentStatus {
+        override val label get() = if (password) "Waiting for a password" else "Waiting for a secret"
+        override val tone get() = StatusTone.Amber
+    }
+
     data object Stopped : AgentStatus {
         override val label = "Gateway stopped"
         override val tone = StatusTone.Red
@@ -53,3 +59,7 @@ sealed interface AgentStatus {
         override val tone = StatusTone.Red
     }
 }
+
+/** The agent is working on a turn (what Stop interrupts): thinking, running a tool or streaming a reply. */
+val AgentStatus.running: Boolean
+    get() = this is AgentStatus.Thinking || this is AgentStatus.Tool || this == AgentStatus.Replying

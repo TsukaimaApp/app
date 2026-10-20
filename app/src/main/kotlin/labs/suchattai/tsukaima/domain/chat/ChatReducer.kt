@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
@@ -68,6 +69,17 @@ object ChatReducer {
         return state.copy(items = items, status = statusAfterApproval(state.status, items, flair))
     }
 
+    /**
+     * Marks masked-value request [id] answered; [declined] when an empty value (skip) was sent. Only that flag is
+     * recorded: the value never enters the state. Idempotent.
+     */
+    fun onSecretAnswered(state: ChatState, id: String, declined: Boolean, flair: () -> String = ThinkingFlair::next): ChatState {
+        val card = state.items.firstOrNull { it.id == id } as? ChatItem.SecretPrompt
+        if (card == null || card.answered) return state
+        val items = state.items.map { if (it === card) card.copy(answered = true, declined = declined) else it }
+        return state.copy(items = items, status = statusAfterApproval(state.status, items, flair))
+    }
+
     /** Marks clarify [id] answered with what was sent ([answers]; empty = cancel all); idempotent. */
     fun onClarifyAnswered(
         state: ChatState,
@@ -83,14 +95,14 @@ object ChatReducer {
 
     /**
      * Binds the chat to a live session ([liveId]) and its stored id; called after every `session.create` and
-     * `session.resume`, including the resume after a reconnect. A new live id has its own seq numbering that
-     * restarts at 1, so the replay watermark and the local id counter reset. When the server re-attached the
+     * `session.resume`, including the resume after a reconnect. A new live id has its own seq numbering, so the
+     * replay watermark (to [NO_SEQ]: nothing seen, so even a seq of 0 applies) and the local id counter reset. When the server re-attached the
      * same live session (a reconnect inside its grace window) the seq continues, so both are kept and a
      * `session.events.since(lastSeq)` replay stays a true delta. A null [storedId] keeps the known one.
      */
     fun onSessionBound(state: ChatState, liveId: String, storedId: String?): ChatState {
         val ids = state.copy(liveSessionId = liveId, storedSessionId = storedId ?: state.storedSessionId)
-        return if (state.liveSessionId == liveId) ids else ids.copy(lastSeq = 0, localCounter = 0)
+        return if (state.liveSessionId == liveId) ids else ids.copy(lastSeq = NO_SEQ, localCounter = 0)
     }
 
     fun onConnectionLost(state: ChatState): ChatState =
@@ -129,6 +141,7 @@ object ChatReducer {
                     status = AgentStatus.Thinking(flair()),
                 )
             }
+            "message.interim" -> onInterim(s, p, ev.seq)
             "tool.generating" -> s.copy(status = AgentStatus.Tool(humanName(p.string("name") ?: "tool")))
             "tool.start" -> onToolStart(s, p)
             "tool.complete" -> onToolComplete(s, p, flair)
@@ -155,7 +168,7 @@ object ChatReducer {
             )
             "request.cancel" -> {
                 val id = p.string("id") ?: return s
-                val card = s.items.firstOrNull { it.id == id && (it is ChatItem.Approval || it is ChatItem.Clarify) } ?: return s
+                val card = s.items.firstOrNull { it.id == id && it.isRequest() } ?: return s
                 val items = s.items - card
                 s.copy(items = items, status = statusAfterApproval(s.status, items, flair))
             }
@@ -178,6 +191,23 @@ object ChatReducer {
             items = abortTurn(counted.items) + ChatItem.AssistantMessage(id, text, streaming = false, reasoning = null),
             status = AgentStatus.Idle,
         )
+    }
+
+    /**
+     * `message.interim {text, already_streamed}`: commentary the agent wrote beside its tool calls. When it was
+     * not streamed as `message.delta`s it becomes a completed reply of its own, closing the streaming bubble, so
+     * the next tool or reply lands below it. Already-streamed text is in the bubble already: ignored.
+     */
+    private fun onInterim(s: ChatState, p: JsonObject, seq: Long?): ChatState {
+        if ((p["already_streamed"] as? JsonPrimitive)?.booleanOrNull == true) return s
+        val text = p.string("text")?.takeIf { it.isNotBlank() } ?: return s
+        val live = liveAssistant(s.items)
+        if (live != null && live.text.isEmpty()) {
+            // A reasoning-only bubble: the interim text is what that reasoning led to.
+            return s.copy(items = s.items.replace(live) { live.copy(text = text, streaming = false) })
+        }
+        val (counted, id) = nextId(s, seq, "i")
+        return counted.copy(items = finalizeStreaming(counted.items) + ChatItem.AssistantMessage(id, text, streaming = false, reasoning = null))
     }
 
     private fun onMessageStart(s: ChatState, seq: Long?, flair: () -> String): ChatState {
@@ -254,20 +284,44 @@ object ChatReducer {
     // ---- server requests ----------------------------------------------------------------------
 
     private fun reduceServerRequest(state: ChatState, req: Frame.ServerRequest): ChatState {
-        if (req.method != APPROVAL && req.method != CLARIFY) return state
+        val secret = SecretKind.of(req.method)
+        if (req.method != APPROVAL && req.method != CLARIFY && secret == null) return state
         if (!isForUs(state, req.params.string("session_id").orEmpty())) return state
         if (state.items.any { it.id == req.id }) return state
+        if (secret != null) {
+            val subject = when (secret) {
+                SecretKind.Sudo -> req.params.string("command")
+                SecretKind.Secret -> req.params.string("env_var")
+                SecretKind.VaultUnlock -> req.params.string("display_name") ?: req.params.string("backend")
+            }
+            val card = ChatItem.SecretPrompt(
+                id = req.id,
+                kind = secret,
+                subject = subject.orEmpty(),
+                prompt = req.params.string("prompt")?.takeIf { it.isNotBlank() },
+                answered = false,
+            )
+            return state.copy(items = state.items + card, status = statusFor(state.items + card) ?: AgentStatus.Secret(secret != SecretKind.Secret))
+        }
         if (req.method == CLARIFY) {
             val questions = ClarifyAnswers.questions(req.params).takeIf { it.isNotEmpty() } ?: return state
             val card = ChatItem.Clarify(id = req.id, questions = questions, answered = false)
             return state.copy(items = state.items + card, status = statusFor(state.items + card) ?: AgentStatus.Question)
         }
+        // The server lists the offered scopes in `choices`; without it, derive them as it does
+        // (tui_gateway/server.py `_approval_request_payload`).
+        val choices = (req.params["choices"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+        val smartDenied = req.params.bool("smart_denied") == true
+        val allowSession = choices?.contains("session") ?: (!smartDenied && req.params.bool("allow_session") != false)
+        val allowAlways = choices?.contains("always") ?: (allowSession && req.params.bool("allow_permanent") != false)
         val card = ChatItem.Approval(
             id = req.id,
             requestId = req.params.string("request_id").orEmpty(),
             command = req.params.string("command").orEmpty(),
             toolName = req.params.string("tool_name").orEmpty(),
             answered = false,
+            allowSession = allowSession,
+            allowAlways = allowAlways,
         )
         return state.copy(items = state.items + card, status = statusFor(state.items + card) ?: AgentStatus.Approval)
     }
@@ -277,25 +331,35 @@ object ChatReducer {
     private fun isForUs(state: ChatState, sessionId: String): Boolean =
         state.liveSessionId == null || sessionId.isEmpty() || sessionId == state.liveSessionId
 
-    /** Approval while an approval waits, else Question while a clarify waits, else null. */
-    private fun statusFor(items: List<ChatItem>): AgentStatus? = when {
-        items.any { it is ChatItem.Approval && !it.answered } -> AgentStatus.Approval
-        items.any { it is ChatItem.Clarify && !it.answered } -> AgentStatus.Question
-        else -> null
+    /** Approval while an approval waits, else Secret while a masked prompt waits, else Question for a clarify, else null. */
+    private fun statusFor(items: List<ChatItem>): AgentStatus? {
+        if (items.any { it is ChatItem.Approval && !it.answered }) return AgentStatus.Approval
+        items.lastOrNull { it is ChatItem.SecretPrompt && !it.answered }?.let {
+            return AgentStatus.Secret(password = (it as ChatItem.SecretPrompt).kind != SecretKind.Secret)
+        }
+        if (items.any { it is ChatItem.Clarify && !it.answered }) return AgentStatus.Question
+        return null
     }
 
-    /** After an approval or clarify is answered or withdrawn: keep waiting while others are pending. */
+    /** After an approval, clarify or masked prompt is answered or withdrawn: keep waiting while others are pending. */
     private fun statusAfterApproval(current: AgentStatus, items: List<ChatItem>, flair: () -> String): AgentStatus =
-        statusFor(items) ?: if (current == AgentStatus.Approval || current == AgentStatus.Question) AgentStatus.Thinking(flair()) else current
+        statusFor(items) ?: if (current.waiting) AgentStatus.Thinking(flair()) else current
+
+    private val AgentStatus.waiting: Boolean
+        get() = this == AgentStatus.Approval || this == AgentStatus.Question || this is AgentStatus.Secret
+
+    /** A card answering a server request: approval, clarify or masked prompt. */
+    private fun ChatItem.isRequest(): Boolean =
+        this is ChatItem.Approval || this is ChatItem.Clarify || this is ChatItem.SecretPrompt
 
     /**
      * The streaming assistant item that new text may still flow into: the last streaming one,
-     * provided no tool call, approval or clarify card was appended after it (that would reorder the turn).
+     * provided no tool call or request card (approval, clarify, masked prompt) was appended after it (that would reorder the turn).
      */
     private fun liveAssistant(items: List<ChatItem>): ChatItem.AssistantMessage? {
         val index = items.indexOfLast { it is ChatItem.AssistantMessage && it.streaming }
         if (index < 0) return null
-        val blocked = items.subList(index + 1, items.size).any { it is ChatItem.ToolCall || it is ChatItem.Approval || it is ChatItem.Clarify }
+        val blocked = items.subList(index + 1, items.size).any { it is ChatItem.ToolCall || it.isRequest() }
         return if (blocked) null else items[index] as ChatItem.AssistantMessage
     }
 
@@ -315,13 +379,14 @@ object ChatReducer {
         return counted.copy(items = counted.items + item) to item
     }
 
-    /** Abnormal turn end: close streams, fail running tools, drop approvals and questions nobody answered. */
+    /** Abnormal turn end: close streams, fail running tools, drop approvals, questions and prompts nobody answered. */
     private fun abortTurn(items: List<ChatItem>): List<ChatItem> =
         finalizeStreaming(items).mapNotNull { item ->
             when {
                 item is ChatItem.ToolCall && item.status == ToolStatus.Running -> item.copy(status = ToolStatus.Failed)
                 item is ChatItem.Approval && !item.answered -> null
                 item is ChatItem.Clarify && !item.answered -> null
+                item is ChatItem.SecretPrompt && !item.answered -> null
                 else -> item
             }
         }
@@ -350,6 +415,8 @@ object ChatReducer {
 
     private fun JsonObject.string(key: String): String? =
         (this[key] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull
+
+    private fun JsonObject.bool(key: String): Boolean? = (this[key] as? JsonPrimitive)?.booleanOrNull
 
     private fun JsonElement.asText(): String? = when (this) {
         is JsonNull -> null

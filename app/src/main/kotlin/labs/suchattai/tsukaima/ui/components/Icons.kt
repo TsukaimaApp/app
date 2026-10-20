@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.GppMaybe
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Menu
@@ -47,11 +48,14 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.StopCircle
 import androidx.compose.material.icons.rounded.Tag
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.Unarchive
 import androidx.compose.material.icons.rounded.VideoFile
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -130,6 +134,12 @@ enum class IconName(val symbol: String) {
     AudioFile("audio_file"),
     FolderZip("folder_zip"),
     InsertDriveFile("insert_drive_file"),
+
+    /** Not in the handoff (v0.4.0): Stop in the composer, the masked-prompt card and its show/hide toggle. */
+    Stop("stop"),
+    Key("key"),
+    Visibility("visibility"),
+    VisibilityOff("visibility_off"),
 }
 
 /** Pure lookup, safe from JVM unit tests (no Android context involved). */
@@ -184,6 +194,10 @@ fun iconFor(name: IconName): ImageVector = when (name) {
     IconName.AudioFile -> Icons.Rounded.AudioFile
     IconName.FolderZip -> Icons.Rounded.FolderZip
     IconName.InsertDriveFile -> Icons.AutoMirrored.Rounded.InsertDriveFile
+    IconName.Stop -> Icons.Rounded.Stop
+    IconName.Key -> Icons.Rounded.Key
+    IconName.Visibility -> Icons.Rounded.Visibility
+    IconName.VisibilityOff -> Icons.Rounded.VisibilityOff
 }
 
 /**

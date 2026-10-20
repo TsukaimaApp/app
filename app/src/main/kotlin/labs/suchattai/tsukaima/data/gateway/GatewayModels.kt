@@ -34,6 +34,8 @@ data class SessionResumed(
     val running: Boolean = false,
     @SerialName("pending_approval") val pendingApproval: JsonObject? = null,
     @SerialName("open_requests") val openRequests: List<JsonObject> = emptyList(),
+    /** The running turn's state (`InflightTurn`): `assistant` is the reply text streamed so far. */
+    val inflight: JsonObject? = null,
 )
 
 @Serializable

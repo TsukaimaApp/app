@@ -26,9 +26,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import labs.suchattai.tsukaima.data.gateway.ApprovalChoice
 import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.ui.components.GhostButton
 import labs.suchattai.tsukaima.ui.components.IconName
+import labs.suchattai.tsukaima.ui.components.MenuItem
+import labs.suchattai.tsukaima.ui.components.MenuSheet
 import labs.suchattai.tsukaima.ui.components.PrimaryButton
 import labs.suchattai.tsukaima.ui.components.Tone
 import labs.suchattai.tsukaima.ui.components.TsukaimaIcon
@@ -71,10 +74,27 @@ internal fun CardHeader(icon: IconName, title: String) {
 }
 
 /**
- * Inline approval request. [approved] is the decision once [ChatItem.Approval.answered] is
- * true (the domain item only records that it was answered); null shows a neutral "Answered".
- * When not [answerable] (the app has no id that binds the answer to this request) both buttons
- * are disabled and the card points to the dashboard.
+ * The wider approval scopes the "Approve for…" sheet offers for [item]: `session` and `always`, each only when the
+ * server allows it ([ChatItem.Approval.allowSession] / [ChatItem.Approval.allowAlways]). Empty hides the button.
+ */
+internal fun approvalScopes(item: ChatItem.Approval): List<ApprovalChoice> =
+    listOfNotNull(ApprovalChoice.session.takeIf { item.allowSession }, ApprovalChoice.always.takeIf { item.allowAlways })
+
+/** The answered card's caption for the [choice] sent; null (answered elsewhere) is a neutral "Answered". */
+internal fun decisionLabel(choice: ApprovalChoice?): String = when (choice) {
+    ApprovalChoice.once -> "Approved"
+    ApprovalChoice.session -> "Approved for this session"
+    ApprovalChoice.always -> "Always approved"
+    ApprovalChoice.deny -> "Denied"
+    null -> "Answered"
+}
+
+/**
+ * Inline approval request. Deny and Approve (`once`) are the primary pair; when the server offers wider scopes
+ * ([approvalScopes]) a small "Approve for…" button opens a sheet with "This session" / "Always", answered through
+ * [onApproveFor]. [decision] is the choice sent once [ChatItem.Approval.answered] is true (the domain item only
+ * records that it was answered); null shows a neutral "Answered". When not [answerable] (the app has no id that
+ * binds the answer to this request) every button is disabled and the card points to the dashboard.
  */
 @Composable
 fun ApprovalCard(
@@ -82,10 +102,12 @@ fun ApprovalCard(
     onApprove: () -> Unit,
     onDeny: () -> Unit,
     modifier: Modifier = Modifier,
-    approved: Boolean? = null,
+    decision: ApprovalChoice? = null,
     answerable: Boolean = true,
+    onApproveFor: (ApprovalChoice) -> Unit = {},
 ) {
     val colors = MaterialTheme.tsukaima
+    var scopesOpen by remember(item.id) { mutableStateOf(false) }
     FloatingCard(modifier) {
         CardHeader(IconName.GppMaybe, "Hermes wants to run a tool")
         Text(
@@ -172,20 +194,38 @@ fun ApprovalCard(
             }
             if (item.answered) {
                 Text(
-                    text = when (approved) {
-                        true -> "Approved"
-                        false -> "Denied"
-                        null -> "Answered"
-                    },
+                    text = decisionLabel(decision),
                     style = TsukaimaType.caption,
                     color = colors.ink3,
                     modifier = Modifier.weight(1f),
+                )
+            } else if (answerable && approvalScopes(item).isNotEmpty()) {
+                Text(
+                    text = "Approve for…",
+                    style = TsukaimaType.caption,
+                    color = if (blocked) colors.ink3 else colors.accent,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = Dimens.hit)
+                        .clickable(enabled = !blocked, role = Role.Button) { scopesOpen = true }
+                        .padding(horizontal = 4.dp)
+                        .wrapContentHeight(Alignment.CenterVertically),
                 )
             }
             GhostButton("Deny", onDeny, tone = Tone.Danger, enabled = answerable && !item.answered)
             PrimaryButton("Approve", onApprove, icon = IconName.Check, enabled = answerable && !item.answered && !blocked)
         }
     }
+    MenuSheet(
+        visible = scopesOpen && !item.answered,
+        onDismiss = { scopesOpen = false },
+        items = approvalScopes(item).map { choice ->
+            when (choice) {
+                ApprovalChoice.session -> MenuItem("This session", IconName.History) { onApproveFor(choice) }
+                else -> MenuItem("Always", IconName.Check) { onApproveFor(choice) }
+            }
+        },
+    )
 }
 
 private fun sample(answered: Boolean) = ChatItem.Approval(
@@ -196,7 +236,8 @@ private fun sample(answered: Boolean) = ChatItem.Approval(
 @Composable
 private fun ApprovalPreview(dark: Boolean) = PreviewPage(dark) {
     ApprovalCard(sample(false), {}, {})
-    ApprovalCard(sample(true), {}, {}, approved = true)
+    ApprovalCard(sample(false).copy(id = "srq-2", command = "rm -r /tmp/x", allowSession = true, allowAlways = true), {}, {})
+    ApprovalCard(sample(true), {}, {}, decision = ApprovalChoice.session)
     ApprovalCard(sample(false).copy(id = "pending-", requestId = "", command = "reboot"), {}, {}, answerable = false)
 }
 

@@ -10,6 +10,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import labs.suchattai.tsukaima.ui.components.Chip
@@ -26,6 +27,7 @@ fun ChatTopBar(
     onModel: () -> Unit,
     onMore: () -> Unit,
     modifier: Modifier = Modifier,
+    moreEnabled: Boolean = true,
 ) {
     Row(
         modifier = modifier
@@ -38,7 +40,7 @@ fun ChatTopBar(
         if (showMenu) IconButton44(IconName.Menu, "Conversations", onMenu)
         Chip(modelLabel, onClick = onModel, trailing = IconName.ExpandMore, borderless = true)
         Spacer(Modifier.weight(1f))
-        IconButton44(IconName.MoreVert, "More", onMore)
+        IconButton44(IconName.MoreVert, "More", onMore, enabled = moreEnabled, modifier = Modifier.alpha(if (moreEnabled) 1f else 0.45f))
     }
 }
 

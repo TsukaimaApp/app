@@ -21,9 +21,11 @@ import labs.suchattai.tsukaima.data.files.ImagePreview
 import labs.suchattai.tsukaima.data.gateway.ConnectionState
 import labs.suchattai.tsukaima.data.gateway.Frame
 import labs.suchattai.tsukaima.data.gateway.RpcTransport
+import labs.suchattai.tsukaima.data.gateway.SessionResumed
 import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.di.AppContainer
 import labs.suchattai.tsukaima.domain.chat.ChatItem
+import labs.suchattai.tsukaima.domain.chat.ChatReducer
 import java.io.IOException
 
 /**
@@ -153,6 +155,21 @@ internal object ChatSync {
             params = JsonObject(payload + ("session_id" to JsonPrimitive(liveId))),
         )
     }
+
+    /**
+     * A resumed session's transcript: its history, plus the reply streamed so far when a turn is running.
+     * `messages` holds only rows already persisted (the running turn's user row, not its partial reply); the
+     * resume's `inflight.assistant` carries every `message.delta` of the turn so far (live-probed, see the
+     * v0.4.0 rulings), shown as a streaming bubble that the live deltas continue.
+     */
+    fun transcript(r: SessionResumed): List<ChatItem> {
+        val history = ChatReducer.fromHistory(r.messages)
+        val partial = r.inflight?.string("assistant")?.takeIf { r.running && it.isNotEmpty() } ?: return history
+        return history + ChatItem.AssistantMessage(INFLIGHT_ID, partial, streaming = true, reasoning = null)
+    }
+
+    /** Item id of the partial reply [transcript] adds for a running turn. */
+    const val INFLIGHT_ID = "a-inflight"
 
     /** Whether the app can answer [card] safely: by its server-request id, or by a non-empty `request_id`. */
     fun answerable(card: ChatItem.Approval): Boolean =

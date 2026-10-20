@@ -65,11 +65,22 @@ class ServerRequestRouterTest {
     }
 
     @Test
-    fun secretAndSudoRejected() {
-        assertFalse(router.route(req("srq-s", "secret")))
-        assertFalse(router.route(req("srq-u", "sudo")))
+    fun maskedPromptsForwardedUnanswered() {
+        // sudo / secret / vault unlock wait for the masked card in chat (v0.4.0; v0.3.x answered -32601).
+        assertTrue(router.route(req("srq-u", "sudo", buildJsonObject { put("command", "sudo -v") })))
+        assertTrue(router.route(req("srq-s", "secret", buildJsonObject { put("env_var", "API_KEY"); put("prompt", "Key?") })))
+        assertTrue(router.route(req("srq-v", "vault.unlock_prompt", buildJsonObject { put("backend", "bw"); put("display_name", "Bitwarden") })))
+        assertTrue(transport.results.isEmpty())
+        assertTrue(transport.errors.isEmpty())
+    }
+
+    @Test
+    fun otherVaultPromptsAndUnknownMethodsRejected() {
+        assertFalse(router.route(req("srq-l", "vault.save_login")))
+        assertFalse(router.route(req("srq-c", "vault.code")))
+        assertFalse(router.route(req("srq-x", "nope")))
         assertEquals(
-            listOf(Triple("srq-s", -32601, "not supported on mobile"), Triple("srq-u", -32601, "not supported on mobile")),
+            listOf("srq-l", "srq-c", "srq-x").map { Triple(it, -32601, "not supported on mobile") },
             transport.errors,
         )
         assertTrue(transport.results.isEmpty())

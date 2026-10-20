@@ -29,6 +29,7 @@ import labs.suchattai.tsukaima.data.api.HermesJson
 import labs.suchattai.tsukaima.data.api.ModelOptionsDto
 import labs.suchattai.tsukaima.data.api.WorkspacesDto
 import labs.suchattai.tsukaima.data.files.FileSaver
+import labs.suchattai.tsukaima.data.gateway.ApprovalChoice
 import labs.suchattai.tsukaima.data.gateway.ConnectionState
 import labs.suchattai.tsukaima.data.gateway.Frame
 import labs.suchattai.tsukaima.data.gateway.GatewayClosedException
@@ -36,6 +37,8 @@ import labs.suchattai.tsukaima.data.gateway.RpcTransport
 import labs.suchattai.tsukaima.data.prefs.Settings
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ChatItem
+import labs.suchattai.tsukaima.domain.chat.SecretKind
+import labs.suchattai.tsukaima.domain.chat.running
 import labs.suchattai.tsukaima.domain.chat.ToolStatus
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -307,7 +310,7 @@ class ChatViewModelTest {
         assertEquals("once", result["choice"]!!.jsonPrimitive.content)
         val card = vm.state.value.chat.items.single() as ChatItem.Approval
         assertTrue(card.answered)
-        assertEquals(true, vm.state.value.decisions["srq-1"])
+        assertEquals(ApprovalChoice.once, vm.state.value.decisions["srq-1"])
         assertTrue("srq-1" in b.answeredRequestIds)
 
         b.serverRequests.emit(approval("srq-2"))
@@ -315,7 +318,7 @@ class ChatViewModelTest {
         vm.deny("srq-2")
         advanceUntilIdle()
         assertEquals("deny", b.transport.responses.last().second["choice"]!!.jsonPrimitive.content)
-        assertEquals(false, vm.state.value.decisions["srq-2"])
+        assertEquals(ApprovalChoice.deny, vm.state.value.decisions["srq-2"])
     }
 
     @Test
@@ -1297,5 +1300,233 @@ class ChatViewModelTest {
         assertNull(vm.preview(png))
         assertEquals(1, b.downloads.size) // the verdict is cached
         assertEquals(0, b.decoded)
+    }
+
+    // --- v0.4.0 -----------------------------------------------------------------------------------
+
+    @Test
+    fun stopInterruptsTheLiveSessionAndCompleteEndsTheTurn() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("session.interrupt", obj("""{"status":"interrupted"}""")) }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("count to 100")
+        vm.send()
+        b.events.emit(ev("message.start", 1))
+        b.events.emit(ev("message.delta", 2, """{"text":"1, 2"}"""))
+        advanceUntilIdle()
+        assertTrue(vm.state.value.chat.status.running)
+
+        vm.interrupt()
+        advanceUntilIdle()
+        assertEquals(live, b.transport.last("session.interrupt")["session_id"]!!.jsonPrimitive.content)
+        assertTrue("no toast when it stopped", b.toasts.isEmpty())
+        // The server ends the turn itself; the status (and the send button) flip back.
+        b.events.emit(ev("message.complete", 3, """{"text":"1, 2","status":"interrupted"}"""))
+        advanceUntilIdle()
+        assertEquals(AgentStatus.Idle, vm.state.value.chat.status)
+        assertFalse(vm.state.value.chat.status.running)
+    }
+
+    @Test
+    fun stopThenErrorEndsTheTurnToo() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("session.interrupt", obj("""{"status":"interrupted"}""")) }
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.events.emit(ev("message.start", 1))
+        b.events.emit(ev("tool.start", 2, """{"tool_id":"t1","name":"terminal"}"""))
+        advanceUntilIdle()
+        assertTrue(vm.state.value.chat.status.running)
+        vm.interrupt()
+        b.events.emit(ev("error", 3, """{"message":"interrupted"}"""))
+        advanceUntilIdle()
+        assertEquals(AgentStatus.Idle, vm.state.value.chat.status)
+        assertEquals(ToolStatus.Failed, (vm.state.value.chat.items.first { it is ChatItem.ToolCall } as ChatItem.ToolCall).status)
+    }
+
+    @Test
+    fun stopWithNothingRunningToasts() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("session.interrupt", obj("""{"status":"not_interrupted"}""")) }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.showMenu(ChatMenu.Overflow)
+        vm.interrupt()
+        advanceUntilIdle()
+        assertEquals(listOf("Nothing to stop"), b.toasts)
+        assertNull("the overflow sheet closes", vm.state.value.menu)
+    }
+
+    @Test
+    fun approvalScopeSendsTheChosenWireValue() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        val full = """"choices":["once","session","always","deny"]"""
+        b.serverRequests.emit(Frame.ServerRequest("srq-s", "approval", obj("""{"session_id":"$live","request_id":"r1","command":"ls",$full}""")))
+        b.serverRequests.emit(Frame.ServerRequest("srq-a", "approval", obj("""{"session_id":"$live","request_id":"r2","command":"ls",$full}""")))
+        b.serverRequests.emit(
+            Frame.ServerRequest("srq-o", "approval", obj("""{"session_id":"$live","request_id":"r3","command":"ls","choices":["once","deny"]}""")),
+        )
+        advanceUntilIdle()
+
+        vm.answerApproval("srq-s", ApprovalChoice.session)
+        vm.answerApproval("srq-a", ApprovalChoice.always)
+        vm.answerApproval("srq-o", ApprovalChoice.always) // not offered: ignored
+        advanceUntilIdle()
+        assertEquals(
+            listOf("srq-s" to "session", "srq-a" to "always"),
+            b.transport.responses.map { it.first to it.second["choice"]!!.jsonPrimitive.content },
+        )
+        assertEquals(ApprovalChoice.session, vm.state.value.decisions["srq-s"])
+        assertEquals(ApprovalChoice.always, vm.state.value.decisions["srq-a"])
+        assertFalse((vm.state.value.chat.items.last() as ChatItem.Approval).answered)
+        assertEquals(AgentStatus.Approval, vm.state.value.chat.status)
+    }
+
+    private fun masked(id: String, method: String, params: String) =
+        Frame.ServerRequest(id, method, obj("""{"session_id":"$live",$params}"""))
+
+    @Test
+    fun maskedPromptAnswersValueAndNeverKeepsIt() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.serverRequests.emit(masked("srq-u", "sudo", """"command":"sudo -v""""))
+        advanceUntilIdle()
+        assertEquals(AgentStatus.Secret(password = true), vm.state.value.status)
+
+        vm.answerSecret("srq-u", "hunter2")
+        vm.answerSecret("srq-u", "hunter2") // double tap
+        advanceUntilIdle()
+        val (id, result) = b.transport.responses.single()
+        assertEquals("srq-u", id)
+        assertEquals(obj("""{"value":"hunter2"}"""), result)
+        val card = vm.state.value.chat.items.single() as ChatItem.SecretPrompt
+        assertEquals(SecretKind.Sudo, card.kind)
+        assertTrue(card.answered)
+        assertFalse(card.declined)
+        assertTrue("srq-u" in b.answeredRequestIds)
+        assertFalse("the value is nowhere in the UI state", vm.state.value.toString().contains("hunter2"))
+        assertTrue(b.toasts.none { it.contains("hunter2") })
+        assertTrue(vm.state.value.status is AgentStatus.Thinking)
+    }
+
+    @Test
+    fun maskedPromptCancelAnswersEmptyValue() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.serverRequests.emit(masked("srq-s", "secret", """"env_var":"API_KEY","prompt":"Key?""""))
+        advanceUntilIdle()
+        assertEquals("Waiting for a secret", vm.state.value.status.label)
+
+        vm.declineSecret("srq-s")
+        advanceUntilIdle()
+        assertEquals("srq-s" to obj("""{"value":""}"""), b.transport.responses.single())
+        assertTrue((vm.state.value.chat.items.single() as ChatItem.SecretPrompt).declined)
+    }
+
+    @Test
+    fun maskedPromptNotSentReopensTheCard() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.serverRequests.emit(masked("srq-v", "vault.unlock_prompt", """"backend":"bw","display_name":"Bitwarden""""))
+        advanceUntilIdle()
+        b.transport.respondOk = false
+        vm.answerSecret("srq-v", "s3cret")
+        advanceUntilIdle()
+        val card = vm.state.value.chat.items.single() as ChatItem.SecretPrompt
+        assertFalse(card.answered)
+        assertFalse("srq-v" in b.answeredRequestIds)
+        assertEquals(AgentStatus.Secret(password = true), vm.state.value.status)
+        assertEquals(listOf("Couldn’t send the answer: not connected to Hermes"), b.toasts)
+        assertFalse(vm.state.value.toString().contains("s3cret"))
+    }
+
+    @Test
+    fun requestCancelClearsMaskedPromptAndReplayIsNotAdopted() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.serverRequests.emit(masked("srq-u", "sudo", """"command":"sudo -v""""))
+        advanceUntilIdle()
+        b.events.emit(ev("request.cancel", 3, """{"id":"srq-u","method":"sudo","reason":"timeout"}"""))
+        b.closedRequestIds.add("srq-u") // what the router records for the same event
+        advanceUntilIdle()
+        assertTrue(vm.state.value.chat.items.isEmpty())
+        assertFalse(vm.state.value.status is AgentStatus.Secret)
+
+        // A later screen for the same chat does not bring the withdrawn prompt back from the replay.
+        val again = vm(b)
+        advanceUntilIdle()
+        assertTrue(again.state.value.chat.items.none { it is ChatItem.SecretPrompt })
+    }
+
+    @Test
+    fun resumeReadoptsOpenMaskedPrompt() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on(
+                "session.resume",
+                obj(
+                    """{"session_id":"$live","stored_session_id":"$stored","running":true,"messages":[],
+                       "open_requests":[{"id":"srq-u","method":"sudo","params":{"session_id":"old","command":"sudo -v"}}]}""",
+                ),
+            )
+        }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        val card = vm.state.value.chat.items.single() as ChatItem.SecretPrompt
+        assertEquals("srq-u", card.id)
+        assertEquals("sudo -v", card.subject)
+        assertEquals(AgentStatus.Secret(password = true), vm.state.value.status)
+    }
+
+    @Test
+    fun resumeOfARunningTurnShowsThePartialReplyAndContinuesIt() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on(
+                "session.resume",
+                obj(
+                    """{"session_id":"$live","stored_session_id":"$stored","running":true,
+                       "messages":[{"role":"user","text":"count to 30","row_id":1}],
+                       "inflight":{"assistant":"1\n2\n3\n","streaming":true,"user":"count to 30"}}""",
+                ),
+            )
+            transport.on("session.events.since", obj("""{"events":[],"latest_seq":40,"truncated":false,"open_requests":[]}"""))
+        }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        val partial = vm.state.value.chat.items.last() as ChatItem.AssistantMessage
+        assertEquals("1\n2\n3\n", partial.text)
+        assertTrue(partial.streaming)
+        assertEquals(40L, vm.state.value.chat.lastSeq)
+
+        b.events.emit(ev("message.delta", 41, """{"text":"4\n"}"""))
+        advanceUntilIdle()
+        val items = vm.state.value.chat.items
+        assertEquals(2, items.size)
+        assertEquals("1\n2\n3\n4\n", (items.last() as ChatItem.AssistantMessage).text)
+
+        // Not running: the inflight snapshot (a retained turn) is not shown as a live reply.
+        val idle = backend().apply {
+            transport.on("session.resume", obj("""{"session_id":"$live","stored_session_id":"$stored","running":false,"messages":[],
+                "inflight":{"assistant":"stale","streaming":false}}"""))
+        }
+        val vm2 = vm(idle, stored)
+        advanceUntilIdle()
+        assertTrue(vm2.state.value.chat.items.isEmpty())
+    }
+
+    @Test
+    fun copySessionIdFallsBackToTheLiveIdOnABrandNewChat() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("session.create", obj("""{"session_id":"$live","info":{},"messages":[]}""")) // no stored id yet
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        var copied: String? = null
+        vm.copySessionId { copied = it }
+        assertEquals(live, copied)
+        assertEquals(listOf("Session ID copied"), b.toasts)
     }
 }

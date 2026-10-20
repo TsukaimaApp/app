@@ -288,7 +288,7 @@ class ConnectionManagerTest {
     }
 
     @Test
-    fun approvalsAndClarifyForwarded() = runBlocking<Unit> {
+    fun approvalsClarifyAndMaskedPromptsForwarded() = runBlocking<Unit> {
         val answers = java.util.concurrent.ConcurrentHashMap<String, kotlinx.serialization.json.JsonObject>()
         wsListener = object : WebSocketListener() {
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -297,7 +297,7 @@ class ConnectionManagerTest {
                 if (id != null && id.startsWith("srq-")) answers[id] = frame
                 if (method(text) == "client.capabilities") {
                     webSocket.send(READY)
-                    for ((rid, m) in listOf("srq-c" to "clarify", "srq-p" to "preview.read", "srq-s" to "secret", "srq-a" to "approval")) {
+                    for ((rid, m) in listOf("srq-c" to "clarify", "srq-p" to "preview.read", "srq-s" to "secret", "srq-v" to "vault.code", "srq-a" to "approval")) {
                         val qs = if (m == "clarify") ""","questions":[{"qid":"q1","question":"Colour?"}]""" else ""
                         webSocket.send("""{"jsonrpc":"2.0","id":"$rid","method":"$m","params":{"session_id":"live-1"$qs}}""")
                     }
@@ -311,12 +311,13 @@ class ConnectionManagerTest {
         creds.save("pw", "tok", serverUrl())
         val cm = manager()
         cm.start()
-        await { while (answers.size < 2 || cm.serverRequests.replayCache.size < 2) delay(10) }
+        await { while (answers.size < 2 || cm.serverRequests.replayCache.size < 3) delay(10) }
 
-        assertEquals(listOf("srq-c", "srq-a"), cm.serverRequests.replayCache.map { it.id })
+        assertEquals(listOf("srq-c", "srq-s", "srq-a"), cm.serverRequests.replayCache.map { it.id })
         assertNull("clarify waits for the user", answers["srq-c"])
+        assertNull("a secret waits for the masked card", answers["srq-s"])
         assertEquals("4404", answers["srq-p"]!!["error"]!!.jsonObject["code"]!!.jsonPrimitive.content)
-        assertEquals("-32601", answers["srq-s"]!!["error"]!!.jsonObject["code"]!!.jsonPrimitive.content)
+        assertEquals("-32601", answers["srq-v"]!!["error"]!!.jsonObject["code"]!!.jsonPrimitive.content)
         assertNull("approvals wait for the user", answers["srq-a"])
     }
 

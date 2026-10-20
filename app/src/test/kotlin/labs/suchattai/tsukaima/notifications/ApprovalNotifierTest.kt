@@ -207,4 +207,27 @@ class ApprovalNotifierTest {
         val hidden = ApprovalNotifier.forClarify(clarify("srq-s", "ok\u202Eexe"))
         assertTrue(hidden.text, hidden.text.contains("U+202E"))
     }
+
+    @Test
+    fun maskedPromptSpecsHaveNoActionsAndRevealTheSubject() {
+        fun req(id: String, method: String, vararg kv: Pair<String, String>) =
+            Frame.ServerRequest(id, method, buildJsonObject { put("session_id", "live-1"); kv.forEach { (k, v) -> put(k, v) } })
+
+        val sudo = ApprovalNotifier.forSecret(req("srq-u", "sudo", "command" to "sudo apt update"), "20261020_010916_48c967")
+        assertEquals(Channels.APPROVALS, sudo.channel)
+        assertEquals("srq-u".hashCode(), sudo.id)
+        assertEquals("Hermes needs a password", sudo.title)
+        assertEquals("sudo apt update", sudo.text)
+        assertTrue("no inline text entry: the tap opens the chat", sudo.actions.isEmpty())
+        assertEquals(ApprovalNotifier.SCREEN_CHAT, sudo.openScreen)
+        assertEquals("20261020_010916_48c967", sudo.sessionId)
+
+        val secret = ApprovalNotifier.forSecret(req("srq-s", "secret", "env_var" to "API\u202EKEY", "prompt" to "p"))
+        assertEquals("Hermes needs a secret", secret.title)
+        assertTrue(secret.text, secret.text.contains("U+202E"))
+
+        val vault = ApprovalNotifier.forSecret(req("srq-v", "vault.unlock_prompt", "backend" to "bw", "display_name" to "Bitwarden"))
+        assertEquals("Hermes needs a password", vault.title)
+        assertEquals("Bitwarden", vault.text)
+    }
 }

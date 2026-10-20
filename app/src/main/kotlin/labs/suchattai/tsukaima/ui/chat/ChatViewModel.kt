@@ -32,6 +32,7 @@ import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.ChatReducer
 import labs.suchattai.tsukaima.domain.chat.ChatState
+import labs.suchattai.tsukaima.domain.chat.SecretKind
 import labs.suchattai.tsukaima.domain.chat.ThinkingFlair
 
 /**
@@ -220,28 +221,38 @@ class ChatViewModel(
         return withTimeoutOrNull(OPEN_WAIT_MS) { _state.map { it.chat.liveSessionId }.filterNotNull().first() }
     }
 
+    /**
+     * Stop: interrupts the running turn (`session.interrupt`). The turn then ends with the server's own
+     * `message.complete` / `error`, which returns the status line (and the send button) to idle.
+     */
     fun interrupt() {
+        _state.update { it.copy(menu = null) }
         val live = chat.liveSessionId ?: return
-        launch { attempt("Couldn’t stop the agent") { session.interrupt(live) } }
+        launch {
+            attempt("Couldn’t stop the agent") {
+                if (session.interrupt(live) == NOT_INTERRUPTED) backend.toast("Nothing to stop")
+            }
+        }
     }
 
-    fun approve(id: String) = answer(id, approved = true)
-    fun deny(id: String) = answer(id, approved = false)
+    fun approve(id: String) = answerApproval(id, ApprovalChoice.once)
+    fun deny(id: String) = answerApproval(id, ApprovalChoice.deny)
 
     /**
-     * Answers through the exact server request (`srq-…` id). A resume's `pending_approval` has no such id and
-     * falls back to `approval.respond`, but only with its `request_id`: without one the server would resolve
-     * whatever approval is pending, so such a card is inert ([ChatSync.answerable]).
+     * Answers approval [id] with [choice] (`once`, `session`, `always` or `deny`) through the exact server request
+     * (`srq-…` id). A resume's `pending_approval` has no such id and falls back to `approval.respond`, but only with
+     * its `request_id`: without one the server would resolve whatever approval is pending, so such a card is inert
+     * ([ChatSync.answerable]). A scope the card does not offer is ignored.
      */
-    private fun answer(id: String, approved: Boolean) {
+    fun answerApproval(id: String, choice: ApprovalChoice) {
         val card = chat.items.firstOrNull { it.id == id } as? ChatItem.Approval ?: return
         if (card.answered || !ChatSync.answerable(card)) return
+        if (choice == ApprovalChoice.session && !card.allowSession || choice == ApprovalChoice.always && !card.allowAlways) return
         if (!backend.answeredRequestIds.add(id)) {
             return setChat { ChatReducer.onApprovalAnswered(it, id, flair) } // answered elsewhere (a notification)
         }
-        val choice = if (approved) ApprovalChoice.once else ApprovalChoice.deny
         _state.update {
-            it.copy(chat = ChatReducer.onApprovalAnswered(it.chat, id, flair), decisions = it.decisions + (id to approved))
+            it.copy(chat = ChatReducer.onApprovalAnswered(it.chat, id, flair), decisions = it.decisions + (id to choice))
         }
         if (!id.startsWith(ChatSync.PENDING_PREFIX)) {
             if (!session.respondApproval(id, choice)) {
@@ -280,6 +291,27 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * Sends [value] for masked prompt [id] (`sudo`, `secret`, `vault.unlock_prompt`); `""` declines. The value
+     * goes to the socket only: the card records just whether it was declined, and nothing logs or toasts it.
+     */
+    fun answerSecret(id: String, value: String) {
+        val card = chat.items.firstOrNull { it.id == id } as? ChatItem.SecretPrompt ?: return
+        if (card.answered) return
+        val declined = value.isEmpty()
+        if (!backend.answeredRequestIds.add(id)) {
+            return setChat { ChatReducer.onSecretAnswered(it, id, declined, flair) } // answered elsewhere
+        }
+        setChat { ChatReducer.onSecretAnswered(it, id, declined, flair) }
+        if (!session.respondValue(id, value)) {
+            backend.toast("Couldn’t send the answer: not connected to Hermes")
+            reopenAnswer(id)
+        }
+    }
+
+    /** Cancel on a masked prompt: answers `""` (skipped / declined). */
+    fun declineSecret(id: String) = answerSecret(id, "")
+
     /** Undoes an answer that was not delivered: the card is answerable again and the claim is released. */
     private fun reopenAnswer(id: String) {
         backend.answeredRequestIds.remove(id)
@@ -290,6 +322,8 @@ class ChatViewModel(
                     it.id != id -> it
                     it is ChatItem.Approval -> it.copy(answered = false)
                     it is ChatItem.Clarify -> it.copy(answered = false, answers = emptyMap()).also { waiting = AgentStatus.Question }
+                    it is ChatItem.SecretPrompt -> it.copy(answered = false, declined = false)
+                        .also { waiting = AgentStatus.Secret(password = it.kind != SecretKind.Secret) }
                     else -> it
                 }
             }
@@ -372,10 +406,13 @@ class ChatViewModel(
         }
     }
 
-    /** Copies the stored session id through [copy] (the screen's clipboard) and confirms with a toast. */
+    /**
+     * Copies the stored session id (the live id while there is no stored one yet) through [copy] (the screen's
+     * clipboard) and confirms with a toast.
+     */
     fun copySessionId(copy: (String) -> Unit) {
         _state.update { it.copy(menu = null) }
-        val id = chat.storedSessionId ?: return
+        val id = chat.storedSessionId ?: chat.liveSessionId ?: return
         copy(id)
         backend.toast("Session ID copied")
     }
@@ -399,5 +436,8 @@ class ChatViewModel(
     private companion object {
         /** How long an attachment waits for the session to open before failing (retry is offered). */
         const val OPEN_WAIT_MS = 30_000L
+
+        /** `session.interrupt` status when no turn was running. */
+        const val NOT_INTERRUPTED = "not_interrupted"
     }
 }

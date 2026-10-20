@@ -43,6 +43,8 @@ import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.ChatState
 import labs.suchattai.tsukaima.domain.chat.ClarifyQuestion
 import labs.suchattai.tsukaima.domain.chat.ToolStatus
+import labs.suchattai.tsukaima.domain.chat.running
+import labs.suchattai.tsukaima.data.gateway.ApprovalChoice
 import labs.suchattai.tsukaima.ui.chat.components.ApprovalCard
 import labs.suchattai.tsukaima.ui.chat.components.AssistantMessage
 import labs.suchattai.tsukaima.ui.chat.components.ChatSkeleton
@@ -50,6 +52,7 @@ import labs.suchattai.tsukaima.ui.chat.components.ChatTopBar
 import labs.suchattai.tsukaima.ui.chat.components.ClarifyCard
 import labs.suchattai.tsukaima.ui.chat.components.Composer
 import labs.suchattai.tsukaima.ui.chat.components.MediaHost
+import labs.suchattai.tsukaima.ui.chat.components.SecretCard
 import labs.suchattai.tsukaima.ui.chat.components.StatusLine
 import labs.suchattai.tsukaima.ui.chat.components.ToolRow
 import labs.suchattai.tsukaima.ui.chat.components.UserBubble
@@ -72,6 +75,10 @@ class ChatActions(
     val previewMedia: suspend (String) -> ImageBitmap? = { null },
     val onApprove: (String) -> Unit = {},
     val onDeny: (String) -> Unit = {},
+    val onApproveFor: (id: String, choice: ApprovalChoice) -> Unit = { _, _ -> },
+    val onSecret: (id: String, value: String) -> Unit = { _, _ -> },
+    val onSecretCancel: (String) -> Unit = {},
+    val onStop: () -> Unit = {},
     val onClarify: (id: String, answers: Map<String, String?>) -> Unit = { _, _ -> },
     val onClarifySkip: (String) -> Unit = {},
     val onMenu: (ChatMenu?) -> Unit = {},
@@ -129,6 +136,10 @@ fun ChatScreen(
             previewMedia = vm::preview,
             onApprove = vm::approve,
             onDeny = vm::deny,
+            onApproveFor = vm::answerApproval,
+            onSecret = vm::answerSecret,
+            onSecretCancel = vm::declineSecret,
+            onStop = vm::interrupt,
             onClarify = vm::answerClarify,
             onClarifySkip = vm::skipClarify,
             onMenu = vm::showMenu,
@@ -158,7 +169,7 @@ fun ChatContent(
     listState: LazyListState = rememberLazyListState(),
 ) {
     val colors = MaterialTheme.tsukaima
-    val stored = state.chat.storedSessionId
+    val overflow = overflowItems(state, actions)
     Column(
         Modifier
             .fillMaxSize()
@@ -170,7 +181,8 @@ fun ChatContent(
             onMenu = onDrawer,
             showMenu = showMenu,
             onModel = { actions.onMenu(ChatMenu.Model) },
-            onMore = { if (stored != null) actions.onMenu(ChatMenu.Overflow) },
+            onMore = { if (overflow.isNotEmpty()) actions.onMenu(ChatMenu.Overflow) },
+            moreEnabled = overflow.isNotEmpty(),
         )
         StatusLine(state.status, onClick = onStatus)
         Box(
@@ -194,9 +206,11 @@ fun ChatContent(
             attachments = state.attachments,
             onRemoveAttachment = actions.onRemoveAttachment,
             onRetryAttachment = actions.onRetryAttachment,
+            running = state.chat.status.running,
+            onStop = actions.onStop,
         )
     }
-    ChatSheets(state, actions)
+    ChatSheets(state, actions, overflow)
 }
 
 @Composable
@@ -227,8 +241,14 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
                     item = item,
                     onApprove = { actions.onApprove(item.id) },
                     onDeny = { actions.onDeny(item.id) },
-                    approved = state.decisions[item.id],
+                    decision = state.decisions[item.id],
                     answerable = ChatSync.answerable(item),
+                    onApproveFor = { actions.onApproveFor(item.id, it) },
+                )
+                is ChatItem.SecretPrompt -> SecretCard(
+                    item = item,
+                    onSend = { actions.onSecret(item.id, it) },
+                    onCancel = { actions.onSecretCancel(item.id) },
                 )
                 is ChatItem.Clarify -> ClarifyCard(
                     item = item,
@@ -242,21 +262,32 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
     }
 }
 
+/**
+ * The top bar's overflow entries: Stop while a turn runs, then the session actions once the session is stored.
+ * A brand-new chat with no stored id yet offers only what works without one (Stop, and Copy session ID — the live
+ * id — once a live session exists); empty disables the button rather than opening a sheet that does nothing.
+ */
+internal fun overflowItems(state: ChatUiState, actions: ChatActions): List<MenuItem> {
+    val stop = MenuItem("Stop", IconName.Stop, onClick = actions.onStop).takeIf { state.chat.status.running && !state.offline }
+    val copy = MenuItem("Copy session ID", IconName.ContentCopy, onClick = actions.onCopyId)
+    if (state.chat.storedSessionId == null) {
+        return listOfNotNull(stop, copy.takeIf { state.chat.liveSessionId != null })
+    }
+    return listOfNotNull(
+        stop,
+        MenuItem("Rename", IconName.Edit) { actions.onDialog(ChatDialog.Rename) },
+        MenuItem("Archive", IconName.Archive, onClick = actions.onArchive),
+        copy,
+        MenuItem("Delete session", IconName.Delete, danger = true) { actions.onDialog(ChatDialog.DeleteConfirm) },
+    )
+}
+
 @Composable
-private fun ChatSheets(state: ChatUiState, actions: ChatActions) {
+private fun ChatSheets(state: ChatUiState, actions: ChatActions, overflow: List<MenuItem>) {
     val dismiss = { actions.onMenu(null) }
     MenuSheet(state.menu == ChatMenu.Model, dismiss, modelItems(state, actions))
     MenuSheet(state.menu == ChatMenu.Workspace, dismiss, workspaceItems(state, actions))
-    MenuSheet(
-        state.menu == ChatMenu.Overflow,
-        dismiss,
-        listOf(
-            MenuItem("Rename", IconName.Edit) { actions.onDialog(ChatDialog.Rename) },
-            MenuItem("Archive", IconName.Archive, onClick = actions.onArchive),
-            MenuItem("Copy session ID", IconName.ContentCopy, onClick = actions.onCopyId),
-            MenuItem("Delete session", IconName.Delete, danger = true) { actions.onDialog(ChatDialog.DeleteConfirm) },
-        ),
-    )
+    MenuSheet(state.menu == ChatMenu.Overflow && overflow.isNotEmpty(), dismiss, overflow)
     when (state.dialog) {
         ChatDialog.Rename -> {
             var name by rememberSaveable { mutableStateOf(state.chat.title.orEmpty()) }

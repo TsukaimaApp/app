@@ -15,10 +15,14 @@ class IconsTest {
         "receipt_long", "bar_chart", "open_in_new", "cloud_off", "send", "tag",
     )
 
-    /** Added after the handoff (v0.2.0: clarify card, attachment chips; v0.3.0: `MEDIA:` file cards). */
+    /**
+     * Added after the handoff (v0.2.0: clarify card, attachment chips; v0.3.0: `MEDIA:` file cards; v0.4.0: Stop,
+     * masked-prompt card).
+     */
     private val additions = listOf(
         "help", "attach_file", "image",
         "download", "description", "video_file", "audio_file", "folder_zip", "insert_drive_file",
+        "stop", "key", "visibility", "visibility_off",
     )
 
     @Test

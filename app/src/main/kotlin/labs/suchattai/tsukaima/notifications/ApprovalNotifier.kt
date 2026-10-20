@@ -6,6 +6,7 @@ import kotlinx.serialization.json.contentOrNull
 import labs.suchattai.tsukaima.data.gateway.Frame
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ClarifyAnswers
+import labs.suchattai.tsukaima.domain.chat.SecretKind
 import labs.suchattai.tsukaima.ui.chat.ChatSync
 import labs.suchattai.tsukaima.ui.chat.components.CommandText
 import labs.suchattai.tsukaima.ui.settings.pairingEntry
@@ -86,6 +87,29 @@ object ApprovalNotifier {
     fun isApproval(req: Frame.ServerRequest): Boolean = req.method == APPROVAL_METHOD
 
     fun isClarify(req: Frame.ServerRequest): Boolean = req.method == CLARIFY_METHOD
+
+    /** A masked one-string prompt (`sudo`, `secret`, `vault.unlock_prompt`). */
+    fun isSecret(req: Frame.ServerRequest): Boolean = SecretKind.of(req.method) != null
+
+    /**
+     * "Hermes needs a password" (`sudo`, `vault.unlock_prompt`) or "Hermes needs a secret" (`secret`), with what it is
+     * for (command, env var or password manager; agent-controlled, revealed and capped). No inline text entry: tapping
+     * opens the chat that asked, where the masked card answers it.
+     */
+    fun forSecret(req: Frame.ServerRequest, storedSessionId: String? = null): NotificationSpec {
+        val kind = SecretKind.of(req.method) ?: SecretKind.Secret
+        val subject = when (kind) {
+            SecretKind.Sudo -> req.params.str("command")
+            SecretKind.Secret -> req.params.str("env_var")
+            SecretKind.VaultUnlock -> req.params.str("display_name") ?: req.params.str("backend")
+        }.orEmpty()
+        return NotificationSpec(
+            Channels.APPROVALS, approvalId(req.id),
+            if (kind == SecretKind.Secret) "Hermes needs a secret" else "Hermes needs a password",
+            cap(CommandText.reveal(subject).text, MAX_QUESTION),
+            openScreen = SCREEN_CHAT, sessionId = storedSessionId,
+        )
+    }
 
     /**
      * "Hermes has a question": the first question (agent-controlled text, revealed and capped). No inline

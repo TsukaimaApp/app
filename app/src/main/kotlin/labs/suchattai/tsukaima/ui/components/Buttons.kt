@@ -164,7 +164,7 @@ private fun PillButton(
 
 /**
  * 44dp circular icon button. Transparent with a press wash by default; [filled] gives the
- * lavender accent fill (the send button only).
+ * lavender accent fill (the send button only), or the danger red with [Tone.Danger] (Stop).
  */
 @Composable
 fun IconButton44(
@@ -174,6 +174,7 @@ fun IconButton44(
     filled: Boolean = false,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    tone: Tone = Tone.Ink,
 ) {
     val colors = MaterialTheme.tsukaima
     val source = remember { MutableInteractionSource() }
@@ -181,6 +182,7 @@ fun IconButton44(
     val fill by animateColorAsState(
         targetValue = when {
             !filled -> Color.Transparent
+            tone == Tone.Danger -> if (pressed) colors.danger.copy(alpha = 0.85f) else colors.danger
             pressed -> colors.accentPressed
             else -> colors.accent
         },
@@ -222,6 +224,7 @@ private fun ButtonsPreview(dark: Boolean) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 IconButton44(IconName.MoreVert, "More", {})
                 IconButton44(IconName.ArrowUpward, "Send", {}, filled = true)
+                IconButton44(IconName.Stop, "Stop", {}, filled = true, tone = Tone.Danger)
             }
         }
     }

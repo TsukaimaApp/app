@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -58,6 +59,7 @@ fun TsukaimaTextField(
     modifier: Modifier = Modifier,
     error: String? = null,
     maxLines: Int = Int.MAX_VALUE,
+    keyboardActions: KeyboardActions = KeyboardActions.Default,
 ) {
     val colors = MaterialTheme.tsukaima
     val source = remember { MutableInteractionSource() }
@@ -100,6 +102,7 @@ fun TsukaimaTextField(
             minLines = minLines,
             maxLines = if (singleLine) 1 else maxLines,
             keyboardOptions = keyboardOptions,
+            keyboardActions = keyboardActions,
             visualTransformation = visualTransformation,
             interactionSource = source,
             cursorBrush = SolidColor(colors.accent),

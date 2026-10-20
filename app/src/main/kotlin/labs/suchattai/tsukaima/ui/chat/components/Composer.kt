@@ -50,6 +50,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import labs.suchattai.tsukaima.ui.components.IconButton44
 import labs.suchattai.tsukaima.ui.components.IconName
+import labs.suchattai.tsukaima.ui.components.Tone
 import labs.suchattai.tsukaima.ui.components.floatShadow
 import labs.suchattai.tsukaima.ui.theme.TsukaimaShapes
 import labs.suchattai.tsukaima.ui.theme.TsukaimaType
@@ -58,7 +59,8 @@ import labs.suchattai.tsukaima.ui.theme.tsukaima
 /**
  * Bottom composer pill: pending attachments (chips) above the row of attach, multiline field (max 120dp) and
  * send. The IME Send action and a hardware Enter send; hardware Shift+Enter inserts a newline. [canSend]
- * gates sending (text or a ready attachment); the caller clears [value] in [onSend].
+ * gates sending (text or a ready attachment); the caller clears [value] in [onSend]. While the agent is
+ * [running] a turn, send becomes a danger-filled Stop ([onStop]) in the same 44dp slot, and Enter does nothing.
  */
 @Composable
 fun Composer(
@@ -73,10 +75,12 @@ fun Composer(
     attachments: List<PendingAttachment> = emptyList(),
     onRemoveAttachment: (String) -> Unit = {},
     onRetryAttachment: (String) -> Unit = {},
+    running: Boolean = false,
+    onStop: () -> Unit = {},
 ) {
     val colors = MaterialTheme.tsukaima
     val shape = TsukaimaShapes.composer
-    val send = { if (enabled && canSend) onSend() }
+    val send = { if (enabled && canSend && !running) onSend() }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -137,7 +141,11 @@ fun Composer(
                     }
                 },
             )
-            IconButton44(IconName.ArrowUpward, "Send", onClick = send, filled = enabled && canSend, enabled = enabled && canSend)
+            if (running && enabled) {
+                IconButton44(IconName.Stop, "Stop", onClick = onStop, filled = true, tone = Tone.Danger)
+            } else {
+                IconButton44(IconName.ArrowUpward, "Send", onClick = send, filled = enabled && canSend, enabled = enabled && canSend)
+            }
         }
     }
 }
@@ -200,6 +208,7 @@ private fun ComposerPreview(dark: Boolean) = PreviewPage(dark) {
     Composer(text, { text = it }, {}, {}, enabled = true)
     Composer("Restart the agent and tail the logs.", {}, {}, {}, enabled = true)
     Composer("", {}, {}, {}, enabled = false)
+    Composer("", {}, {}, {}, enabled = true, running = true)
     Composer(
         "What is in these?", {}, {}, {}, enabled = true, canSend = false,
         attachments = listOf(

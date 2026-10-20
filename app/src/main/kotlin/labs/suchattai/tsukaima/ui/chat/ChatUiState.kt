@@ -2,6 +2,7 @@ package labs.suchattai.tsukaima.ui.chat
 
 import labs.suchattai.tsukaima.data.api.ModelOptionsDto
 import labs.suchattai.tsukaima.data.api.WorkspacesDto
+import labs.suchattai.tsukaima.data.gateway.ApprovalChoice
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ChatState
 
@@ -21,8 +22,8 @@ data class ChatUiState(
     val gatewayStatus: AgentStatus? = null,
     val model: String? = null,
     val provider: String? = null,
-    /** Approve (true) / deny (false) per answered approval id, for the card's outcome label. */
-    val decisions: Map<String, Boolean> = emptyMap(),
+    /** The choice sent per answered approval id, for the card's outcome label. */
+    val decisions: Map<String, ApprovalChoice> = emptyMap(),
     /** Opened as a new chat (no stored session id in the route). */
     val isNew: Boolean = true,
     /** Composer attachments; kept across rotation (VM), lost with the process. */

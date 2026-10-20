@@ -168,4 +168,27 @@ class GatewaySessionTest {
         assertEquals("req-9", params["request_id"]!!.jsonPrimitive.content)
         assertEquals("once", params["choice"]!!.jsonPrimitive.content)
     }
+
+    @Test
+    fun respondValueEncodesTheMaskedAnswer() {
+        val t = FakeTransport()
+        val session = GatewaySession(t)
+        assertTrue(session.respondValue("srq-u", "pa\"ss"))
+        session.respondValue("srq-s", "")
+        assertEquals(listOf("srq-u" to obj("""{"value":"pa\"ss"}"""), "srq-s" to obj("""{"value":""}""")), t.responses)
+    }
+
+    @Test
+    fun interruptReturnsTheServerStatus() = runBlocking {
+        assertEquals("not_interrupted", GatewaySession(FakeTransport(obj("""{"status":"not_interrupted"}"""))).interrupt("s"))
+        assertNull(GatewaySession(FakeTransport()).interrupt("s"))
+    }
+
+    @Test
+    fun resumeDecodesTheInflightTurn() = runBlocking {
+        val t = FakeTransport(obj("""{"session_id":"s1","messages":[],"running":true,"inflight":{"assistant":"1\n2","streaming":true,"user":"count"}}"""))
+        val r = GatewaySession(t).resume("st")
+        assertTrue(r.running)
+        assertEquals("1\n2", r.inflight!!["assistant"]!!.jsonPrimitive.content)
+    }
 }

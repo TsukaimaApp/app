@@ -43,7 +43,7 @@ class NotificationCoordinatorTest {
         assertNotNull(c.onServerRequest(approval("srq-2"), foreground = false))
         assertNull(c.onServerRequest(approval("srq-2"), foreground = false))
         // Other server requests are never notified.
-        assertNull(c.onServerRequest(Frame.ServerRequest("srq-3", "secret", JsonObject(emptyMap())), foreground = false))
+        assertNull(c.onServerRequest(Frame.ServerRequest("srq-3", "vault.code", JsonObject(emptyMap())), foreground = false))
     }
 
     @Test
@@ -242,5 +242,18 @@ class NotificationCoordinatorTest {
         assertNull(c.onServerRequest(clarify("srq-r"), foreground = false))
         // Answered from chat → its notification goes.
         assertEquals(Cancel("srq-q".hashCode()), c.onAnswered("srq-q"))
+    }
+
+    @Test
+    fun maskedPromptsNotifiedOnceAndClosedByRequestCancel() {
+        val sudo = Frame.ServerRequest("srq-u", "sudo", buildJsonObject { put("session_id", "live-1"); put("command", "sudo -v") })
+        assertNull("the chat on screen shows it", c.onServerRequest(sudo, foreground = true, visibleSession = "live-1"))
+        val spec = c.onServerRequest(sudo, foreground = false)
+        assertEquals("Hermes needs a password", spec!!.title)
+        assertNull("once per id", c.onServerRequest(sudo, foreground = false))
+        val cancel = c.onEvent(event("request.cancel", payload = buildJsonObject { put("id", "srq-s") }), foreground = false)
+        assertEquals(listOf(Cancel("srq-s".hashCode())), cancel)
+        val secret = Frame.ServerRequest("srq-s", "secret", buildJsonObject { put("session_id", "live-1"); put("env_var", "K") })
+        assertNull("withdrawn before it was seen: never notified", c.onServerRequest(secret, foreground = false))
     }
 }
