@@ -7,12 +7,25 @@ object CommandText {
     data class Revealed(val text: String, val hadHiddenChars: Boolean)
 
     private const val MaxPlainBlankLines = 2
+    private const val Zwj = 0x200D
+    private const val Vs16 = 0xFE0F
 
-    private fun flagged(cp: Int): Boolean {
+    private fun inRanges(cp: Int): Boolean =
+        cp in 0xFE00..0xFE0F || cp in 0x180B..0x180F || cp in 0x17B4..0x17B5 ||
+            cp in 0xE0000..0xE0FFF || cp == 0x034F || cp == 0x2800 ||
+            cp == 0x115F || cp == 0x1160 || cp == 0x3164 || cp == 0xFFA0
+
+    private fun isEmoji(cp: Int): Boolean {
+        if (cp < 0x2000) return false
+        val t = Character.getType(cp).toByte()
+        return t == Character.OTHER_SYMBOL || t == Character.MODIFIER_SYMBOL
+    }
+
+    /** [prev] is the previous code point on the line, or -1; it exempts ZWJ and VS16 inside emoji. */
+    private fun flagged(cp: Int, prev: Int): Boolean {
         if (cp == '\n'.code || cp == '\t'.code) return false
-        if (cp in 0xFE00..0xFE0F || cp in 0xE0100..0xE01EF) return true
-        if (cp in 0xE0000..0xE007F) return true
-        if (cp == 0x115F || cp == 0x1160 || cp == 0x3164 || cp == 0xFFA0) return true
+        if ((cp == Zwj || cp == Vs16) && prev >= 0 && isEmoji(prev)) return false
+        if (inRanges(cp)) return true
         return when (Character.getType(cp).toByte()) {
             Character.FORMAT, Character.CONTROL, Character.LINE_SEPARATOR,
             Character.PARAGRAPH_SEPARATOR, Character.PRIVATE_USE, Character.UNASSIGNED,
@@ -24,50 +37,70 @@ object CommandText {
     }
 
     private fun marker(cp: Int) =
-        "⟨U+" + Integer.toHexString(cp).uppercase(Locale.ROOT).padStart(4, '0') + "⟩"
+        "\u27E8U+" + Integer.toHexString(cp).uppercase(Locale.ROOT).padStart(4, '0') + "\u27E9"
 
-    fun reveal(raw: String): Revealed {
-        var found = false
-        val out = StringBuilder(raw.length)
+    /** A line is blank if it holds only whitespace and/or flagged code points. */
+    private fun isBlank(line: String): Boolean {
         var i = 0
-        while (i < raw.length) {
-            val cp = raw.codePointAt(i)
+        var prev = -1
+        while (i < line.length) {
+            val cp = line.codePointAt(i)
             i += Character.charCount(cp)
-            if (flagged(cp)) {
+            if (!(Character.isWhitespace(cp) || flagged(cp, prev))) return false
+            prev = cp
+        }
+        return true
+    }
+
+    /** Returns the line with flagged code points replaced, and whether any were. */
+    private fun revealLine(line: String): Pair<String, Boolean> {
+        var found = false
+        val out = StringBuilder(line.length)
+        var i = 0
+        var prev = -1
+        while (i < line.length) {
+            val cp = line.codePointAt(i)
+            i += Character.charCount(cp)
+            if (flagged(cp, prev)) {
                 found = true
                 out.append(marker(cp))
             } else {
                 out.appendCodePoint(cp)
             }
+            prev = cp
         }
-        val (collapsed, blanks) = collapseBlankRuns(out.toString())
-        return Revealed(collapsed, found || blanks)
+        return out.toString() to found
     }
 
-    /** Replaces runs of more than two blank lines with one visible marker line. */
-    private fun collapseBlankRuns(text: String): Pair<String, Boolean> {
-        val lines = text.split('\n')
+    fun reveal(raw: String): Revealed {
+        val lines = raw.split('\n')
+        val blank = lines.map { isBlank(it) }
         val result = ArrayList<String>(lines.size)
-        var changed = false
+        var suspicious = false
         var i = 0
         while (i < lines.size) {
-            if (lines[i].isBlank()) {
+            if (blank[i]) {
                 var j = i
-                while (j < lines.size && lines[j].isBlank()) j++
+                while (j < lines.size && blank[j]) j++
                 val run = j - i
-                // A run touching the start or end has no neighbour on one side but is still padding.
                 if (run > MaxPlainBlankLines) {
-                    result.add("⟨$run blank lines⟩")
-                    changed = true
+                    result.add("\u27E8$run blank lines\u27E9")
+                    suspicious = true
                 } else {
-                    repeat(run) { result.add(lines[i + it]) }
+                    for (k in i until j) {
+                        val (text, found) = revealLine(lines[k])
+                        result.add(text)
+                        suspicious = suspicious || found
+                    }
                 }
                 i = j
             } else {
-                result.add(lines[i])
+                val (text, found) = revealLine(lines[i])
+                result.add(text)
+                suspicious = suspicious || found
                 i++
             }
         }
-        return result.joinToString("\n") to changed
+        return Revealed(result.joinToString("\n"), suspicious)
     }
 }

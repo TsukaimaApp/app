@@ -11,7 +11,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -93,6 +95,7 @@ fun ApprovalCard(
         var expanded by rememberSaveable(item.id) { mutableStateOf(false) }
         // null = not measured yet; fail closed so Approve is never live before the layout is known.
         var hiddenLines by remember(item.command) { mutableStateOf<Int?>(null) }
+        val measurer = rememberTextMeasurer()
         val blocked = !expanded && hiddenLines != 0
         Text(
             text = revealed.text,
@@ -105,11 +108,13 @@ fun ApprovalCard(
                     hiddenLines = if (!layout.hasVisualOverflow) {
                         0
                     } else {
-                        val text = revealed.text
-                        val end = layout.getLineEnd(layout.lineCount - 1, visibleEnd = false).coerceIn(0, text.length)
-                        val total = text.count { it == '\n' } + 1
-                        val shown = text.substring(0, end).count { it == '\n' } + 1
-                        maxOf(1, total - shown)
+                        // Visual lines: re-measure unconstrained by height at the same width.
+                        val full = measurer.measure(
+                            text = revealed.text,
+                            style = TsukaimaType.mono,
+                            constraints = Constraints(maxWidth = layout.size.width),
+                        )
+                        maxOf(1, full.lineCount - layout.lineCount)
                     }
                 }
             },
