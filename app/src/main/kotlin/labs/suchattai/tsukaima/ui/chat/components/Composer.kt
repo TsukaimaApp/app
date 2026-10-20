@@ -85,8 +85,8 @@ fun composerAction(
  * gates sending (text or a ready attachment); the caller clears [value] in [onSend]. While the agent is
  * [running] a turn, send becomes a danger-filled Stop ([onStop]) in the same 44dp slot, and Enter does nothing. When [onVoice] is set and there is nothing to send, send
  * becomes an accent mic that calls it (see [composerAction]). [focusRequester], when set, is attached to the text
- * field (leaving voice mode for the keyboard focuses it). While [editing] a sent message, an "Editing — tap to
- * cancel" caption sits above the field; a tap on it calls [onCancelEdit].
+ * field (leaving voice mode for the keyboard focuses it). While a sent message is edited, [editCaption] ("Editing —
+ * tap to cancel") sits above the field; a tap on it calls [onCancelEdit].
  */
 @Composable
 fun Composer(
@@ -106,7 +106,7 @@ fun Composer(
     disabledPlaceholder: String = "Hermes is unreachable",
     onVoice: (() -> Unit)? = null,
     focusRequester: FocusRequester? = null,
-    editing: Boolean = false,
+    editCaption: String? = null,
     onCancelEdit: () -> Unit = {},
 ) {
     val colors = MaterialTheme.tsukaima
@@ -122,7 +122,7 @@ fun Composer(
             .border(1.dp, colors.hairline, shape)
             .padding(6.dp),
     ) {
-        if (editing) EditingCaption(onCancelEdit)
+        if (editCaption != null) EditingCaption(editCaption, onCancelEdit)
         if (attachments.isNotEmpty()) {
             Row(
                 modifier = Modifier
@@ -247,9 +247,9 @@ private fun AttachmentChip(a: PendingAttachment, onRemove: () -> Unit, onRetry: 
     }
 }
 
-/** "Editing — tap to cancel" above the field while a sent message is being edited; the whole 44dp row cancels. */
+/** [text] ("Editing — tap to cancel") above the field while a sent message is being edited; the whole 44dp row cancels. */
 @Composable
-private fun EditingCaption(onCancel: () -> Unit) {
+private fun EditingCaption(text: String, onCancel: () -> Unit) {
     val colors = MaterialTheme.tsukaima
     Row(
         modifier = Modifier
@@ -262,7 +262,7 @@ private fun EditingCaption(onCancel: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         TsukaimaIcon(IconName.Edit, size = 14.dp, tint = colors.ink2, contentDescription = null)
-        Text("Editing — tap to cancel", style = TsukaimaType.caption, color = colors.ink2)
+        Text(text, style = TsukaimaType.caption, color = colors.ink2)
     }
 }
 
@@ -274,7 +274,7 @@ private fun ComposerPreview(dark: Boolean) = PreviewPage(dark) {
     Composer("", {}, {}, {}, enabled = false)
     Composer("", {}, {}, {}, enabled = true, running = true)
     Composer("", {}, {}, {}, enabled = true, onVoice = {})
-    Composer("And the init system?", {}, {}, {}, enabled = true, editing = true)
+    Composer("And the init system?", {}, {}, {}, enabled = true, editCaption = "Editing — attachments not included — tap to cancel")
     Composer(
         "What is in these?", {}, {}, {}, enabled = true, canSend = false,
         attachments = listOf(

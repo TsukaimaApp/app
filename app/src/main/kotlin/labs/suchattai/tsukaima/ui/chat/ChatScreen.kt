@@ -356,7 +356,7 @@ private fun ChatColumn(
             onStop = actions.onStop,
             onVoice = actions.onVoice,
             focusRequester = composerFocus,
-            editing = state.pendingEdit != null,
+            editCaption = state.editCaption,
             onCancelEdit = actions.onCancelEdit,
         )
     }

@@ -2358,6 +2358,7 @@ class ChatViewModelTest {
         assertEquals(3L, params["truncate_before_row_id"]!!.jsonPrimitive.long)
         assertEquals("true", params["confirm_truncate"]!!.jsonPrimitive.content)
         assertEquals("true", params["confirm_deep_truncate"]!!.jsonPrimitive.content)
+        assertEquals("true", params["confirm_empty_truncate"]!!.jsonPrimitive.content)
         val s = vm.state.value
         assertEquals(listOf("what kernel?", "6.17.2", "and the init system?"), s.texts())
         assertEquals(9L, (s.chat.items.last() as ChatItem.UserMessage).rowId)
@@ -2385,7 +2386,7 @@ class ChatViewModelTest {
     fun editFallsBackWhenTheRowIsGone() = runTest(dispatcher) {
         val b = backend().apply {
             transport.on("session.resume", obj(twoTurnsJson))
-            transport.rpcErrors["prompt.submit"] = RpcException(4018, "truncate_before_row_id 3 not found in session history")
+            transport.rpcErrors["prompt.submit"] = RpcException(4018, "target user message is no longer in session history")
         }
         val vm = vm(b, stored)
         advanceUntilIdle()
@@ -2399,9 +2400,159 @@ class ChatViewModelTest {
         val s = vm.state.value
         assertEquals(before, s.chat.items)
         assertEquals("and the init system?", s.input)
-        assertEquals(3L, s.pendingEdit)
+        assertNull("the row is gone: the text can go as a new message", s.pendingEdit)
+        assertNull(s.editCaption)
         assertEquals(AgentStatus.Idle, s.chat.status)
-        assertTrue(b.toasts.last(), b.toasts.last().contains("truncate_before_row_id 3 not found"))
+        assertEquals("That message is gone — send it as a new message or cancel", b.toasts.last())
+    }
+
+    @Test
+    fun editRefusedAsBusyKeepsTheEditAndItsAttachments() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("session.resume", obj(twoTurnsJson))
+            cannedAttach()
+            transport.rpcErrors["prompt.submit"] = RpcException(4009, "session busy")
+        }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        val before = vm.state.value.chat.items
+
+        vm.editMessage("h-3")
+        vm.attach(listOf(notes))
+        advanceUntilIdle()
+        vm.send()
+        advanceUntilIdle()
+
+        val s = vm.state.value
+        assertEquals(before, s.chat.items)
+        assertEquals("and the distro?", s.input)
+        assertEquals(3L, s.pendingEdit)
+        assertEquals(listOf("notes.txt"), s.attachments.map { it.name })
+        assertEquals(AttachmentStatus.Ready, s.attachments.single().status)
+        assertEquals("Wait for the reply to finish", b.toasts.last())
+    }
+
+    @Test
+    fun storageFailureAfterTheCutReloadsTheHistory() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("session.resume", obj(twoTurnsJson))
+            transport.on("session.history", obj("""{"messages":[{"role":"user","text":"what kernel?","row_id":1},{"role":"assistant","text":"6.17.2","row_id":2}]}"""))
+            transport.rpcErrors["prompt.submit"] = RpcException(
+                5070,
+                "Session storage could not be written, so this message was not saved: the disk is full. Free some disk space, then send your message again.",
+            )
+        }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+
+        vm.editMessage("h-3")
+        vm.setInput("and the init system?")
+        vm.send()
+        advanceUntilIdle()
+
+        val s = vm.state.value
+        assertEquals(live, b.transport.last("session.history")["session_id"]!!.jsonPrimitive.content)
+        assertEquals(listOf("what kernel?", "6.17.2"), s.texts())
+        assertEquals("and the init system?", s.input)
+        assertNull(s.pendingEdit)
+        assertTrue(b.toasts.last().contains("the disk is full"))
+    }
+
+    @Test
+    fun theTurnsEventsMayArriveBeforeTheSubmitReturns() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val b = backend().apply {
+            transport.on("session.resume", obj(twoTurnsJson))
+            transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":11}"""))
+            transport.gateNext["prompt.submit"] = gate
+        }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+
+        vm.regenerate("h-4")
+        runCurrent()
+        b.events.emit(ev("message.start", 101))
+        b.events.emit(ev("message.delta", 102, """{"text":"Ubuntu 25.04 (Plucky)"}"""))
+        advanceUntilIdle()
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        val s = vm.state.value
+        assertEquals(listOf("what kernel?", "6.17.2", "and the distro?", "Ubuntu 25.04 (Plucky)"), s.texts())
+        assertEquals(11L, (s.chat.items[2] as ChatItem.UserMessage).rowId)
+    }
+
+    @Test
+    fun regenerateReplaysTheAttachmentRefsButNotQueuedImages() = runTest(dispatcher) {
+        val b = backend().apply {
+            cannedAttach()
+            transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":5}"""))
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.attach(listOf(notes))
+        advanceUntilIdle()
+        vm.setInput("hi")
+        vm.send()
+        advanceUntilIdle()
+        b.events.emit(ev("message.start", 1))
+        b.events.emit(ev("message.complete", 2, """{"text":"Read it."}"""))
+        advanceUntilIdle()
+
+        vm.regenerate("a-1")
+        advanceUntilIdle()
+        assertEquals("@file:attachments/notes.txt\n\nhi", b.transport.last("prompt.submit")["text"]!!.jsonPrimitive.content)
+        assertEquals(5L, b.transport.last("prompt.submit")["truncate_before_row_id"]!!.jsonPrimitive.long)
+
+        // Editing it drops the attachments, and the caption says so.
+        b.events.emit(ev("message.complete", 3, """{"text":"Read it again."}"""))
+        advanceUntilIdle()
+        vm.editMessage(vm.state.value.chat.items.first().id)
+        assertEquals("Editing — attachments not included — tap to cancel", vm.state.value.editCaption)
+        vm.cancelEdit()
+
+        // An image-only send cannot be replayed: the server consumed the image.
+        b.transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":7}"""))
+        vm.attach(listOf(png))
+        advanceUntilIdle()
+        vm.send()
+        advanceUntilIdle()
+        b.events.emit(ev("message.start", 4))
+        b.events.emit(ev("message.complete", 5, """{"text":"A screenshot."}"""))
+        advanceUntilIdle()
+        val submits = b.transport.methods().count { it == "prompt.submit" }
+        vm.regenerate(vm.state.value.chat.items.last().id)
+        advanceUntilIdle()
+        assertEquals(submits, b.transport.methods().count { it == "prompt.submit" })
+    }
+
+    @Test
+    fun aFailedSendDroppedByARewindDoesNotComeBack() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("session.resume", obj(twoTurnsJson))
+            transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":11}"""))
+            transport.failNext["prompt.submit"] = null
+        }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        vm.setInput("lost")
+        vm.send()
+        advanceUntilIdle()
+        assertTrue((vm.state.value.chat.items.last() as ChatItem.UserMessage).failed)
+
+        vm.regenerate("h-4")
+        advanceUntilIdle()
+        assertEquals(listOf("what kernel?", "6.17.2", "and the distro?"), vm.state.value.texts())
+
+        // A reconnect onto a new live id rebuilds the transcript: the dropped bubble is not put back.
+        b.transport.on("session.resume", obj(twoTurnsJson.replace(live, "beef0001")))
+        b.transport.on("session.events.since", obj("""{"events":[],"latest_seq":0,"truncated":false,"open_requests":[]}"""))
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+        assertEquals("beef0001", vm.state.value.chat.liveSessionId)
+        assertTrue(vm.state.value.chat.items.none { it is ChatItem.UserMessage && it.failed })
     }
 
     @Test
@@ -2433,7 +2584,7 @@ class ChatViewModelTest {
     fun failedRegenerateKeepsTheTranscript() = runTest(dispatcher) {
         val b = backend().apply {
             transport.on("session.resume", obj(twoTurnsJson))
-            transport.rpcErrors["prompt.submit"] = RpcException(4029, "session busy")
+            transport.rpcErrors["prompt.submit"] = RpcException(4029, "truncation parameters require confirm_truncate=true")
         }
         val vm = vm(b, stored)
         advanceUntilIdle()
@@ -2446,7 +2597,7 @@ class ChatViewModelTest {
         assertEquals("", vm.state.value.input)
         assertNull(vm.state.value.pendingEdit)
         assertEquals(AgentStatus.Idle, vm.state.value.chat.status)
-        assertTrue(b.toasts.last().contains("session busy"))
+        assertEquals("Couldn’t regenerate the reply: truncation parameters require confirm_truncate=true", b.toasts.last())
     }
 
     @Test

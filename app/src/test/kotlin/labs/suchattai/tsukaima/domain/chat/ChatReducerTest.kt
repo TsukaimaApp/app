@@ -882,4 +882,30 @@ class ChatReducerTest {
         assertEquals(7L, (s.items[0] as ChatItem.UserMessage).rowId)
         assertEquals(8L, (s.items[1] as ChatItem.AssistantMessage).rowId)
     }
+
+    @Test
+    fun aTurnWithoutFinalTextNeverStampsAnOlderReply() {
+        val history = live.copy(
+            items = listOf(
+                ChatItem.UserMessage("h-1", "first", rowId = 1),
+                ChatItem.AssistantMessage("h-2", "one", streaming = false, reasoning = null, rowId = 2),
+            ),
+        )
+        val s = ChatReducer.onSubmitted(history, "again", "u-l1", flair).feed(
+            ev("message.complete", """{"text":"","persisted_turn":{"row_ids":[7,8],"complete":false,"user_row_id":7,"final_assistant_row_id":8}}""", seq = 1),
+        )
+        assertEquals(2L, (s.items[1] as ChatItem.AssistantMessage).rowId)
+        assertEquals(7L, (s.items[2] as ChatItem.UserMessage).rowId)
+        // A user message that already has its row keeps it.
+        val again = s.feed(ev("message.complete", """{"text":"","persisted_turn":{"row_ids":[9],"complete":false,"user_row_id":9}}""", seq = 2))
+        assertEquals(7L, (again.items[2] as ChatItem.UserMessage).rowId)
+    }
+
+    @Test
+    fun theEchoKeepsWhatWasSubmittedWhenItDiffers() {
+        val plain = ChatReducer.onSubmitted(live, "hi", "u-l1", flair, promptText = "hi")
+        assertNull((plain.items.single() as ChatItem.UserMessage).promptText)
+        val withRef = ChatReducer.onSubmitted(live, "hi", "u-l1", flair, listOf("notes.txt"), promptText = "@file:notes.txt\n\nhi")
+        assertEquals("@file:notes.txt\n\nhi", (withRef.items.single() as ChatItem.UserMessage).promptText)
+    }
 }

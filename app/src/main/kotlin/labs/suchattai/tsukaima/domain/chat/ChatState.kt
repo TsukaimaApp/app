@@ -13,6 +13,9 @@ sealed interface ChatItem {
      * [failed]: the local echo of a send that did not reach Hermes; the bubble offers Retry and Dismiss.
      * [rowId]: the server's persisted row (history `row_id`, or `user_row_id` once a send was accepted); null
      * until known. Edit and Regenerate rewind the transcript to it.
+     * [promptText]: what a live send actually submitted when it differs from [text] (attachment `@file:` refs, the
+     * image placeholder); null = [text]. Regenerate replays it. [imagesSent]: the send queued images, which the turn
+     * consumed on the server, so it cannot be replayed as it was.
      */
     data class UserMessage(
         override val id: String,
@@ -20,6 +23,8 @@ sealed interface ChatItem {
         val attachments: List<String> = emptyList(),
         val failed: Boolean = false,
         val rowId: Long? = null,
+        val promptText: String? = null,
+        val imagesSent: Boolean = false,
     ) : ChatItem
 
     data class AssistantMessage(

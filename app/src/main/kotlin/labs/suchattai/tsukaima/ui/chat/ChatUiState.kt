@@ -60,6 +60,8 @@ data class ChatUiState(
     val messageMenu: String? = null,
     /** The row of the user message being edited: the next send replaces it and drops what followed. */
     val pendingEdit: Long? = null,
+    /** The message being edited was sent with attachments, which the edit does not include. */
+    val editDropsAttachments: Boolean = false,
     /** Voice mode's state; non-null while the voice screen is open. */
     val voice: VoiceState? = null,
     /** The voice language setting (BCP-47 tag), mirrored from settings; null = system default. */
@@ -83,6 +85,14 @@ data class ChatUiState(
     val canSend: Boolean
         get() = writable && !compacting && attachments.none { it.status == AttachmentStatus.Uploading } &&
             (input.isNotBlank() || attachments.any { it.status == AttachmentStatus.Ready })
+
+    /** The composer's caption while [pendingEdit] is set, else null. */
+    val editCaption: String?
+        get() = when {
+            pendingEdit == null -> null
+            editDropsAttachments -> "Editing — attachments not included — tap to cancel"
+            else -> "Editing — tap to cancel"
+        }
 
     /** A new chat with nothing in it yet (shows the working-directory picker). */
     val empty: Boolean get() = isNew && chat.items.isEmpty() && !loading

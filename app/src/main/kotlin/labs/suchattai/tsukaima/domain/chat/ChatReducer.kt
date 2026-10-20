@@ -61,8 +61,12 @@ object ChatReducer {
         localId: String,
         flair: () -> String = ThinkingFlair::next,
         attachments: List<String> = emptyList(),
+        promptText: String? = null,
+        imagesSent: Boolean = false,
     ): ChatState = state.copy(
-        items = state.items + ChatItem.UserMessage(localId, text, attachments),
+        items = state.items + ChatItem.UserMessage(
+            localId, text, attachments, promptText = promptText?.takeIf { it != text }, imagesSent = imagesSent,
+        ),
         status = AgentStatus.Thinking(flair()),
     )
 
@@ -365,25 +369,24 @@ object ChatReducer {
     }
 
     /**
-     * `message.complete.persisted_turn`: the turn's committed rows. `user_row_id` goes to the newest user message
-     * still without one, `final_assistant_row_id` to the last assistant message (the reply just completed), so they
-     * can be edited / regenerated without reloading the history.
+     * `message.complete.persisted_turn`: the turn's committed rows. `user_row_id` goes to the last user message when
+     * it has none yet; `final_assistant_row_id` to the last assistant message only when it sits below that user
+     * message (the reply of this turn, not an older one when the turn ended without text). They let a live turn
+     * be edited or regenerated without reloading the history.
      */
     private fun withPersistedTurn(s: ChatState, turn: JsonObject?): ChatState {
         if (turn == null) return s
         fun long(key: String) = (turn[key] as? JsonPrimitive)?.longOrNull
-        var items = s.items
-        long("user_row_id")?.let { row ->
-            val i = items.indexOfLast { it is ChatItem.UserMessage && !it.failed }
-            val user = items.getOrNull(i) as? ChatItem.UserMessage
-            if (user != null && user.rowId == null) items = items.toMutableList().also { it[i] = user.copy(rowId = row) }
-        }
-        long("final_assistant_row_id")?.let { row ->
-            val i = items.indexOfLast { it is ChatItem.AssistantMessage }
-            val reply = items.getOrNull(i) as? ChatItem.AssistantMessage
-            if (reply != null && !reply.streaming) items = items.toMutableList().also { it[i] = reply.copy(rowId = row) }
-        }
-        return if (items === s.items) s else s.copy(items = items)
+        val items = s.items.toMutableList()
+        val userIndex = items.indexOfLast { it is ChatItem.UserMessage }
+        val user = items.getOrNull(userIndex) as? ChatItem.UserMessage
+        val userRow = long("user_row_id")
+        if (user != null && userRow != null && user.rowId == null && !user.failed) items[userIndex] = user.copy(rowId = userRow)
+        val replyIndex = items.indexOfLast { it is ChatItem.AssistantMessage }
+        val reply = items.getOrNull(replyIndex) as? ChatItem.AssistantMessage
+        val replyRow = long("final_assistant_row_id")
+        if (reply != null && replyRow != null && replyIndex > userIndex && !reply.streaming) items[replyIndex] = reply.copy(rowId = replyRow)
+        return if (items == s.items) s else s.copy(items = items)
     }
 
     private fun onToolStart(s: ChatState, p: JsonObject): ChatState {

@@ -92,6 +92,8 @@ class ChatViewModel(
 
     private val edits = ChatEdits(
         session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state, attachments, flair,
+        forgetFailed = { ids -> ids.forEach(failedSends::remove) },
+        reload = ::reloadHistory,
     ) { "u-l${++userCounter}" }
 
     private val media = ChatMedia(backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), io, _state)
@@ -260,7 +262,10 @@ class ChatViewModel(
     ) {
         val localId = "u-l${++userCounter}"
         _state.update {
-            val chat = ChatReducer.onSubmitted(it.chat, text, localId, flair, sent.map(PendingAttachment::name))
+            val chat = ChatReducer.onSubmitted(
+                it.chat, text, localId, flair, sent.map(PendingAttachment::name),
+                promptText = Attachments.promptText(text, sent), imagesSent = sent.any { a -> a.kind == AttachmentKind.Image },
+            )
             if (fromComposer) it.copy(input = "", chat = chat) else it.copy(chat = chat)
         }
         launch { submit(live, localId, text, sent, voice, interrupted) }
@@ -311,6 +316,15 @@ class ChatViewModel(
 
     /** The reasoning header of message [id] was tapped. */
     fun toggleReasoning(id: String) = setChat { ChatReducer.toggleReasoning(it, id) }
+
+    /** Replaces the transcript with live session [live]'s stored history (failed sends kept); a failure toasts. */
+    private suspend fun reloadHistory(live: String) {
+        attempt("Couldn’t reload the chat") {
+            val messages = session.history(live)
+            setChat { if (it.liveSessionId == live) it.copy(items = ChatReducer.fromHistory(messages)) else it }
+            restoreFailedSends()
+        }
+    }
 
     /** A rebuilt transcript holds only what the server stored: the failed bubbles (never sent) are put back at the end. */
     private fun restoreFailedSends() {
