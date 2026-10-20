@@ -100,8 +100,10 @@ class SettingsViewModelTest {
     private val vms = mutableListOf<SettingsViewModel>()
 
     /**
-     * Bounds a hang, not a race: the store is a real DataStore on a temp file, and a cold CI runner has taken
-     * more than 5 s for its first write while the ViewModel's initial load fans out over the mock server.
+     * Bounds a hang, not a race. The store is a real DataStore on a temp file. A write started from the test
+     * thread before the ViewModel's settings collector had its first emission hung forever on the GitHub
+     * runner (never locally), so tests await that first emission (as a user would, the screen is rendered
+     * from it) before writing through the ViewModel; see `setModelSavesTheProvider`.
      */
     private val STORE_TIMEOUT_MS = 30_000L
 
@@ -163,7 +165,9 @@ class SettingsViewModelTest {
 
     @Test
     fun setProfilePersists() = runBlocking<Unit> {
+        store.update { it.copy(username = "alice") }
         val vm = vm()
+        vm.await { it.username == "alice" } // the screen has its settings before the user can tap, see [seeded]
         vm.setProfile("research")
         assertEquals("research", withTimeout(STORE_TIMEOUT_MS) { store.settings.first { it.profile == "research" } }.profile)
         assertEquals("research", vm.await { it.profile == "research" }.profile)
@@ -312,6 +316,7 @@ class SettingsViewModelTest {
     fun setModelSavesTheProvider() = runBlocking<Unit> {
         store.update { it.copy(model = "old", modelProvider = "stale-provider") }
         val vm = vm()
+        vm.await { it.model == "old" }
         vm.setModel("openrouter", "hermes-4-70b")
         val s = withTimeout(STORE_TIMEOUT_MS) { store.settings.first { it.model == "hermes-4-70b" } }
         assertEquals("openrouter", s.modelProvider)

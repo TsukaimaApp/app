@@ -70,3 +70,9 @@ dependencies {
     testImplementation(libs.turbine)
     testImplementation(libs.okhttp.mockwebserver3)
 }
+
+// Reproduce a small CI runner locally: TSUKAIMA_TEST_CPUS=2 makes the test JVM report that many processors
+// (Dispatchers.Default and every pool sized from availableProcessors() follow).
+tasks.withType<Test>().configureEach {
+    System.getenv("TSUKAIMA_TEST_CPUS")?.toIntOrNull()?.let { jvmArgs("-XX:ActiveProcessorCount=$it") }
+}
