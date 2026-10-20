@@ -74,4 +74,17 @@ class SettingsStoreTest {
         store.update { it.copy(notifications = it.notifications.copy(approvals = true)) }
         assertEquals(off.copy(approvals = true), store.settings.first().notifications)
     }
+
+    @Test
+    fun assistSessionRoundTrips() = runTest {
+        val store = store()
+        store.update { it.copy(assistSessionId = "s1", assistSessionAt = 42L) }
+        val s = store.settings.first()
+        assertEquals("s1", s.assistSessionId)
+        assertEquals(42L, s.assistSessionAt)
+        store.update { it.copy(assistSessionId = null, assistSessionAt = null) }
+        val cleared = store.settings.first()
+        assertNull(cleared.assistSessionId)
+        assertNull(cleared.assistSessionAt)
+    }
 }

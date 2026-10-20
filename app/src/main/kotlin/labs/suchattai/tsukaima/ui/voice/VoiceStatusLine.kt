@@ -47,15 +47,18 @@ fun voiceLine(phase: VoicePhase, status: AgentStatus, mode: VoiceMode): VoiceLin
     }
 }
 
-/** Centred 7dp dot + serif-italic [line]; the label cross-fades in 180 ms when it changes. */
+/**
+ * Centred 7dp dot + serif-italic [line]; the label cross-fades in 180 ms when it changes. [centred] false starts it
+ * at the leading edge (the assist sheet).
+ */
 @Composable
-fun VoiceStatusLine(line: VoiceLine, fontSize: TextUnit = 16.sp, modifier: Modifier = Modifier) {
+fun VoiceStatusLine(line: VoiceLine, fontSize: TextUnit = 16.sp, modifier: Modifier = Modifier, centred: Boolean = true) {
     val colors = MaterialTheme.tsukaima
     val visual = statusVisual(line.tone, line.pulsing, colors)
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, if (centred) Alignment.CenterHorizontally else Alignment.Start),
     ) {
         StatusDot(visual)
         Crossfade(targetState = line.label, animationSpec = tween(180, easing = Motion.easing), label = "voiceLabel") { label ->
@@ -65,7 +68,7 @@ fun VoiceStatusLine(line: VoiceLine, fontSize: TextUnit = 16.sp, modifier: Modif
                 color = colors.ink2,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
+                textAlign = if (centred) TextAlign.Center else TextAlign.Start,
             )
         }
     }

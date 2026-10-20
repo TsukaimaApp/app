@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.MaterialTheme
@@ -34,6 +35,7 @@ import labs.suchattai.tsukaima.ui.theme.tsukaima
  * for its `MEDIA:` deliveries ([media]). [onLongPress] opens the message menu (copy). The reasoning's open state
  * is the chat's ([reasoningOpen], toggled through [onToggleReasoning]), not the composable's: a list that
  * recycles or rebuilds its items must not fold a block the reader is in the middle of.
+ * [padding] is its outer spacing (none in the assist sheet).
  */
 @Composable
 fun AssistantMessage(
@@ -45,6 +47,7 @@ fun AssistantMessage(
     onLongPress: (() -> Unit)? = null,
     reasoningOpen: Boolean = false,
     onToggleReasoning: () -> Unit = {},
+    padding: PaddingValues = PaddingValues(horizontal = Dimens.gutter, vertical = 4.dp),
 ) {
     val colors = MaterialTheme.tsukaima
     val blocks = remember(text, streaming) { Markdown.parse(text, streaming) }
@@ -53,7 +56,7 @@ fun AssistantMessage(
         modifier = modifier
             .widthIn(max = 640.dp)
             .then(if (onLongPress != null) Modifier.longPressMenu(onLongPress) else Modifier)
-            .padding(horizontal = Dimens.gutter, vertical = 4.dp),
+            .padding(padding),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (reasoning != null) {

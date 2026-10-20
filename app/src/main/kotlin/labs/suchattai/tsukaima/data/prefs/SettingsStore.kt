@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -41,6 +42,10 @@ data class Settings(
     /** Whether the app has already asked for `POST_NOTIFICATIONS` (asked once, after onboarding). */
     val askedNotifications: Boolean = false,
     val notifications: NotificationPrefs = NotificationPrefs(),
+    /** Stored id of the chat the device-assistant sheet last used; resumed for a while ([assistSessionAt]). */
+    val assistSessionId: String? = null,
+    /** When [assistSessionId] was last used, epoch millis. */
+    val assistSessionAt: Long? = null,
 )
 
 class SettingsStore(private val dataStore: DataStore<Preferences>) {
@@ -64,6 +69,8 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             prefs[NOTIFY_PAIRING] = next.notifications.pairing
             prefs[NOTIFY_REPLIES] = next.notifications.replies
             prefs[NOTIFY_ALERTS] = next.notifications.alerts
+            prefs.putOrRemove(ASSIST_SESSION_ID, next.assistSessionId)
+            if (next.assistSessionAt == null) prefs.remove(ASSIST_SESSION_AT) else prefs[ASSIST_SESSION_AT] = next.assistSessionAt
         }
     }
 
@@ -95,6 +102,8 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
                 replies = this[NOTIFY_REPLIES] ?: defaults.notifications.replies,
                 alerts = this[NOTIFY_ALERTS] ?: defaults.notifications.alerts,
             ),
+            assistSessionId = this[ASSIST_SESSION_ID],
+            assistSessionAt = this[ASSIST_SESSION_AT],
         )
     }
 
@@ -114,5 +123,7 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
         val NOTIFY_PAIRING = booleanPreferencesKey("notify_pairing")
         val NOTIFY_REPLIES = booleanPreferencesKey("notify_replies")
         val NOTIFY_ALERTS = booleanPreferencesKey("notify_alerts")
+        val ASSIST_SESSION_ID = stringPreferencesKey("assist_session_id")
+        val ASSIST_SESSION_AT = longPreferencesKey("assist_session_at")
     }
 }

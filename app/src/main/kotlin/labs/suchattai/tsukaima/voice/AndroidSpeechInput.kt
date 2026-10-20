@@ -1,10 +1,13 @@
 package labs.suchattai.tsukaima.voice
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.speech.RecognitionListener
+import android.speech.RecognitionService
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
@@ -24,15 +27,37 @@ import labs.suchattai.tsukaima.domain.voice.SpeechInput
  */
 class AndroidSpeechInput(private val context: Context) : SpeechInput {
     override val available: Boolean
-        get() = SpeechRecognizer.isRecognitionAvailable(context) || onDeviceAvailable()
+        get() = onDeviceAvailable() || recognizers().isNotEmpty()
 
     private fun onDeviceAvailable() =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
 
+    /** Installed recognition services other than Tsukaima's own stub (`assist.TsukaimaRecognitionService`). */
+    private fun recognizers(): List<ComponentName> =
+        context.packageManager.queryIntentServices(Intent(RecognitionService.SERVICE_INTERFACE), 0)
+            .map { it.serviceInfo }
+            .filter { it.packageName != context.packageName }
+            .map { ComponentName(it.packageName, it.name) }
+
+    /**
+     * On Android 10/11, making Tsukaima the device assistant also makes its stub recogniser the default one; skip it
+     * there in favour of another installed recogniser. Null means "the system default" (always the case on 12+).
+     */
+    private fun explicitRecognizer(): ComponentName? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return null
+        val current = Settings.Secure.getString(context.contentResolver, DEFAULT_RECOGNIZER_SETTING)
+            ?.let(ComponentName::unflattenFromString)
+        if (current?.packageName != context.packageName) return null
+        return recognizers().firstOrNull()
+    }
+
     override fun listen(): Flow<SpeechEvent> = callbackFlow {
-        val recognizer =
-            if (onDeviceAvailable()) SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
-            else SpeechRecognizer.createSpeechRecognizer(context)
+        val explicit = explicitRecognizer()
+        val recognizer = when {
+            onDeviceAvailable() -> SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+            explicit != null -> SpeechRecognizer.createSpeechRecognizer(context, explicit)
+            else -> SpeechRecognizer.createSpeechRecognizer(context)
+        }
         recognizer.setRecognitionListener(object : RecognitionListener {
             override fun onPartialResults(partialResults: Bundle?) {
                 first(partialResults)?.let { trySend(SpeechEvent.Partial(it)) }
@@ -96,5 +121,8 @@ class AndroidSpeechInput(private val context: Context) : SpeechInput {
 
     private companion object {
         const val TAG = "Tsukaima"
+
+        /** `Settings.Secure.VOICE_RECOGNITION_SERVICE` (hidden): the default recogniser, as a flattened component. */
+        const val DEFAULT_RECOGNIZER_SETTING = "voice_recognition_service"
     }
 }

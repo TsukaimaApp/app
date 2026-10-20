@@ -83,6 +83,8 @@ data class SettingsUiState(
     val notifications: NotificationPrefs = NotificationPrefs(),
     /** The approved pairing whose "Revoke?" confirmation is showing. */
     val confirmRevoke: PairingEntry? = null,
+    /** Tsukaima holds the device's assistant role (read by the screen on resume; the role needs a Context). */
+    val assistantRoleHeld: Boolean = false,
 ) {
     /** The URL field was edited to a different server than the one signed in to, and not yet signed in again. */
     val urlChangedWithoutSignIn: Boolean
@@ -406,6 +408,11 @@ class SettingsViewModel(
     fun setMaterialYou(on: Boolean) {
         viewModelScope.launch { settings.update { it.copy(materialYou = on) } }
     }
+
+    fun setAssistantRoleHeld(held: Boolean) = _state.update { it.copy(assistantRoleHeld = held) }
+
+    /** No settings screen for the default assistant could be opened: say where it is. */
+    fun assistantSettingsUnavailable() = toast("Open Settings → Default apps → Digital assistant app")
 
     fun setSimulateOffline(on: Boolean) {
         connection.simulateOffline.value = on

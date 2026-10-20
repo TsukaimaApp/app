@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -44,9 +45,13 @@ import labs.suchattai.tsukaima.ui.theme.TsukaimaShapes
 import labs.suchattai.tsukaima.ui.theme.TsukaimaType
 import labs.suchattai.tsukaima.ui.theme.tsukaima
 
-/** Slim expandable row for a tool call: quiet by default, output on tap. */
+/** Slim expandable row for a tool call: quiet by default, output on tap. [margin] is its outer spacing (none in the assist sheet). */
 @Composable
-fun ToolRow(item: ChatItem.ToolCall, modifier: Modifier = Modifier) {
+fun ToolRow(
+    item: ChatItem.ToolCall,
+    modifier: Modifier = Modifier,
+    margin: PaddingValues = PaddingValues(horizontal = Dimens.gutter, vertical = 6.dp),
+) {
     val colors = MaterialTheme.tsukaima
     var open by rememberSaveable(item.id) { mutableStateOf(false) }
     val source = remember { MutableInteractionSource() }
@@ -57,7 +62,7 @@ fun ToolRow(item: ChatItem.ToolCall, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = Dimens.gutter, vertical = 6.dp)
+            .padding(margin)
             .clip(shape)
             .background(colors.surfaceRaised, shape)
             .border(1.dp, colors.hairline, shape)

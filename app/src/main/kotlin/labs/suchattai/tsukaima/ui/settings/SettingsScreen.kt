@@ -1,5 +1,12 @@
 package labs.suchattai.tsukaima.ui.settings
 
+import android.app.role.RoleManager
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -18,13 +25,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.serialization.json.JsonObject
 import labs.suchattai.tsukaima.BuildConfig
@@ -69,6 +79,8 @@ class SettingsActions(
     val onAskRevoke: (PairingEntry?) -> Unit = {},
     val onToolset: (name: String, enabled: Boolean) -> Unit = { _, _ -> },
     val onNotifications: ((NotificationPrefs) -> NotificationPrefs) -> Unit = {},
+    /** "Use as device assistant": asks for the assistant role, or opens the system's assistant settings. */
+    val onAssistant: () -> Unit = {},
     val onTheme: (ThemeMode) -> Unit = {},
     val onMaterialYou: (Boolean) -> Unit = {},
     val onSimulateOffline: (Boolean) -> Unit = {},
@@ -85,6 +97,23 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val roleManager = remember(context) { context.getSystemService(RoleManager::class.java) }
+    val requestRole = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        vm.setAssistantRoleHeld(roleManager?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true)
+    }
+    // Re-read on every resume: the role may have changed in the system's settings meanwhile.
+    LifecycleResumeEffect(roleManager) {
+        vm.setAssistantRoleHeld(roleManager?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true)
+        onPauseOrDispose {}
+    }
+    val onAssistant: () -> Unit = {
+        if (roleManager?.isRoleAvailable(RoleManager.ROLE_ASSISTANT) == true) {
+            requestRole.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
+        } else {
+            openAssistantSettings(context, vm::assistantSettingsUnavailable)
+        }
+    }
     SettingsContent(
         state = state,
         actions = SettingsActions(
@@ -104,6 +133,7 @@ fun SettingsScreen(
             onAskRevoke = vm::askRevoke,
             onToolset = vm::toggleToolset,
             onNotifications = vm::setNotifications,
+            onAssistant = onAssistant,
             onTheme = vm::setTheme,
             onMaterialYou = vm::setMaterialYou,
             onSimulateOffline = vm::setSimulateOffline,
@@ -282,6 +312,17 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                 }
             }
 
+            Section("Voice") {
+                TsukaimaRow(
+                    title = "Use as device assistant",
+                    subtitle = if (state.assistantRoleHeld) "Tsukaima is your assistant" else "Long-press home or swipe from a corner to ask Hermes",
+                    leading = IconName.Mic,
+                    trailing = { Chevron() },
+                    onClick = actions.onAssistant,
+                    modifier = Modifier.bleed(12.dp),
+                )
+            }
+
             Section("Diagnostics") {
                 Column(Modifier.bleed(12.dp)) {
                     TsukaimaRow(
@@ -331,6 +372,22 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
             }
         }
     }
+}
+
+/**
+ * The system's assistant settings where the assistant role cannot be requested in-app: voice input settings, else
+ * the default-apps list; [onUnavailable] when neither opens.
+ */
+private fun openAssistantSettings(context: Context, onUnavailable: () -> Unit) {
+    for (action in listOf(Settings.ACTION_VOICE_INPUT_SETTINGS, Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) {
+        try {
+            context.startActivity(Intent(action))
+            return
+        } catch (_: ActivityNotFoundException) {
+            // try the next one
+        }
+    }
+    onUnavailable()
 }
 
 @Composable

@@ -30,6 +30,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import labs.suchattai.tsukaima.ui.theme.Dimens
@@ -166,6 +167,7 @@ private fun PillButton(
 /**
  * 44dp circular icon button. Transparent with a press wash by default; [filled] gives the
  * lavender accent fill (the send button only), or the danger red with [Tone.Danger] (Stop).
+ * [size] is the visual circle; below 44dp it is drawn centred in a 44dp touch target (the assist sheet's 40dp).
  */
 @Composable
 fun IconButton44(
@@ -176,6 +178,7 @@ fun IconButton44(
     filled: Boolean = false,
     enabled: Boolean = true,
     tone: Tone = Tone.Ink,
+    size: Dp = Dimens.hit,
 ) {
     val colors = MaterialTheme.tsukaima
     val source = remember { MutableInteractionSource() }
@@ -192,19 +195,25 @@ fun IconButton44(
     )
     Box(
         modifier = modifier
-            .size(Dimens.hit)
-            .clip(TsukaimaShapes.pill)
-            .background(fill)
-            .then(if (filled) Modifier else Modifier.pressWash(source, TsukaimaShapes.pill))
+            .size(maxOf(size, Dimens.hit))
             .clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        TsukaimaIcon(
-            icon,
-            size = 24.dp,
-            tint = if (filled) colors.onAccent else colors.ink2,
-            contentDescription = contentDescription,
-        )
+        Box(
+            modifier = Modifier
+                .size(size)
+                .clip(TsukaimaShapes.pill)
+                .background(fill)
+                .then(if (filled) Modifier else Modifier.pressWash(source, TsukaimaShapes.pill)),
+            contentAlignment = Alignment.Center,
+        ) {
+            TsukaimaIcon(
+                icon,
+                size = 24.dp,
+                tint = if (filled) colors.onAccent else colors.ink2,
+                contentDescription = contentDescription,
+            )
+        }
     }
 }
 

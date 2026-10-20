@@ -24,14 +24,13 @@ import labs.suchattai.tsukaima.notifications.BackgroundPolicy
 import labs.suchattai.tsukaima.notifications.DeepLink
 import labs.suchattai.tsukaima.notifications.OpenScreen
 import java.io.IOException
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import labs.suchattai.tsukaima.data.prefs.ThemeMode
 import labs.suchattai.tsukaima.ui.shell.AppShell
 import labs.suchattai.tsukaima.ui.theme.TsukaimaTheme
+import labs.suchattai.tsukaima.ui.theme.isDarkTheme
 
 class MainActivity : ComponentActivity() {
     /** The answer needs no handling: the background policy reads the live permission state. */
@@ -46,11 +45,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val settings by container.settings.collectAsStateWithLifecycle()
             // Until settings load, follow the system (the shell shows only the page background meanwhile).
-            val dark = when (settings?.theme ?: ThemeMode.System) {
-                ThemeMode.Warm -> false
-                ThemeMode.Dark -> true
-                ThemeMode.System -> isSystemInDarkTheme()
-            }
+            val dark = isDarkTheme(settings?.theme)
             SystemBarIcons(dark)
             TsukaimaTheme(darkTheme = dark, dynamicColor = settings?.materialYou == true) {
                 AppShell(container)

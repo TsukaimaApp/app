@@ -3,4 +3,13 @@
     <style name="Theme.Tsukaima" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">#1B1917</item>
     </style>
+
+    <!-- The device-assistant sheet (AssistActivity): a see-through window over the current app; Compose draws the scrim. -->
+    <style name="Theme.Tsukaima.Assist" parent="Theme.Tsukaima">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowIsFloating">false</item>
+    </style>
 </resources>

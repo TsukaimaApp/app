@@ -1,6 +1,7 @@
 package labs.suchattai.tsukaima.ui.theme
 
 import android.os.Build
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -14,6 +15,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
+import labs.suchattai.tsukaima.data.prefs.ThemeMode
 
 val LocalTsukaimaColors = staticCompositionLocalOf { LightColors }
 
@@ -86,4 +88,13 @@ fun TsukaimaTheme(
             content = content,
         )
     }
+}
+
+/** Whether [mode] (Settings → Theme) renders dark; null (settings still loading) follows the system. */
+@Composable
+@ReadOnlyComposable
+fun isDarkTheme(mode: ThemeMode?): Boolean = when (mode ?: ThemeMode.System) {
+    ThemeMode.Warm -> false
+    ThemeMode.Dark -> true
+    ThemeMode.System -> isSystemInDarkTheme()
 }
