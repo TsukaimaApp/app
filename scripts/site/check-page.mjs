@@ -4,6 +4,7 @@
 //   node scripts/site/check-page.mjs site/index.html
 //
 // Prints one line per failure as "<file>: <rule>: <offending value>" and exits 1 on any failure, 0 when clean.
+// Also asserts the page carries the plan's verbatim links, required facts/captions and nav section ids.
 // Scans the page, every local stylesheet it links (following @import), every local script it loads, and
 // site/site.css. Budgets are measured over the site/ tree; files that do not exist yet are skipped.
 
@@ -16,6 +17,9 @@ const SITE = join(REPO, 'site');
 
 const ALLOWED_HOSTS = new Set(['github.com', 'tsukaima.app']);
 const GITHUB_PATHS = ['/TsukaimaApp/app', '/ImranR98/Obtainium', '/NousResearch/hermes-agent'];
+// Placeholder hosts the page may show as text (the Settings mock's Server URL). Allowed only in an HTML page's text
+// content, never inside a tag (href, src, …) and never in CSS or scripts, so they can never become a request.
+const EXAMPLE_TEXT_HOSTS = new Set(['hermes.your-tailnet.ts.net']);
 
 // From the plan's Global Constraints. `token` is matched as a whole word; every term gets a word boundary on any
 // edge that is a letter or digit, so "SSE" does not fire on "assess" and "hm_" still fires on "hm_3f9a".
@@ -53,13 +57,27 @@ function decodeEntities(s) {
 
 // ---- external hosts -------------------------------------------------------------------------------------------
 
-function checkUrls(file, text) {
+function checkUrls(file, text, isHtml = false) {
   // Absolute http(s) URLs anywhere in the file, including ones nested in another scheme (obtainium://add/https://…).
-  for (const m of text.matchAll(/https?:\/\/[^\s"'<>()`\\]+/gi)) checkHttpUrl(file, m[0]);
+  for (const m of text.matchAll(/https?:\/\/[^\s"'<>()`\\]+/gi)) {
+    if (isHtml && isExampleText(text, m.index, m[0])) continue;
+    checkHttpUrl(file, m[0]);
+  }
   // Scheme-relative URLs in attributes and CSS url().
   for (const m of text.matchAll(/(?:\b(?:src|href|srcset|action|poster|data)\s*=\s*["']?|url\(\s*["']?)(\/\/[^\s"'<>()]+)/gi)) {
     checkHttpUrl(file, 'https:' + m[1]);
   }
+}
+
+// True when the URL's host is a listed placeholder and the match sits in element text, outside any tag or comment.
+function isExampleText(html, index, raw) {
+  let host;
+  try { host = new URL(raw.replace(/[.,;:]+$/, '')).hostname.toLowerCase(); } catch { return false; }
+  if (!EXAMPLE_TEXT_HOSTS.has(host)) return false;
+  const before = html.slice(0, index);
+  const inTag = before.lastIndexOf('<') > before.lastIndexOf('>');
+  const inComment = before.lastIndexOf('<!--') > before.lastIndexOf('-->');
+  return !inTag && !inComment;
 }
 
 function checkHttpUrl(file, raw) {
@@ -174,6 +192,52 @@ function checkStructure(file, html) {
   }
 }
 
+// ---- required content -----------------------------------------------------------------------------------------
+
+// The plan's verbatim links (each must be the exact href of some link), the facts and captions the page must carry
+// (in the visible text or any attribute value), and the section ids the nav points at.
+const REQUIRED_HREFS = [
+  'https://github.com/TsukaimaApp/app/releases/latest',
+  'https://github.com/TsukaimaApp/app',
+  'obtainium://add/https://github.com/TsukaimaApp/app',
+  'https://github.com/TsukaimaApp/app/releases',
+  'https://github.com/TsukaimaApp/app/issues',
+  'https://github.com/ImranR98/Obtainium',
+  'https://github.com/NousResearch/hermes-agent',
+];
+const REQUIRED_TEXT = [
+  'Android 10+',
+  'about 6 MB',
+  'no account',
+  'Connected · Hermes 0.22.2',
+  'Opens in Obtainium on your phone',
+  'Running shell command…',
+  'Hermes dashboard',
+  'username and password',
+  'not affiliated with Nous',
+];
+const REQUIRED_SECTION_IDS = ['how', 'features', 'voice', 'selfhost', 'faq'];
+
+function checkRequired(file, html) {
+  const markup = html.replace(/<!--[\s\S]*?-->/g, ' ').replace(/<(script|style|template)\b[\s\S]*?<\/\1\s*>/gi, ' ');
+  const attrValues = [];
+  const hrefs = new Set();
+  const sectionIds = new Set();
+  for (const tag of markup.matchAll(/<([a-z][a-z0-9-]*)\b[^>]*>/gi)) {
+    for (const a of tag[0].matchAll(/\s([a-z-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+      const name = a[1].toLowerCase();
+      const value = decodeEntities(a[2] ?? a[3] ?? a[4]);
+      attrValues.push(value);
+      if (name === 'href') hrefs.add(value.trim());
+      if (name === 'id' && tag[1].toLowerCase() === 'section') sectionIds.add(value.trim());
+    }
+  }
+  const haystack = [visibleText(html), ...attrValues].join('\n').replace(/\s+/g, ' ');
+  for (const href of REQUIRED_HREFS) if (!hrefs.has(href)) fail(file, 'required link missing', href);
+  for (const s of REQUIRED_TEXT) if (!haystack.includes(s)) fail(file, 'required text missing', JSON.stringify(s));
+  for (const id of REQUIRED_SECTION_IDS) if (!sectionIds.has(id)) fail(file, 'required section id missing', `<section id="${id}">`);
+}
+
 // ---- stylesheets ----------------------------------------------------------------------------------------------
 
 function checkFontFaces(file, css) {
@@ -251,9 +315,10 @@ if (!existsSync(page)) {
 }
 const html = readFileSync(page, 'utf8');
 
-checkUrls(page, html);
+checkUrls(page, html, true);
 checkCopy(page, html);
 checkStructure(page, html);
+checkRequired(page, html);
 
 const markup = html.replace(/<!--[\s\S]*?-->/g, ' ');
 for (const m of markup.matchAll(/\s(src|href|poster)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {

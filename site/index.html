@@ -16,17 +16,126 @@
 </header>
 
 <main>
+<section class="hero">
+<div>
+<p class="status"><span class="dot"></span><span id="flair">Running shell command…</span></p>
 <h1>A familiar for your Hermes Agent.</h1>
+<p class="lede">Tsukaima is a native Android client for Hermes Agent, the open-source autonomous agent by Nous Research. Chat with your agent, watch it work, approve tool calls and switch models — from your pocket, talking straight to your own instance.</p>
+<div class="cta">
+<a class="btn p" href="https://github.com/TsukaimaApp/app/releases/latest">Download APK</a>
+<a class="btn s" href="https://github.com/TsukaimaApp/app">View source</a>
+<a class="obt" href="obtainium://add/https://github.com/TsukaimaApp/app"><img src="img/badge_obtainium.png" width="161" height="62" alt="Get it on Obtainium"></a>
+</div>
+<p class="fine"><small>Opens in Obtainium on your phone · <a href="https://github.com/ImranR98/Obtainium">Get Obtainium</a></small><small>Android 10+ · about 6 MB · no account</small></p>
+</div>
+<div id="d-phone" class="phone"></div>
+</section>
 
-<!-- Section stubs so the nav anchors resolve; the following tasks fill them. -->
-<section id="how"><div class="label">How it works</div><h2>Three steps, then it's yours.</h2></section>
-<section id="features"><div class="label">Features</div><h2>Built for watching an agent work.</h2></section>
-<section id="voice"><div class="label">Voice</div><h2>Say it instead.</h2></section>
-<section id="selfhost"><div class="label">Self-hosted</div><h2>No account. No middleman.</h2></section>
-<section id="faq"><div class="label">FAQ</div><h2>Questions people ask.</h2></section>
+<hr class="rule">
+<section id="how">
+<div class="label">How it works</div>
+<h2>Three steps, then it's yours.</h2>
+<p class="sub">Hermes keeps running wherever you host it. Tsukaima is just the hand you reach in with.</p>
+<div class="steps">
+<div class="step"><h3>Point it at your instance.</h3><p>Enter the server URL and sign in with your Hermes dashboard username and password. Over LAN, Tailscale, or any tunnel you already trust.</p></div>
+<div class="step"><h3>Pick a profile and a model.</h3><p>Every Hermes profile shows up with its own chats. Switch the model from the chip in the top bar, mid-conversation if you like.</p></div>
+<div class="step"><h3>Talk, watch, approve.</h3><p>Send a message, see the status line change as the agent thinks and runs tools, and sign off on anything risky before it happens.</p></div>
+</div>
+</section>
+
+<hr class="rule">
+<section id="features">
+<div class="label">Features</div>
+<h2>Built for watching an agent work.</h2>
+<p class="sub">Most chat apps assume the other side is a person typing. Tsukaima assumes it's a process — so presence, tools and permission are in the design, not bolted on.</p>
+
+<div class="feat">
+<div class="copy"><h3>The status line is the app.</h3><p>Idle, thinking, running a tool, waiting on you — a single serif line under the top bar, with a lavender dot that breathes while the agent is busy. Glanceable from across the room.</p><p>While it thinks, the line cycles through quiet verbs instead of a spinner. Beside it, a context meter shows how much of the model's window the chat is using.</p></div>
+<div class="demo"><div id="d-status" class="stack"></div></div>
+</div>
+
+<div class="feat r">
+<div class="copy"><h3>Nothing runs without you.</h3><p>When Hermes asks before running a tool, Tsukaima shows the full command in an inline card — approve or deny in one tap, and the agent carries on either way. Approve for this session or always, when your server allows it.</p><p>Approvals also arrive as notifications with Approve and Deny on them, so you can answer without opening the chat.</p></div>
+<div class="demo" id="d-approval"></div>
+</div>
+
+<div class="feat">
+<div class="copy"><h3>Prose, not bubbles.</h3><p>Your agent's replies sit flush on the page like a document. Markdown and code render inline, with a copy action on every code block, and tables, task-list checkboxes and math render too. Tool calls and thinking collapse into a slim row — there when you want the detail, quiet when you don't.</p><p>When the agent keeps a todo list, it shows as a Tasks card that updates in place as the work moves.</p></div>
+<div class="demo" id="d-chat"></div>
+</div>
+
+<div class="feat r">
+<div class="copy"><h3>One agent, many hats.</h3><p>Chats group by Hermes profile — so your ops agent and your research agent stay separate even though they share a server. The drawer is the navigation; there's no tab bar.</p><p>Search runs on the server, archived chats are a tap away, and cron jobs can be created, edited, paused or run from the phone.</p></div>
+<div class="demo" id="d-drawer"></div>
+</div>
+</section>
+
+<hr class="rule">
+<section id="voice">
+<div class="label">Voice</div>
+<h2>Say it instead.</h2>
+<p class="sub">Voice mode listens, sends what it hears, and reads replies aloud sentence by sentence as they stream. Tap the orb to interrupt. Set Tsukaima as the device assistant and long-press home for one exchange. Speech is processed on the phone or on your Hermes, your choice. Approvals still need a tap.</p>
+<div class="facts">
+<div class="fact"><b>On the phone</b><span>Android's own speech recogniser and text-to-speech, on-device where the system supports it.</span></div>
+<div class="fact"><b>On Hermes</b><span>One utterance at a time, uploaded as Opus to your Hermes, transcribed and spoken with the engines you configured there.</span></div>
+<div class="fact"><b>Device assistant</b><span>Long-press home for one exchange; anything that needs approval opens in the app.</span></div>
+</div>
+</section>
+
+<hr class="rule">
+<section id="selfhost">
+<div class="self">
+<div><div class="label">Self-hosted</div><h2>No account. No middleman.</h2><p class="sub">Tsukaima talks directly to one Hermes instance over your own network or tunnel. There's no Tsukaima server, no analytics, no sync service. You sign in with your Hermes dashboard account; the username and password live in Android's encrypted storage and go only to your Hermes.</p></div>
+<div class="settings-mock">
+<div class="sm-title">Settings · Hermes instance</div>
+<dl>
+<div class="sm-row"><dt>Server URL</dt><dd>https://hermes.your-tailnet.ts.net</dd></div>
+<div class="sm-row"><dt>Username</dt><dd>you</dd></div>
+<div class="sm-row"><dt>Password</dt><dd>••••••••</dd></div>
+</dl>
+<p class="sm-result"><span class="sm-dot"></span>Connected · Hermes 0.22.2</p>
+</div>
+</div>
+<div class="facts">
+<div class="fact"><b>Single user</b><span>One phone, one Hermes. No teams, no sharing, no roles to manage.</span></div>
+<div class="fact"><b>Live over the WebSocket</b><span>Replies, tool events and approval requests stream over Hermes' own JSON-RPC WebSocket, and missed events replay after a reconnect.</span></div>
+<div class="fact"><b>Material 3, warm by default</b><span>Light and dark themes in a warm palette. Material You dynamic color is a switch away if you want it to match your wallpaper.</span></div>
+<div class="fact"><b>Open source</b><span>Kotlin + Jetpack Compose. Build it yourself or install the signed release from GitHub.</span></div>
+</div>
+</section>
+
+<hr class="rule">
+<section id="faq">
+<div class="label">FAQ</div>
+<h2>Questions people ask.</h2>
+<div class="faq">
+<details><summary>Does it work without a Hermes instance?</summary><p>No. Tsukaima is a client, not an agent. It needs a running Hermes Agent to connect to — on a home server, a VPS, or your laptop.</p></details>
+<details><summary>Can I reach it from outside my network?</summary><p>Yes, however you'd reach Hermes itself: Tailscale, WireGuard, a reverse proxy with TLS. Plain http is only allowed for LAN and tailnet addresses; anything else needs https.</p></details>
+<details><summary>Is anything sent to Nous or to the Tsukaima author?</summary><p>No. Tsukaima has no telemetry and no service of its own; the app talks to your Hermes. Images from other hosts load only when you tap them, and voice on the phone uses Android's own speech services.</p></details>
+<details><summary>Which tool calls need approval?</summary><p>Whichever ones your Hermes asks about; its own settings decide. Tsukaima surfaces every one of those as an approval card; it doesn't decide for you.</p></details>
+<details><summary>Will there be an iOS version?</summary><p>Not planned. Tsukaima is Android-first and leans on Material 3.</p></details>
+<details><summary>Why the name?</summary><p>A tsukaima (<span lang="ja">使い魔</span>) is a familiar — a spirit bound to its master and sent out to do the work. The agent runs elsewhere; this is the thing in your hand that's bound to it.</p></details>
+<details><summary>How do I get updates?</summary><p>Add Tsukaima to Obtainium and it watches the GitHub releases for you, or download the next APK from Releases. The app does not update itself.</p></details>
+<details><summary>Which Android versions?</summary><p>Android 10 and newer, on phones, tablets and foldables. On a wide screen the drawer becomes a pane beside the chat.</p></details>
+</div>
+</section>
+
+<hr class="rule">
+<div class="quiet"><img src="img/resting-wisp.svg" alt="" width="510" height="290"><p>Cream, one lavender,<br>a serif where it matters —<br>the agent is loud.</p></div>
+
+<hr class="rule">
+<section class="final">
+<h2>Bind your familiar.</h2>
+<p class="sub">Free, open source, no account. Install, sign in to your Hermes, start talking.</p>
+<div class="cta">
+<a class="btn p" href="https://github.com/TsukaimaApp/app/releases/latest">Download APK</a>
+<a class="obt" href="obtainium://add/https://github.com/TsukaimaApp/app"><img src="img/badge_obtainium.png" width="161" height="62" alt="Get it on Obtainium"></a>
+</div>
+<p class="fine"><small>Opens in Obtainium on your phone · <a href="https://github.com/ImranR98/Obtainium">Get Obtainium</a></small></p>
+</section>
 </main>
 
-<footer><span>Tsukaima · an open-source client for Hermes Agent by Nous Research · not affiliated with Nous</span><span><a href="https://github.com/TsukaimaApp/app">Source</a> · <a href="https://github.com/TsukaimaApp/app/releases">Releases</a> · <a href="https://github.com/TsukaimaApp/app/issues">Issues</a></span></footer>
+<footer><span>Tsukaima · an open-source client for <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a> by Nous Research · not affiliated with Nous</span><span><a href="https://github.com/TsukaimaApp/app">Source</a> · <a href="https://github.com/TsukaimaApp/app/releases">Releases</a> · <a href="https://github.com/TsukaimaApp/app/issues">Issues</a></span></footer>
 </div>
 </body>
 </html>

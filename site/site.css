@@ -86,3 +86,74 @@ footer{display:flex;justify-content:space-between;align-items:center;gap:16px;fl
 @media (prefers-reduced-motion:reduce){.dot{animation:none}}
 
 /* ---- page ---- */
+/* hero */
+.hero{padding-top:40px}
+.hero .status{margin-top:0}
+.phone{justify-self:center;width:min(360px,100%);aspect-ratio:412/824;box-sizing:border-box;border-radius:32px;border:1px solid var(--border-hairline);background:var(--surface-raised);overflow:hidden;box-shadow:var(--shadow-float)}
+.obt{display:inline-flex;align-items:center;min-height:var(--hit-min);border:0;border-radius:var(--radius-row)}
+.obt img{display:block;width:161px;height:auto}
+.fine{display:flex;flex-direction:column;gap:4px;margin:14px 0 0}
+.fine small{font:var(--type-caption);color:var(--text-tertiary)}
+
+/* how it works */
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:32px;counter-reset:s}
+.step{border-top:1px solid var(--border-hairline);padding-top:18px}
+.step::before{counter-increment:s;content:counter(s,decimal-leading-zero);display:block;font:600 13px/1 var(--font-serif);color:var(--accent);margin-bottom:14px;letter-spacing:.06em}
+.step h3{font:600 20px/1.3 var(--font-serif);margin:0 0 8px}.step p{margin:0;color:var(--text-secondary);text-wrap:pretty}
+
+/* features */
+.feat{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:56px;align-items:center;padding:56px 0}
+.feat:last-child{padding-bottom:0}
+.feat.r{grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr)}.feat.r .copy{order:2}
+.feat h3{font:600 26px/1.25 var(--font-serif);margin:0 0 12px;text-wrap:pretty}.feat p{margin:0 0 10px;color:var(--text-secondary);text-wrap:pretty}
+.demo{background:var(--surface-raised);border:1px solid var(--border-hairline);border-radius:var(--radius-card);padding:20px 0;overflow:hidden}
+.demo .stack{display:flex;flex-direction:column;gap:6px}
+/* demo mount points: Task 3 fills them; the minimum heights keep the layout readable while they are empty */
+#d-status{min-height:132px}
+#d-approval{min-height:220px}
+#d-chat{min-height:340px}
+#d-drawer{padding:0;min-height:380px;display:flex}
+
+/* fact cards (voice, self-hosted) */
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px}
+.fact{background:var(--surface-raised);border:1px solid var(--border-hairline);border-radius:var(--radius-card);padding:22px}
+.fact b{display:block;font:600 19px/1.3 var(--font-serif);margin-bottom:6px}.fact span{color:var(--text-secondary);text-wrap:pretty}
+
+/* self-hosted */
+.self{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:48px;align-items:center}
+.self .sub{margin-bottom:0}
+.self + .facts{margin-top:48px}
+.settings-mock{min-width:0;box-sizing:border-box;background:var(--surface-raised);border:1px solid var(--border-hairline);border-radius:var(--radius-card);padding:20px}
+.sm-title{font:var(--type-title);font-size:18px;margin-bottom:14px}
+.settings-mock dl{display:flex;flex-direction:column;gap:10px;margin:0}
+.sm-row{background:var(--surface-sunken);border-radius:var(--radius-input);padding:10px 14px}
+.sm-row dt{font:var(--type-caption);color:var(--text-secondary);margin-bottom:2px}
+.sm-row dd{margin:0;font:var(--type-code);color:var(--text-body);overflow-wrap:anywhere}
+.sm-result{display:flex;align-items:center;gap:8px;margin:16px 0 0;font:var(--type-status);color:var(--text-secondary)}
+.sm-dot{flex-shrink:0;width:7px;height:7px;border-radius:99px;background:var(--status-ok)}
+
+/* faq */
+.faq{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px 48px;margin-top:32px}
+details{border-top:1px solid var(--border-hairline);padding:16px 0}
+details summary{cursor:pointer;list-style:none;font:600 16.5px/1.35 var(--font-serif);display:flex;justify-content:space-between;gap:16px}
+details summary::-webkit-details-marker{display:none}
+details summary::after{content:"+";color:var(--text-tertiary);font:400 20px/1 var(--font-sans)}details[open] summary::after{content:"–"}
+details p{margin:10px 0 0;color:var(--text-secondary);text-wrap:pretty}
+
+/* haiku */
+.quiet{display:flex;align-items:center;gap:28px;padding:56px 0 72px}
+.quiet img{width:220px;height:auto;flex-shrink:0;opacity:.8}
+.quiet p{margin:0;font:var(--type-status);font-size:18px;color:var(--text-secondary);max-width:52ch}
+
+/* final call to action */
+.final{text-align:center;padding:80px 0}.final h2{font-size:38px}
+.final .sub{margin:0 auto 30px}
+.final .cta{justify-content:center}
+.final .fine{align-items:center}
+
+@media (max-width:860px){
+  .links{display:flex}.links a:not(:last-child){display:none}
+  .self,.feat,.feat.r{grid-template-columns:1fr}.feat{gap:32px}.feat.r .copy{order:0}
+  .phone{width:min(300px,100%)}
+  .quiet{flex-direction:column;align-items:flex-start}
+}
