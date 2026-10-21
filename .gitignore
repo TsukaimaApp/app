@@ -9,3 +9,6 @@ build/
 *.jks
 *.keystore
 keystore.properties
+
+# site audit tooling
+scripts/site/node_modules/

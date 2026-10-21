@@ -108,11 +108,7 @@ footer{display:flex;justify-content:space-between;align-items:center;gap:16px;fl
 .feat h3{font:600 26px/1.25 var(--font-serif);margin:0 0 12px;text-wrap:pretty}.feat p{margin:0 0 10px;color:var(--text-secondary);text-wrap:pretty}
 .demo{background:var(--surface-raised);border:1px solid var(--border-hairline);border-radius:var(--radius-card);padding:20px 0;overflow:hidden}
 .demo .stack{display:flex;flex-direction:column;gap:6px}
-/* demo mount points: Task 3 fills them; the minimum heights keep the layout readable while they are empty */
-#d-status{min-height:132px}
-#d-approval{min-height:220px}
-#d-chat{min-height:340px}
-#d-drawer{padding:0;min-height:380px;display:flex}
+#d-drawer{padding:0;display:flex}
 
 /* fact cards (voice, self-hosted) */
 .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px}
@@ -157,3 +153,106 @@ details p{margin:10px 0 0;color:var(--text-secondary);text-wrap:pretty}
   .phone{width:min(300px,100%)}
   .quiet{flex-direction:column;align-items:flex-start}
 }
+
+/* ---- components ---- */
+/* Static ports of design/components/{chat,chrome}/*.jsx for the demos and the hero phone. Icons are an inline
+   <symbol> sprite (stroke icons drawn on a 24 grid) used through <svg class="i"><use>. */
+.sprite{position:absolute;width:0;height:0;overflow:hidden}
+.i{width:18px;height:18px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.approval[hidden],.approval-done[hidden]{display:none}
+
+/* contrast: white on --accent is 4.2:1 and --accent text on cream 3.8:1, under WCAG AA at these sizes, so text on a
+   filled button and small inline links use the pressed shade (5.3:1 and 4.8:1); links in running text are underlined */
+.btn.p{background:var(--accent-pressed)}.btn.p:hover{background:var(--accent-pressed) linear-gradient(var(--wash-press),var(--wash-press))}
+.fine a,footer a{color:var(--accent-pressed);text-decoration:underline;text-underline-offset:2px}
+
+/* status line (StatusLine.jsx); the context meter sits at the right end, as in the app */
+.sl{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;padding:6px var(--gutter-page);font:var(--type-status);color:var(--text-secondary)}
+.sl .d{width:7px;height:7px;border-radius:99px;background:var(--text-tertiary);flex-shrink:0}
+.sl.thinking .d,.sl.tool .d{background:var(--accent);animation:p 2s infinite}
+.sl.approval .d{background:var(--status-warn)}
+.sl .meter{margin-left:auto;font:var(--type-caption);color:var(--text-tertiary)}
+#flair{transition:opacity var(--dur-quick) var(--ease-quiet)}
+@media (prefers-reduced-motion:reduce){.sl.thinking .d,.sl.tool .d{animation:none}#flair{transition:none}}
+
+/* messages (UserBubble.jsx, AssistantMessage.jsx) */
+.bubble{width:fit-content;max-width:82%;box-sizing:border-box;margin:4px var(--gutter-page) 4px auto;padding:10px 14px;background:var(--bubble-user);color:var(--bubble-user-ink);font:var(--type-body);border-radius:var(--radius-card) var(--radius-card) 6px var(--radius-card)}
+.msg{max-width:640px;padding:4px var(--gutter-page);font:var(--type-body);color:var(--text-body)}
+.msg p{margin:0;color:inherit}
+
+/* tool row (ToolRow.jsx) */
+.toolrow{margin:6px var(--gutter-page);border:1px solid var(--border-hairline);border-radius:var(--radius-row);background:var(--surface-raised);overflow:hidden}
+.toolrow .th{display:flex;align-items:center;gap:10px;min-height:44px;box-sizing:border-box;padding:8px 12px;font:var(--type-ui);color:var(--text-secondary)}
+.toolrow .th>.i:first-child{color:var(--text-tertiary)}.toolrow.run .th>.i:first-child{color:var(--accent)}
+.toolrow .tn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.toolrow .tn span{color:var(--text-tertiary)}
+.toolrow .s{width:16px;height:16px;color:var(--text-tertiary)}
+.toolrow .x{transition:transform var(--dur-base) var(--ease-quiet)}.toolrow.open .x{transform:rotate(180deg)}
+.tr-b{padding:0 12px 12px;font:var(--type-caption);color:var(--text-secondary)}
+.tr-b .code{margin:0}
+
+/* code block (CodeBlock.jsx); demo code wraps instead of scrolling so nothing is clipped on a phone */
+.code{background:var(--code-bg);border-radius:var(--radius-code);margin:8px 0}
+.code .ch{display:flex;align-items:center;justify-content:space-between;padding:6px 6px 0 14px}
+.code .ch>span:first-child{font:var(--type-label);letter-spacing:.08em;text-transform:uppercase;color:rgba(216,211,232,.62)}
+.code .cp{display:inline-flex;align-items:center;gap:5px;padding:6px 8px;font:var(--type-caption);color:rgba(216,211,232,.75)}
+.code .cp .i{width:16px;height:16px}
+.code pre,.approval pre{margin:0;padding:4px 14px 12px;font:var(--type-code);color:var(--code-ink);white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* approval card (ApprovalCard.jsx) */
+.approval:not(.sl){margin:8px var(--gutter-page);padding:16px;background:var(--surface-raised);border:1px solid var(--border-hairline);border-radius:var(--radius-card);box-shadow:var(--shadow-float)}
+.approval .ah{display:flex;align-items:center;gap:8px;margin:0 0 10px;font:var(--type-status);color:var(--text-body)}
+.approval .ah .i{width:20px;height:20px;color:var(--status-warn)}
+.tl{margin-bottom:6px;font:var(--type-label);letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary)}
+.approval pre{margin:0 0 14px;padding:10px 12px;background:var(--code-bg);border-radius:var(--radius-code)}
+.acts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:10px}
+button.btn{cursor:pointer}
+.btn .i{width:20px;height:20px}
+.btn.deny,.btn.deny:hover{color:var(--status-danger)}
+.approval-done .reset{margin:10px var(--gutter-page) 0}
+.approval-done.denied .toolrow{display:none}
+
+/* tasks card (the app's TodoCard: raised, hairline, "Tasks" + progress, one glyph per row) */
+.tasks{display:flex;flex-direction:column;gap:6px;margin:6px var(--gutter-page);padding:12px;background:var(--surface-raised);border:1px solid var(--border-hairline);border-radius:var(--radius-row)}
+.tk{display:flex;align-items:baseline;gap:8px}.tk b{font:var(--type-ui);color:var(--text-body)}.tk small{font:var(--type-caption);color:var(--text-tertiary)}
+.t{display:flex;align-items:center;gap:8px;font:var(--type-ui);color:var(--text-body)}
+.t .i{width:16px;height:16px}
+.t.todo .i{color:var(--text-tertiary)}.t.doing .i{color:var(--accent)}.t.done .i{color:var(--status-ok)}
+.t.done span{color:var(--text-tertiary);text-decoration:line-through}
+
+/* drawer (Drawer.jsx, ConversationItem.jsx, DrawerLabel); the right side stands for the chat behind the scrim */
+.drawer{display:flex;flex-direction:column;width:296px;max-width:86%;flex-shrink:0;box-sizing:border-box;background:var(--surface-raised);border-right:1px solid var(--border-hairline)}
+.dh{display:flex;align-items:center;gap:10px;padding:20px 20px 10px;font:var(--type-wordmark);font-size:22px;color:var(--text-body)}
+.dh img{width:auto;height:24px}.dh .k{font-family:var(--font-kanji);font-size:11px;color:var(--text-tertiary)}
+.search{display:flex;align-items:center;gap:8px;margin:6px 20px 4px;padding:10px 14px;background:var(--surface-sunken);border-radius:var(--radius-input);font:var(--type-body);color:var(--text-secondary)}
+.dlist{flex:1;padding:0 8px 8px}
+.dlabel{padding:16px 12px 6px;font:var(--type-label);letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary)}
+.citem{display:flex;align-items:center;gap:10px;min-height:44px;box-sizing:border-box;padding:10px 12px;border-radius:var(--radius-row);font:var(--type-ui);color:var(--text-body)}
+.citem span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.citem small{flex-shrink:0;font:var(--type-caption);color:var(--text-tertiary)}
+.citem.sel{background:var(--accent-selected)}.citem.sel small{color:var(--text-body)}
+.citem .i{width:20px;height:20px;color:var(--text-secondary)}
+.dfoot{padding:8px;border-top:1px solid var(--border-hairline)}
+.dside{flex:1;min-width:0;display:flex;flex-direction:column;gap:14px;padding:72px 20px;background:var(--surface-page);box-shadow:inset 0 0 0 999px rgba(39,34,32,.28)}
+.dside i{height:10px;border-radius:99px;background:var(--surface-sunken)}.dside i:nth-child(1){width:56%;align-self:flex-end;height:36px;border-radius:var(--radius-card)}.dside i:nth-child(3){width:78%}.dside i:nth-child(4){width:40%}
+@media (max-width:480px){.dside i{display:none}}
+
+/* composer (Composer.jsx) */
+.composer{display:flex;align-items:center;gap:4px;margin:6px 12px 10px;padding:6px;background:var(--surface-raised);border:1px solid var(--border-hairline);border-radius:var(--radius-composer);box-shadow:var(--shadow-float)}
+.composer .ib,.tbar .ib{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;flex-shrink:0;color:var(--text-secondary)}
+.composer .i.ib{width:24px;height:24px;padding:10px}
+.composer .ph{flex:1;min-width:0;padding:11px 4px;font:var(--type-body);color:var(--text-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.composer .send{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;flex-shrink:0;border-radius:99px;background:var(--accent);color:var(--accent-on)}
+.composer .send .i,.tbar .ib .i{width:24px;height:24px}
+
+/* hero phone: a 412 x 824 dp chat screen (TopBar, StatusLine, messages, Composer) inside a rounded frame */
+.phone{display:flex;flex-direction:column;position:relative}
+.sys{display:flex;justify-content:space-between;align-items:center;padding:12px 26px 0;font:600 12px/1 var(--font-sans);color:var(--text-body)}
+.bat{width:20px;height:10px;box-sizing:border-box;border:1.5px solid currentColor;border-radius:3px;position:relative}.bat::after{content:"";position:absolute;inset:1.5px 5px 1.5px 1.5px;background:currentColor;border-radius:1px}
+.tbar{display:flex;align-items:center;gap:4px;padding:8px 8px 2px}
+.chip{display:inline-flex;align-items:center;gap:4px;min-height:36px;padding:0 8px 0 12px;border-radius:var(--radius-pill);font:var(--type-ui);color:var(--text-body)}
+.sp{flex:1}
+.pm{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;padding:6px 0 4px}
+.pm>*{flex-shrink:0}
+/* older messages scroll out under the status line: a short fade instead of a hard cut */
+.pm{-webkit-mask-image:linear-gradient(transparent,#000 28px);mask-image:linear-gradient(transparent,#000 28px)}
+.gest{width:108px;height:4px;margin:2px auto 8px;border-radius:99px;background:var(--text-body);opacity:.35}

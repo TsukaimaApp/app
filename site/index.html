@@ -7,6 +7,23 @@
 <link rel="stylesheet" href="site.css">
 </head>
 <body>
+<svg class="sprite" aria-hidden="true">
+<symbol id="i-term" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"></rect><path d="m7.5 9.5 3 2.5-3 2.5M13 15h3.5"></path></symbol>
+<symbol id="i-think" viewBox="0 0 24 24"><path d="M10 20.5v-2.5H7.5A1.5 1.5 0 0 1 6 16.5V14l-1.8-.7L6 10a6.5 6.5 0 0 1 12.5 0c0 2.2-1 3.9-2.5 5v5.5"></path><path d="M10.5 8.6a2 2 0 0 1 3.4 1.6"></path></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"></path></symbol>
+<symbol id="i-exp" viewBox="0 0 24 24"><path d="m6.5 9.5 5.5 5.5 5.5-5.5"></path></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"></rect><path d="M15.5 8.5v-2a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"></path></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.5 5 6.2v5.3c0 4.3 2.9 7.6 7 9 4.1-1.4 7-4.7 7-9V6.2z"></path><path d="M12 8.5v4M12 15.8v.1"></path></symbol>
+<symbol id="i-add" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"></path></symbol>
+<symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5.5M6.5 11 12 5.5l5.5 5.5"></path></symbol>
+<symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"></path></symbol>
+<symbol id="i-vert" viewBox="0 0 24 24"><circle cx="12" cy="5.5" r="1.5" fill="currentColor" stroke="none"></circle><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"></circle><circle cx="12" cy="18.5" r="1.5" fill="currentColor" stroke="none"></circle></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"></circle><path d="m15 15 5 5"></path></symbol>
+<symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><circle cx="12" cy="12" r="6.5"></circle><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"></path></symbol>
+<symbol id="i-todo" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"></circle></symbol>
+<symbol id="i-doing" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"></circle><path d="M12 4.5a7.5 7.5 0 0 1 0 15z" fill="currentColor"></path></symbol>
+<symbol id="i-done" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"></circle><path d="m8.7 12.2 2.3 2.3 4.4-4.6"></path></symbol>
+</svg>
 <div class="wrap">
 <header>
 <nav aria-label="Primary">
@@ -28,7 +45,21 @@
 </div>
 <p class="fine"><small>Opens in Obtainium on your phone · <a href="https://github.com/ImranR98/Obtainium">Get Obtainium</a></small><small>Android 10+ · about 6 MB · no account</small></p>
 </div>
-<div id="d-phone" class="phone"></div>
+<div id="d-phone" class="phone">
+<div class="sys" aria-hidden="true"><span>9:41</span><span class="bat"></span></div>
+<div class="tbar"><span class="ib"><svg class="i" aria-hidden="true"><use href="#i-menu"></use></svg></span><span class="chip">Hermes · default<svg class="i" aria-hidden="true"><use href="#i-exp"></use></svg></span><span class="sp"></span><span class="ib"><svg class="i" aria-hidden="true"><use href="#i-vert"></use></svg></span></div>
+<div class="sl tool"><span class="d"></span><span>Running shell command…</span><small class="meter">15.8k / 1M ctx · 2%</small></div>
+<div class="pm">
+<div class="bubble">Clear out the old logs on /srv.</div>
+<div class="msg"><p>Done. The disk on /srv is at 71%, nothing else stands out.</p></div>
+<div class="bubble">Is the nightly backup healthy?</div>
+<div class="toolrow"><div class="th"><svg class="i" aria-hidden="true"><use href="#i-term"></use></svg><span class="tn">shell <span>· systemctl --user status backup.timer</span></span><svg class="i s" aria-hidden="true"><use href="#i-check"></use></svg><svg class="i x" aria-hidden="true"><use href="#i-exp"></use></svg></div></div>
+<div class="msg"><p>The timer is active and last night's run finished. Checking a restore now:</p><div class="code"><div class="ch"><span>bash</span><span class="cp"><svg class="i" aria-hidden="true"><use href="#i-copy"></use></svg>Copy</span></div><pre>restic snapshots --latest 1</pre></div></div>
+<div class="tasks"><div class="tk"><b>Tasks</b><small>1 of 2 done</small></div><div class="t done"><svg class="i" aria-hidden="true"><use href="#i-done"></use></svg><span class="vh">Done: </span><span>Check the timer</span></div><div class="t doing"><svg class="i" aria-hidden="true"><use href="#i-doing"></use></svg><span class="vh">In progress: </span><span>Test a restore</span></div></div>
+</div>
+<div class="composer"><svg class="i ib" aria-hidden="true"><use href="#i-add"></use></svg><span class="ph">Message your agent</span><span class="send"><svg class="i" aria-hidden="true"><use href="#i-up"></use></svg></span></div>
+<div class="gest" aria-hidden="true"></div>
+</div>
 </section>
 
 <hr class="rule">
@@ -51,22 +82,60 @@
 
 <div class="feat">
 <div class="copy"><h3>The status line is the app.</h3><p>Idle, thinking, running a tool, waiting on you — a single serif line under the top bar, with a lavender dot that breathes while the agent is busy. Glanceable from across the room.</p><p>While it thinks, the line cycles through quiet verbs instead of a spinner. Beside it, a context meter shows how much of the model's window the chat is using.</p></div>
-<div class="demo"><div id="d-status" class="stack"></div></div>
+<div class="demo"><div id="d-status" class="stack">
+<div class="sl idle"><span class="d"></span><span>Hermes is listening</span><small class="meter">15.8k / 1M ctx · 2%</small></div>
+<div class="sl thinking"><span class="d"></span><span>Steeping matcha…</span></div>
+<div class="sl tool"><span class="d"></span><span>Running shell command…</span></div>
+<div class="sl approval"><span class="d"></span><span>Waiting for your approval</span></div>
+</div></div>
 </div>
 
 <div class="feat r">
 <div class="copy"><h3>Nothing runs without you.</h3><p>When Hermes asks before running a tool, Tsukaima shows the full command in an inline card — approve or deny in one tap, and the agent carries on either way. Approve for this session or always, when your server allows it.</p><p>Approvals also arrive as notifications with Approve and Deny on them, so you can answer without opening the chat.</p></div>
-<div class="demo" id="d-approval"></div>
+<div class="demo" id="d-approval">
+<div class="approval">
+<p class="ah"><svg class="i" aria-hidden="true"><use href="#i-shield"></use></svg>Hermes wants to run a tool</p>
+<div class="tl">shell</div>
+<pre>systemctl restart hermes-agent</pre>
+<div class="acts"><button type="button" class="btn s deny">Deny</button><button type="button" class="btn p approve"><svg class="i" aria-hidden="true"><use href="#i-check"></use></svg>Approve</button></div>
+</div>
+<div class="approval-done" hidden>
+<div class="toolrow"><div class="th"><svg class="i" aria-hidden="true"><use href="#i-term"></use></svg><span class="tn">shell <span>· systemctl restart hermes-agent</span></span><svg class="i s" aria-hidden="true"><use href="#i-check"></use></svg><svg class="i x" aria-hidden="true"><use href="#i-exp"></use></svg></div></div>
+<div class="msg"><p>Restarted. I'll flag it if the 3am run fails.</p></div>
+<button type="button" class="btn s reset">Reset</button>
+</div>
+</div>
 </div>
 
 <div class="feat">
 <div class="copy"><h3>Prose, not bubbles.</h3><p>Your agent's replies sit flush on the page like a document. Markdown and code render inline, with a copy action on every code block, and tables, task-list checkboxes and math render too. Tool calls and thinking collapse into a slim row — there when you want the detail, quiet when you don't.</p><p>When the agent keeps a todo list, it shows as a Tasks card that updates in place as the work moves.</p></div>
-<div class="demo" id="d-chat"></div>
+<div class="demo" id="d-chat">
+<div class="bubble">Why did the backup fail last night?</div>
+<div class="toolrow"><div class="th"><svg class="i" aria-hidden="true"><use href="#i-think"></use></svg><span class="tn">Thought for 9s</span><svg class="i s" aria-hidden="true"><use href="#i-check"></use></svg><svg class="i x" aria-hidden="true"><use href="#i-exp"></use></svg></div></div>
+<div class="toolrow open"><div class="th"><svg class="i" aria-hidden="true"><use href="#i-term"></use></svg><span class="tn">shell <span>· tail -n 50 /var/log/cron.log</span></span><svg class="i s" aria-hidden="true"><use href="#i-check"></use></svg><svg class="i x" aria-hidden="true"><use href="#i-exp"></use></svg></div><div class="tr-b"><div class="code"><div class="ch"><span>log</span><span class="cp"><svg class="i" aria-hidden="true"><use href="#i-copy"></use></svg>Copy</span></div><pre>Oct 21 03:00:07 backup[2114]: upload failed: storage credential expired</pre></div></div></div>
+<div class="msg"><p>The backup's storage credential expired on the 16th. Rotate it, then re-run the timer:</p><div class="code"><div class="ch"><span>bash</span><span class="cp"><svg class="i" aria-hidden="true"><use href="#i-copy"></use></svg>Copy</span></div><pre>systemctl --user restart backup.timer</pre></div></div>
+<div class="tasks"><div class="tk"><b>Tasks</b><small>1 of 3 done</small></div><div class="t done"><svg class="i" aria-hidden="true"><use href="#i-done"></use></svg><span class="vh">Done: </span><span>Check the cron log</span></div><div class="t doing"><svg class="i" aria-hidden="true"><use href="#i-doing"></use></svg><span class="vh">In progress: </span><span>Rotate the storage credential</span></div><div class="t todo"><svg class="i" aria-hidden="true"><use href="#i-todo"></use></svg><span class="vh">Pending: </span><span>Re-run the backup</span></div></div>
+</div>
 </div>
 
 <div class="feat r">
 <div class="copy"><h3>One agent, many hats.</h3><p>Chats group by Hermes profile — so your ops agent and your research agent stay separate even though they share a server. The drawer is the navigation; there's no tab bar.</p><p>Search runs on the server, archived chats are a tap away, and cron jobs can be created, edited, paused or run from the phone.</p></div>
-<div class="demo" id="d-drawer"></div>
+<div class="demo" id="d-drawer">
+<div class="drawer">
+<div class="dh"><img src="img/mark.svg" alt="" width="620" height="660">Tsukaima<span class="k" lang="ja">使い魔</span></div>
+<div class="search"><svg class="i" aria-hidden="true"><use href="#i-search"></use></svg>Search sessions</div>
+<div class="dlist">
+<div class="dlabel">Ops profile</div>
+<div class="citem sel" aria-current="true"><span>Why the backup failed</span><small>2m</small></div>
+<div class="citem"><span>Renew the TLS certificates</span><small>3d</small></div>
+<div class="dlabel">Research profile</div>
+<div class="citem"><span>Compare vector databases</span><small>1w</small></div>
+<div class="citem"><span>Notes on agent memory</span><small>2w</small></div>
+</div>
+<div class="dfoot"><div class="citem"><svg class="i" aria-hidden="true"><use href="#i-gear"></use></svg><span>Settings</span></div></div>
+</div>
+<div class="dside" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+</div>
 </div>
 </section>
 
@@ -137,5 +206,6 @@
 
 <footer><span>Tsukaima · an open-source client for <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a> by Nous Research · not affiliated with Nous</span><span><a href="https://github.com/TsukaimaApp/app">Source</a> · <a href="https://github.com/TsukaimaApp/app/releases">Releases</a> · <a href="https://github.com/TsukaimaApp/app/issues">Issues</a></span></footer>
 </div>
+<script src="site.js" defer></script>
 </body>
 </html>
