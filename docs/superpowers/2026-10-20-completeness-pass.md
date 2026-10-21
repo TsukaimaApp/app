@@ -196,3 +196,63 @@ Known gaps:
 - `$HOME/$USER` in prose (outside backticks) reads as math.
 - TalkBack reads raw TeX (the formula image's description is its source).
 - No Robolectric UI test for the connection card (reducer, VM and RPC paths are unit-tested).
+
+## v0.9.2 (2026-10-21)
+
+The known-gaps pass over the parked lists of the v0.8.0 and v0.9.0 passes.
+
+### Closed
+
+- Queue and Stop edge cases: stop flag lifecycle, "Send when done" between turns, a purged send keeps its Not-sent
+  bubble across a rebuild or reload.
+- Markdown: the O(n²) `_` scan (T10) is linear (memoised closers); `$HOME/$USER` and `a$b$c` no longer read as math;
+  escaped `]` in link text; empty display math reads as text in both chat and speech.
+- Math UX: formulas draw off the main thread and a cached one in its first frame; inline formulas scale to fit or clip
+  with a full-size dialog; TalkBack reads formulas in words (the "TalkBack reads raw TeX" gap).
+- Connection card: countdown rounding, answers sent once, env then "Continue in browser", suggestion hint for
+  `display.suggested` requests, pending request restored after a real reconnect (unit-tested).
+- Todo card: stale revisions ignored, tail key follows the card, hidden done parents do not indent children.
+- Images: failures no longer evict bitmaps, one tap loads a foreign URL everywhere, reply previews are not
+  strip-capped, inline `data:` keys hashed once.
+- v0.8.0 leftovers: edit/regenerate failure keeps late events; Report a problem no longer shares into a later visit;
+  server TTS prefetches the next sentence.
+
+### Still open
+
+Decisions (kept out on purpose): localisation, in-app updates, mixed voice setups, `segmentResults` on API 33+.
+
+Hermes-side limits:
+
+- Orphan-recovery notices reach the client only for `write_file`, `patch` and `skill_manage` rows (the history
+  projection drops other tools' content).
+- `display.suggested` (directory) connection cards show only the "Hermes suggests connecting" hint; there is no
+  directory UI beyond it.
+
+Parked (not worth a wave, listed so they are not rediscovered):
+
+- Stop-ack race where the server catches the interrupt before draining: with several clients it can mark a fresh
+  queued send "Not sent" (duplicate on Retry).
+- A Stop tapped between turns after the server purged a never-started queued send leaves it "Queued" until a new live
+  session (needs a probe).
+- A retried matched twin leaves the original history row active (an extra unanswered copy on a later reload); an
+  anchor after an earlier queued send drained falls back to append and may show a send twice if Hermes keeps purged
+  accept rows active (unverified).
+- Perf tests: one `println`; the `*a ` and `[a ` inputs are guards, not RED evidence.
+- Formulas: a reused whole-fit bitmap is double-counted in the LRU (about half capacity for those formulas, memory
+  stays bounded); input nested past the depth limit reads command names flat.
+- Connection card: `typed.clear()` also runs when the VM silently drops an answer; the env-sent mark is lost on a
+  rebuild (retype before the browser leg); env fields stay editable while an answer is in flight; the failed env
+  send clears typed values; test gaps (disabled Skip not asserted, no Robolectric test for the card).
+- Todo: no nested-hidden-ancestor test, collapse threshold not asserted in the UI test.
+- Images: a URL shown in a reply and a tool row is fetched twice (deliberate); weak observability assertion.
+- Server TTS: two speak requests in flight (current and next); a prefetched file can linger after a reconnect rebuild
+  until the next sentence or stop; a report is dropped on any pause.
+
+Device checks (only a phone can verify these):
+
+1. Extreme-strip reply images (very tall or wide) on GPUs with a small max texture size.
+2. Formulas in the release APK (R8): `$$\frac{1}{2}$$`, an inline `$x^2$`, a clipped wide formula with its dialog.
+3. Connection card with a real connector (Connect, return, wake, env fields, Skip all, Continue, notification).
+4. Queued send plus Stop: Queued label, Send when done between turns, Not sent plus Retry after a reconnect.
+5. Todo card across a kill-and-reopen with revisions still ordered.
+6. Server TTS prefetch latency: the gap between sentences with a real voice.

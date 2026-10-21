@@ -251,6 +251,28 @@ Decisions taken on the user's behalf while implementing `design/handoff_voice/RE
 - Ruling: tables are a custom layout with content-sized columns capped at 220dp and horizontal scroll beyond the width — wrapping every column to fit makes agent tables unreadable on a phone — cost if wrong: a wide table needs a sideways scroll.
 - Ruling: list nesting follows indentation relative to the open items (CommonMark-style), not leading spaces ÷ 2, so four-space nesting under `1.` reads as one level; each item carries its shown number (null for a bullet), counted on from the first marker at its depth (`1.` `1.` `1.` shows 1, 2, 3), so mixed bullet/numbered nesting renders — cost if wrong: an oddly indented list nests one level shallower than its spaces suggest.
 
+## v0.9.2
+
+- Ruling: one release 0.9.2 (versionCode 22) at the end of the known-gaps pass, localisation, in-app updates, mixed voice setups and `segmentResults` stay out as earlier decisions — cost if wrong: one more patch release.
+- Ruling: markdown perf tests use inputs where the old quadratic `_` scan exceeds the bound (40 000 repeats: old 9.3 s, new under 10 ms), with RED recorded against the HEAD files — cost if wrong: a slower test.
+- Ruling: after a resume that opens a new live session, a purged queued send comes back as a "Not sent" bubble at the end of the chat, never matched to a history row — Hermes retires undrained queued rows on resume, so a match would hit a real row and show a duplicate — cost if wrong: a Not-sent bubble below a copy of the same text.
+- Ruling: after a same-live reload, the purged send anchors on the stopped turn's user row and takes the first matching user row after it; no anchor or no match appends — cost if wrong: the Not-sent bubble sits at the end instead of in place.
+- Ruling: when a Stop ack lands with no live turn but a queued send is still waiting, keep the stop flag until the turn end arrives — cost if wrong: one queued send marked "Not sent" that actually ran.
+- Ruling: a Stop tapped between turns, after the server already purged a never-started queued send, leaves that send showing "Queued" until a new live session — it needs a live probe to tell apart from a started turn, and guessing risks the duplicate-on-Retry — cost if wrong: one stale "Queued" label.
+- Ruling: the Stop-ack race where the server catches the interrupt in the gap before draining stays parked — it needs a tap that races a natural turn end; on multi-client setups it can mark a fresh queued send "Not sent" (duplicate on Retry), on one client it only shows a never-run send as sent — cost if wrong: a rare duplicate on multi-client setups.
+- Ruling: formula width is measured per paragraph that contains math rather than once for the whole message — it gives the exact width inside lists and quotes without guessed subtractions, and text without math pays nothing — cost if wrong: a formula redrawn on a width change such as rotation.
+- Ruling: a formula that is still too wide at 70 % size is clipped with a 44dp "…" button that opens it at full size, rather than shrunk further — below 70 % it becomes unreadable — cost if wrong: one extra tap on a very wide formula.
+- Ruling: formula drawing is serialised on one thread — JLaTeXMath's static tables are not safe on two — cost if wrong: a long formula delays the next one.
+- Ruling: spoken math is a small TeX reader (fractions, powers, roots, Greek names) with a depth limit of 32 for accessibility text only; math stays out of read-aloud — cost if wrong: an odd phrasing for an exotic formula.
+- Ruling: while a connection answer is in flight every button on the card is locked, including Skip all and Continue — answers are sent once — cost if wrong: a short wait before Continue after Connect.
+- Ruling: a target with env fields and a sign-in link sends the env first and offers "Continue in browser" only after a newer update still shows it unresolved — cost if wrong: one extra tap, and the typed values are gone if the send fails.
+- Ruling: a todo update with an older revision than the card's is ignored within one live session, a new live session resets that floor — Hermes restores the revision from history when it rebuilds the agent, so numbering stays monotonic — cost if wrong: a card that ignores a restarted list until the next live session.
+- Ruling: reply images and tool-row images keep separate cache keys (tool images are capped to the strip size, reply images are not), so one URL shown both ways is fetched twice — cost if wrong: one extra download.
+- Ruling: final image failures live in their own bounded set (64) instead of the bitmap cache — a burst of failures must not evict good pictures — cost if wrong: a failed image retried after 64 newer failures.
+- Ruling: a Report-a-problem result is delivered only to a screen that is resumed and still holds the request id; otherwise a toast asks to tap again — cost if wrong: one extra tap, and a report built just as you leave must be rebuilt.
+- Ruling: a failed edit or regenerate restores the transcript from before the attempt but keeps items that arrived meanwhile (completed side notes, background results) — cost if wrong: an item shown in its newest state rather than as it was when you tapped.
+- Ruling: server TTS keeps at most one sentence prefetched; a pause or a different next sentence discards it — cost if wrong: one wasted synthesis call per skipped sentence.
+
 ## v0.9.1
 
 - Ruling: the app id and Kotlin namespace both become `app.tsukaima` (reverse of the user's domain tsukaima.app) — the user asked for the rename after 0.9.0; keeping the old applicationId would have avoided a reinstall but left the old identity visible — cost if wrong: one more reinstall to move again.

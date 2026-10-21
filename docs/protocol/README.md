@@ -442,3 +442,17 @@ Each item says how it was established: **[live]** = probed against the test inst
   with commands that load files, define macros or change global library state (`\includegraphics`, `\input`,
   `\newcommand`, `\def`, `\DeclareMathOperator`, `\definecolor`, …); those, and any formula that fails to parse,
   show as inline code with the raw TeX (never a crash). Math is never spoken (`SpeechText` drops it).
+
+### v0.9.2 — verified facts
+
+Tagged as in v0.9.0: **[live]** probed, **[source]** read from the 0.22.2 source only.
+
+- **`session.interrupt` purges the queue even when nothing runs** [source] (`tui_gateway/session_lifecycle.py`
+  `_interrupt_session_turn`): the queue is cleared unconditionally and the result is `"interrupted"` even when idle;
+  `not_interrupted` comes only from the hosted-room `expected_hosted_task_id` path. A Stop between turns therefore
+  purges a waiting queued send with no turn end to follow, and "Nothing to stop" is effectively never returned.
+- **`session.resume` retires undrained queued rows** [source] (`methods_session.read_history` calls
+  `retire_undrained_queue_rows` on every resume): a queued send that never ran is gone from the resumed history, so a
+  client must not match a purged send to a history row after a resume.
+- **The todo revision is restored from history when the agent is rebuilt** [source] (`run_agent.py` ~1032-1039:
+  restored only when the history carries a newer revision), so revisions stay monotonic within a session.
