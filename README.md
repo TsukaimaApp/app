@@ -112,7 +112,7 @@ Check a build with `apksigner verify --print-certs app/build/outputs/apk/release
 
 Android refuses an update signed by a different key, so the first install of a release-key build over a
 debug-signed one (any build before 0.5.1, or a CI artifact) needs an uninstall first (`adb uninstall
-labs.suchattai.tsukaima`), which also clears the stored sign-in.
+app.tsukaima`), which also clears the stored sign-in.
 
 Server-side smoke test (uses `.local/hermes-test-creds.env`; run against a test Hermes only):
 

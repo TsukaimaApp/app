@@ -3,6 +3,14 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.9.1 — 2026-10-21 (versionCode 21)
+
+### Changed
+- The app id is now `app.tsukaima` (domain tsukaima.app), replacing `labs.suchattai.tsukaima`. Android treats this as
+  a new app: uninstall the old Tsukaima, install this one, sign in again, pick it as the device assistant again if you
+  used that, and point Obtainium at the new id. Nothing on the Hermes side changes; the signing key is the same, so
+  later updates install over this one.
+
 ## 0.9.0 — 2026-10-21 (versionCode 20)
 
 ### Added

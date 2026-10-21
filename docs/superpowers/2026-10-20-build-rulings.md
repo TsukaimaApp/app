@@ -251,6 +251,10 @@ Decisions taken on the user's behalf while implementing `design/handoff_voice/RE
 - Ruling: tables are a custom layout with content-sized columns capped at 220dp and horizontal scroll beyond the width — wrapping every column to fit makes agent tables unreadable on a phone — cost if wrong: a wide table needs a sideways scroll.
 - Ruling: list nesting follows indentation relative to the open items (CommonMark-style), not leading spaces ÷ 2, so four-space nesting under `1.` reads as one level; each item carries its shown number (null for a bullet), counted on from the first marker at its depth (`1.` `1.` `1.` shows 1, 2, 3), so mixed bullet/numbered nesting renders — cost if wrong: an oddly indented list nests one level shallower than its spaces suggest.
 
+## v0.9.1
+
+- Ruling: the app id and Kotlin namespace both become `app.tsukaima` (reverse of the user's domain tsukaima.app) — the user asked for the rename after 0.9.0; keeping the old applicationId would have avoided a reinstall but left the old identity visible — cost if wrong: one more reinstall to move again.
+
 ## v0.9.0
 
 - Ruling: a send while a turn is live always carries `queued: true` (also while the turn waits on an approval, question, masked prompt or connection, and between the live turn's end and the queued turn's start); the app never relies on `display.busy_input_mode` — the server default (`interrupt`) would let a tap kill the running turn — cost if wrong: a user who wanted to redirect the turn has to press Stop first.

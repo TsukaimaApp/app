@@ -14,7 +14,7 @@
 }
 -if @kotlinx.serialization.Serializable class ** { static **$* *; }
 -keepclassmembers class <2>$<3> { kotlinx.serialization.KSerializer serializer(...); }
--keep,includedescriptorclasses class labs.suchattai.tsukaima.**$$serializer { *; }
+-keep,includedescriptorclasses class app.tsukaima.**$$serializer { *; }
 
 # OkHttp / Okio
 -dontwarn okhttp3.internal.platform.**

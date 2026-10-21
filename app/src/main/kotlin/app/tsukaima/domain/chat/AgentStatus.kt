@@ -1,0 +1,91 @@
+package app.tsukaima.domain.chat
+
+/** Colour family of the status-line dot (mapped to theme colours by the UI). */
+enum class StatusTone { Grey, Accent, Amber, Red }
+
+/** What the agent is doing right now, as shown in the chat status line. */
+sealed interface AgentStatus {
+    val label: String
+    val tone: StatusTone
+    val pulsing: Boolean get() = false
+
+    data object Idle : AgentStatus {
+        override val label = "Hermes is listening"
+        override val tone = StatusTone.Grey
+    }
+
+    data class Thinking(val flair: String) : AgentStatus {
+        override val label get() = flair
+        override val tone get() = StatusTone.Accent
+        override val pulsing get() = true
+    }
+
+    data class Tool(val name: String) : AgentStatus {
+        override val label get() = "Running $name"
+        override val tone get() = StatusTone.Accent
+        override val pulsing get() = true
+    }
+
+    data object Replying : AgentStatus {
+        override val label = "Replying…"
+        override val tone = StatusTone.Accent
+        override val pulsing = true
+    }
+
+    data object Approval : AgentStatus {
+        override val label = "Waiting for your approval"
+        override val tone = StatusTone.Amber
+    }
+
+    /** A `clarify` request waits for the user. */
+    data object Question : AgentStatus {
+        override val label = "Waiting for your answer"
+        override val tone = StatusTone.Amber
+    }
+
+    /** A masked prompt of [kind] (`sudo`, `secret`, `vault.*`) waits for the user. */
+    data class Secret(val kind: SecretKind) : AgentStatus {
+        override val label get() = when (kind) {
+            SecretKind.Sudo, SecretKind.VaultUnlock -> "Waiting for a password"
+            SecretKind.Secret -> "Waiting for a secret"
+            SecretKind.VaultCode -> "Waiting for a code"
+            SecretKind.VaultSaveLogin -> "Waiting for a login"
+        }
+        override val tone get() = StatusTone.Amber
+    }
+
+    /** A connection operation (`connection.request`) waits for the user. */
+    data object Connection : AgentStatus {
+        override val label = "Waiting for a connection"
+        override val tone = StatusTone.Amber
+    }
+
+    /** `session.compress` is summarizing the conversation (not a turn: Stop does not apply). */
+    data object Compacting : AgentStatus {
+        override val label = "Compacting context…"
+        override val tone = StatusTone.Accent
+        override val pulsing = true
+    }
+
+    data object Stopped : AgentStatus {
+        override val label = "Gateway stopped"
+        override val tone = StatusTone.Red
+    }
+
+    data object Offline : AgentStatus {
+        override val label = "Can’t reach Hermes"
+        override val tone = StatusTone.Red
+    }
+}
+
+/** The agent is working on a turn (what Stop interrupts): thinking, running a tool or streaming a reply. */
+val AgentStatus.running: Boolean
+    get() = this is AgentStatus.Thinking || this is AgentStatus.Tool || this == AgentStatus.Replying
+
+/**
+ * The server's turn is live: [running], or paused on the user (approval, question, masked prompt, connection). A send
+ * now must be queued behind it (`prompt.submit {queued: true}`); a plain one would interrupt it.
+ */
+val AgentStatus.turnLive: Boolean
+    get() = running || this == AgentStatus.Approval || this == AgentStatus.Question || this is AgentStatus.Secret ||
+        this == AgentStatus.Connection

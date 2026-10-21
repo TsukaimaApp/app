@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Tsukaima as the device assistant: sessions start the voice sheet (AssistActivity). -->
 <voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:sessionService="labs.suchattai.tsukaima.assist.TsukaimaSessionService"
-    android:recognitionService="labs.suchattai.tsukaima.assist.TsukaimaRecognitionService"
+    android:sessionService="app.tsukaima.assist.TsukaimaSessionService"
+    android:recognitionService="app.tsukaima.assist.TsukaimaRecognitionService"
     android:supportsAssist="true" />

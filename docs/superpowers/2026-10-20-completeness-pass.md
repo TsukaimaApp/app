@@ -2,7 +2,7 @@
 
 Four read-only audits (design ↔ UI, protocol ↔ data layer, hygiene/release, plan+rulings ↔ code) plus a
 lint run (40 warnings, 19 of them "newer version available"). Claims marked ✔ were re-verified by hand.
-Paths are under `app/src/main/kotlin/labs/suchattai/tsukaima/`.
+Paths are under `app/src/main/kotlin/app/tsukaima/`.
 
 ## Tier 1 — bugs and blockers (fix now)
 

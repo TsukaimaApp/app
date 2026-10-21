@@ -1,0 +1,59 @@
+package app.tsukaima.ui.chat.components
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import app.tsukaima.ui.components.Chip
+import app.tsukaima.ui.components.IconButton44
+import app.tsukaima.ui.components.IconName
+import app.tsukaima.ui.theme.tsukaima
+
+/** Near-invisible top bar on the page colour: drawer menu, borderless model chip, overflow. */
+@Composable
+fun ChatTopBar(
+    modelLabel: String,
+    onMenu: () -> Unit,
+    showMenu: Boolean,
+    onModel: () -> Unit,
+    onMore: () -> Unit,
+    modifier: Modifier = Modifier,
+    moreEnabled: Boolean = true,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.tsukaima.surfacePage)
+            .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        if (showMenu) IconButton44(IconName.Menu, "Conversations", onMenu)
+        Chip(modelLabel, onClick = onModel, trailing = IconName.ExpandMore, borderless = true)
+        Spacer(Modifier.weight(1f))
+        IconButton44(IconName.MoreVert, "More", onMore, enabled = moreEnabled, modifier = Modifier.alpha(if (moreEnabled) 1f else 0.45f))
+    }
+}
+
+@Composable
+private fun TopBarPreview(dark: Boolean) = PreviewPage(dark) {
+    ChatTopBar("Hermes 4 · 405B", {}, showMenu = true, onModel = {}, onMore = {})
+    ChatTopBar("Hermes 4", {}, showMenu = false, onModel = {}, onMore = {})
+}
+
+@Preview(name = "ChatTopBar light")
+@Composable
+private fun TopBarLightPreview() = TopBarPreview(dark = false)
+
+@Preview(name = "ChatTopBar dark")
+@Composable
+private fun TopBarDarkPreview() = TopBarPreview(dark = true)

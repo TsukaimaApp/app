@@ -14,15 +14,15 @@ val releaseKeystoreProperties: Properties? = rootProject.file(".local/keystore.p
     ?.let { file -> Properties().apply { file.inputStream().use { load(it) } } }
 
 android {
-    namespace = "labs.suchattai.tsukaima"
+    namespace = "app.tsukaima"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "labs.suchattai.tsukaima"
+        applicationId = "app.tsukaima"
         minSdk = 29
         targetSdk = 36
-        versionCode = 20
-        versionName = "0.9.0"
+        versionCode = 21
+        versionName = "0.9.1"
     }
 
     signingConfigs {
