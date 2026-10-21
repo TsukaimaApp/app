@@ -49,6 +49,11 @@ sealed interface ChatItem {
         val durationS: Double?,
         /** Set by `tool.output_risk`: the output was classified risky (prompt injection, secrets). */
         val risk: ToolRisk? = null,
+        /**
+         * The image a `vision_analyze` call looked at: its `args.image_url` as sent (http(s), `data:`, or a path on the
+         * server). Null for every other tool.
+         */
+        val imageUrl: String? = null,
     ) : ChatItem
 
     /**

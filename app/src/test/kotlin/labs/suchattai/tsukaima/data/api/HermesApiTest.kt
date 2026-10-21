@@ -634,4 +634,33 @@ class HermesApiTest {
             foreign.close()
         }
     }
+
+    @Test
+    fun mediaReturnsTheDataUrl() = runBlocking {
+        json("""{"data_url":"data:image/png;base64,iVBORw0KGgo="}""")
+        val api = authedApi()
+        settings = settings.copy(profile = "work")
+        assertEquals("data:image/png;base64,iVBORw0KGgo=", api.fetchMediaDataUrl("~/.hermes/screenshots/shot #1.png"))
+        val r = server.takeRequest(1, TimeUnit.SECONDS)!!
+        assertEquals("GET", r.method)
+        assertEquals("/api/media", r.url.encodedPath)
+        assertEquals("~/.hermes/screenshots/shot #1.png", r.url.queryParameter("path"))
+        assertNull("the media route takes no profile", r.url.queryParameter("profile"))
+        assertEquals("Bearer tok", r.headers["Authorization"])
+    }
+
+    @Test
+    fun mediaForbiddenIsAnApiException() {
+        // The server's verdict on that path (outside the media roots, gone, too big, not an image): final. A 401 is
+        // that image's verdict too, never a re-login (authedApi fails the test on one).
+        val api = authedApi()
+        for (code in listOf(403, 404, 413, 415, 401)) {
+            json("""{"detail":"no"}""", code = code)
+            val e = assertThrows(ApiException::class.java) { runBlocking { api.fetchMediaDataUrl("/etc/passwd.png") } }
+            assertEquals(code, e.code)
+        }
+        // A 2xx without a data_url is a malformed answer, not a crash.
+        json("""{"ok":true}""")
+        assertThrows(ApiException::class.java) { runBlocking { api.fetchMediaDataUrl("~/.hermes/images/a.png") } }
+    }
 }

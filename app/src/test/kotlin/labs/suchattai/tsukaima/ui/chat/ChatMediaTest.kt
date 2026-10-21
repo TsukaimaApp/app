@@ -14,6 +14,8 @@ import labs.suchattai.tsukaima.data.api.ApiException
 import labs.suchattai.tsukaima.data.api.AuthException
 import labs.suchattai.tsukaima.data.api.ImageTooLargeException
 import labs.suchattai.tsukaima.data.prefs.Settings
+import labs.suchattai.tsukaima.domain.chat.ChatItem
+import labs.suchattai.tsukaima.domain.chat.ToolStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -50,7 +52,15 @@ class ChatMediaTest {
             return result(url)
         }
 
-        override fun decodePreview(bytes: ByteArray): ImageBitmap? = Bitmap.also { decoded++ }
+        override fun decodePreview(bytes: ByteArray): ImageBitmap? = Bitmap.also { decoded++; decodedBytes += bytes.toList() }
+        val decodedBytes = mutableListOf<List<Byte>>()
+
+        val media = mutableListOf<String>()
+        var mediaResult: (String) -> Result<String> = { Result.success("data:image/png;base64,AQID") }
+        override suspend fun media(path: String): Result<String> {
+            media += path
+            return mediaResult(path)
+        }
     }
 
     private class Harness(scope: TestScope, backend: ChatBackend = Backend()) {
@@ -162,6 +172,83 @@ class ChatMediaTest {
         // No server configured yet: nothing is same-origin.
         b.settings.value = null
         assertFalse(h.media.imageAllowed(url))
+    }
+
+    private fun vision(imageUrl: String?) = ChatItem.ToolCall(
+        id = "v1", name = "vision_analyze", context = "what is this", args = null, status = ToolStatus.Running,
+        output = null, exitCode = null, durationS = null, imageUrl = imageUrl,
+    )
+
+    @Test
+    fun toolImageSourcesAreClassified() {
+        assertEquals(ToolImageSource.Local("~/.hermes/screenshots/a.png"), ToolImageSource.of("~/.hermes/screenshots/a.png"))
+        assertEquals(ToolImageSource.Local("/root/.hermes/images/a.png"), ToolImageSource.of("/root/.hermes/images/a.png"))
+        assertEquals(ToolImageSource.Local("/root/.hermes/images/a.png"), ToolImageSource.of("file:///root/.hermes/images/a.png"))
+        assertEquals(ToolImageSource.Web(url), ToolImageSource.of(url))
+        assertEquals(ToolImageSource.Web("HTTP://x.example/a.png"), ToolImageSource.of("HTTP://x.example/a.png"))
+        assertEquals(ToolImageSource.Inline("data:image/png;base64,AQID"), ToolImageSource.of("data:image/png;base64,AQID"))
+        for (other in listOf("ftp://x.example/a.png", "content://media/1", "relative/a.png", "", "  ", "file://")) {
+            assertNull(other, ToolImageSource.of(other))
+        }
+    }
+
+    @Test
+    fun localMediaIsFetchedThroughTheMediaRoute() = runTest {
+        val b = Backend()
+        val h = Harness(this, b)
+        assertSame(Bitmap, h.media.toolImage(vision("~/.hermes/screenshots/a.png")))
+        assertSame(Bitmap, h.media.toolImage(vision("~/.hermes/screenshots/a.png"))) // cached
+        assertEquals(listOf("~/.hermes/screenshots/a.png"), b.media)
+        assertEquals(listOf(listOf<Byte>(1, 2, 3)), b.decodedBytes) // the data URL's bytes, decoded once
+
+        // file:// is the same server path.
+        assertSame(Bitmap, h.media.toolImage(vision("file:///root/.hermes/images/b.png")))
+        assertEquals("/root/.hermes/images/b.png", b.media.last())
+
+        // An inline data: URL decodes directly; nothing is fetched.
+        assertSame(Bitmap, h.media.toolImage(vision("data:image/png;base64,BAU=")))
+        assertEquals(2, b.media.size)
+        assertEquals(listOf<Byte>(4, 5), b.decodedBytes.last())
+
+        // http(s) follows the reply-image rules: same origin loads, foreign waits for a tap.
+        assertSame(Bitmap, h.media.toolImage(vision(url)))
+        assertNull(h.media.toolImage(vision(foreign)))
+        assertEquals(listOf(url), b.fetched)
+
+        // No image, or a scheme it cannot fetch: nothing.
+        assertNull(h.media.toolImage(vision(null)))
+        assertNull(h.media.toolImage(vision("ftp://x.example/a.png")))
+        assertEquals(2, b.media.size)
+        assertEquals(1, b.fetched.size)
+    }
+
+    @Test
+    fun mediaForbiddenLeavesTheToolRowIntact() = runTest {
+        for (code in listOf(403, 404, 413, 415)) {
+            val b = Backend().apply { mediaResult = { Result.failure(ApiException(code, "no")) } }
+            val h = Harness(this, b)
+            val tool = vision("/etc/shadow.png").copy(status = ToolStatus.Done, output = "it is a file")
+            val before = tool.copy()
+            assertNull(h.media.toolImage(tool))
+            assertNull(h.media.toolImage(tool)) // final: cached, not refetched
+            assertEquals(1, b.media.size)
+            assertEquals("$code leaves the row as it was", before, tool)
+        }
+        // A malformed data URL and an undecodable image are final too.
+        val bad = Backend().apply { mediaResult = { Result.success("not a data url") } }
+        val hb = Harness(this, bad)
+        assertNull(hb.media.toolImage(vision("~/.hermes/images/a.png")))
+        assertNull(hb.media.toolImage(vision("~/.hermes/images/a.png")))
+        assertEquals(1, bad.media.size)
+        assertNull(hb.media.toolImage(vision("data:image/png;base64,@@@")))
+
+        // A dropped connection is transient: a later call retries.
+        val flaky = Backend().apply { mediaResult = { Result.failure(IOException("reset")) } }
+        val hf = Harness(this, flaky)
+        assertNull(hf.media.toolImage(vision("~/.hermes/images/a.png")))
+        flaky.mediaResult = { Result.success("data:image/png;base64,AQID") }
+        assertSame(Bitmap, hf.media.toolImage(vision("~/.hermes/images/a.png")))
+        assertEquals(2, flaky.media.size)
     }
 
     private companion object {

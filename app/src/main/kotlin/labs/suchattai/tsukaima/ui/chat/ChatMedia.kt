@@ -13,10 +13,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import labs.suchattai.tsukaima.data.api.ApiException
 import labs.suchattai.tsukaima.data.api.AuthException
+import labs.suchattai.tsukaima.data.api.HermesApi
 import labs.suchattai.tsukaima.data.api.ImageOrigin
 import labs.suchattai.tsukaima.data.api.ImageTooLargeException
 import labs.suchattai.tsukaima.data.api.userMessage
+import labs.suchattai.tsukaima.domain.chat.ChatItem
+import labs.suchattai.tsukaima.domain.voice.DataUrl
 import java.io.IOException
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 enum class MediaKind { Image, Video, Audio, Document, Archive, Other }
@@ -57,6 +61,38 @@ object Media {
         if (parent.isEmpty()) return if (path.startsWith("/")) "/" else ""
         val segments = parent.split('/').filter { it.isNotEmpty() }
         return if (segments.size <= 2) parent else "…/" + segments.takeLast(2).joinToString("/")
+    }
+}
+
+/** Where a `vision_analyze` image ([ChatItem.ToolCall.imageUrl]) comes from. */
+sealed interface ToolImageSource {
+    /** An http(s) URL: a reply image's rules (same origin loads, foreign waits for a tap). */
+    data class Web(val url: String) : ToolImageSource
+
+    /** A path on the server (absolute or `~/…`), fetched through `/api/media`. */
+    data class Local(val path: String) : ToolImageSource
+
+    /** An inline `data:` URL. */
+    data class Inline(val dataUrl: String) : ToolImageSource
+
+    companion object {
+        /**
+         * The source of a raw `image_url`: http(s) and `data:` as such; `file://` (stripped), an absolute or a `~`
+         * path is on the server; anything else (another scheme, a relative path, blank) is null.
+         */
+        fun of(raw: String): ToolImageSource? {
+            val value = raw.trim()
+            val lower = value.lowercase(Locale.ROOT)
+            val path = if (lower.startsWith(FILE_SCHEME)) value.substring(FILE_SCHEME.length) else value
+            return when {
+                lower.startsWith("http://") || lower.startsWith("https://") -> Web(value)
+                lower.startsWith("data:") -> Inline(value)
+                path.startsWith("/") || path.startsWith("~/") -> Local(path)
+                else -> null
+            }
+        }
+
+        private const val FILE_SCHEME = "file://"
     }
 }
 
@@ -167,26 +203,60 @@ internal class ChatMedia(
      */
     suspend fun imagePreview(url: String): ImageBitmap? {
         if (!imageAllowed(url)) return null
-        if (images.containsKey(url)) return images[url]
-        return imageLoading.getOrPut(url) { scope.async { fetchImage(url) } }.await()
+        return cachedImage(url) { backend.fetchImage(url).getOrThrow() }
     }
 
-    private suspend fun fetchImage(url: String): ImageBitmap? {
+    /**
+     * The image a `vision_analyze` row looked at ([ChatItem.ToolCall.imageUrl]), decoded, or null when there is none
+     * or it failed. http(s) follows the reply-image rules ([imagePreview]: a foreign one waits for [allowImage]); a
+     * path on the server comes through `/api/media` and an inline `data:` URL decodes directly, either at most
+     * [HermesApi.MEDIA_MAX_IMAGE_BYTES]; any other scheme has no image. Shares [imagePreview]'s cache (`media:<path>`
+     * for a server path) and its failure rules: the server's refusal (403/404/413/415), a malformed or oversized
+     * image are final, a dropped connection is retried by a later call. Never touches [tool].
+     */
+    suspend fun toolImage(tool: ChatItem.ToolCall): ImageBitmap? =
+        when (val source = tool.imageUrl?.let(ToolImageSource::of)) {
+            null -> null
+            is ToolImageSource.Web -> imagePreview(source.url)
+            is ToolImageSource.Local -> cachedImage(MEDIA_KEY + source.path) {
+                val dataUrl = backend.media(source.path).getOrThrow()
+                withContext(io) { dataUrlBytes(dataUrl) }
+            }
+            // Keyed by length and hash: the URL itself may be megabytes (String caches its hash).
+            is ToolImageSource.Inline ->
+                cachedImage("$MEDIA_KEY${source.dataUrl.length}:${source.dataUrl.hashCode()}") { withContext(io) { dataUrlBytes(source.dataUrl) } }
+        }
+
+    /** The image bytes of a `data:` URL: not an image or not base64 → [IllegalArgumentException]; over the cap → too large. */
+    private fun dataUrlBytes(dataUrl: String): ByteArray {
+        val (mime, bytes) = DataUrl.decode(dataUrl)
+        require(mime.startsWith("image/")) { "not an image" }
+        if (bytes.size > HermesApi.MEDIA_MAX_IMAGE_BYTES) throw ImageTooLargeException("Image over 25 MiB")
+        return bytes
+    }
+
+    /** The image under [key] from the LRU, else [load]ed and decoded once (concurrent callers share it). */
+    private suspend fun cachedImage(key: String, load: suspend () -> ByteArray): ImageBitmap? {
+        if (images.containsKey(key)) return images[key]
+        return imageLoading.getOrPut(key) { scope.async { fetchImage(key, load) } }.await()
+    }
+
+    private suspend fun fetchImage(key: String, load: suspend () -> ByteArray): ImageBitmap? {
         try {
-            val bytes = backend.fetchImage(url).getOrThrow()
+            val bytes = load()
             val bitmap = withContext(io) { backend.decodePreview(bytes) }
-            images[url] = bitmap
+            images[key] = bitmap
             return bitmap
         } catch (c: CancellationException) {
             throw c
         } catch (e: OutOfMemoryError) {
-            images[url] = null
+            images[key] = null
             return null
         } catch (e: Exception) {
-            if (!transientImageFailure(e)) images[url] = null
+            if (!transientImageFailure(e)) images[key] = null
             return null
         } finally {
-            imageLoading.remove(url)
+            imageLoading.remove(key)
         }
     }
 
@@ -207,6 +277,9 @@ internal class ChatMedia(
     private companion object {
         const val PREVIEW_CACHE = 8
         const val IMAGE_CACHE = 8
+
+        /** Cache-key prefix of a [toolImage] that is not an http(s) URL. */
+        const val MEDIA_KEY = "media:"
 
         /** How long a card shows "Saved" before it is back to idle. */
         const val SAVED_MS = 3_000L

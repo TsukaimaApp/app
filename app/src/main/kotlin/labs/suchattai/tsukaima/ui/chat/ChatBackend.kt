@@ -76,6 +76,9 @@ interface ChatBackend {
      */
     suspend fun fetchImage(url: String): Result<ByteArray>
 
+    /** An image on the server's disk ([path] absolute or `~/…`) as a `data:` URL, through `/api/media` (bearer, 25 MiB). */
+    suspend fun media(path: String): Result<String>
+
     /** Where downloads are saved (blocking; run on IO). */
     val fileSaver: FileSaver
 
@@ -139,6 +142,7 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override suspend fun deleteSession(id: String) = c.repository.deleteSession(id)
     override suspend fun download(path: String) = c.repository.download(path)
     override suspend fun fetchImage(url: String) = c.repository.fetchImage(url)
+    override suspend fun media(path: String) = c.repository.media(path)
     override val fileSaver get() = c.fileSaver
     override fun openFile(uri: String, mime: String) = c.openFile(uri, mime)
     override fun openUrl(url: String) = c.openUrl(url)

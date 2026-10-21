@@ -378,6 +378,9 @@ class ChatViewModel(
     /** Whether a reply's image at [url] loads by itself (server origin, or tapped to load); see [ChatMedia.imageAllowed]. */
     fun imageAllowed(url: String): Boolean = media.imageAllowed(url)
 
+    /** The image a `vision_analyze` row looked at, decoded (null when there is none or it failed); see [ChatMedia.toolImage]. */
+    suspend fun toolImage(tool: ChatItem.ToolCall): ImageBitmap? = withContext(dispatcher) { media.toolImage(tool) }
+
     /** A tap on a foreign image's "tap to load" card. */
     fun allowImage(url: String) = media.allowImage(url)
 

@@ -22,6 +22,8 @@ object ChatReducer {
     private const val APPROVAL = "approval"
     private const val CLARIFY = "clarify"
     private const val SUBAGENT_PREFIX = "subagent."
+    /** The tool whose `args.image_url` the tool row shows ([ChatItem.ToolCall.imageUrl]). */
+    private const val VISION_TOOL = "vision_analyze"
 
     /** Terminal `subagent.complete` statuses that mean the child did not finish its goal. */
     private val SUBAGENT_FAILED = setOf("failed", "error", "timeout", "interrupted")
@@ -50,6 +52,7 @@ object ChatReducer {
                     output = null,
                     exitCode = null,
                     durationS = null,
+                    imageUrl = visionImageUrl(m.name.orEmpty(), m.args),
                 )
                 else -> null
             }
@@ -507,6 +510,10 @@ object ChatReducer {
         return if (items == s.items) s else s.copy(items = items)
     }
 
+    /** `args.image_url` of a `vision_analyze` call (the image it looked at), kept as sent; null for any other tool. */
+    private fun visionImageUrl(name: String, args: JsonObject?): String? =
+        if (name != VISION_TOOL) null else (args?.get("image_url") as? JsonPrimitive)?.takeIf { it.isString }?.content
+
     private fun onToolStart(s: ChatState, p: JsonObject): ChatState {
         val name = p.string("name") ?: "tool"
         val toolId = p.string("tool_id") ?: return s.copy(status = AgentStatus.Tool(humanName(name)))
@@ -519,6 +526,7 @@ object ChatReducer {
             output = null,
             exitCode = null,
             durationS = null,
+            imageUrl = visionImageUrl(name, p["args"] as? JsonObject),
         )
         val existing = s.items.firstOrNull { it.id == toolId }
         val items = if (existing != null) s.items.replace(existing) { running } else s.items + running
@@ -543,6 +551,7 @@ object ChatReducer {
             durationS = null,
         )
         val done = base.copy(
+            imageUrl = base.imageUrl ?: visionImageUrl(base.name, p["args"] as? JsonObject),
             status = if (failed) ToolStatus.Failed else ToolStatus.Done,
             output = result?.get("output")?.asText(),
             exitCode = exitCode,

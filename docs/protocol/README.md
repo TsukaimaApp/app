@@ -348,3 +348,14 @@ All need the bearer header unless marked public. Management endpoints accept `?p
   a list (`_attach_todo_state`; omitted when it never had one — an empty list at revision 0 is not sent). There is no
   replay event: the app seeds the card from it (authoritative), and keeps its own card through a transcript rebuild
   when a resume carries none.
+
+### v0.9.0 — vision_analyze images (2026-10-21, from the 0.22.2 source)
+
+- **`vision_analyze` args carry `image_url`** (`tools/vision_tools.py`): an http(s) URL, a `data:` URL, or a path on
+  the server (absolute, `~/…`, or `file://…`). The tool result is text only (the image is not in it), so the app shows
+  the image from that arg on the tool row: http(s) by the reply-image rules (same origin loads, foreign waits for a
+  tap), `data:` decoded in place, a path through **`GET /api/media?path=<path>`** (bearer; not profile-scoped;
+  `hermes_cli/web_routers/files.py`) → `{"data_url": "data:image/<type>;base64,…"}`. Errors: `403` outside
+  `~/.hermes/{images,screenshots,cache}`, `404` missing, `413` over 25 MiB, `415` a suffix other than
+  png/jpg/jpeg/gif/webp/svg/bmp/ico, `400` an unresolvable path. The app treats every non-2xx (401 included, never a
+  re-login) as final for that path ("image unavailable"); a dropped connection is retried.

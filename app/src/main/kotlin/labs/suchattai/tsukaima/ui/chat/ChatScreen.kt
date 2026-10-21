@@ -109,6 +109,7 @@ class ChatActions(
     val previewImage: suspend (String) -> ImageBitmap? = { null },
     val imageAllowed: (String) -> Boolean = { false },
     val onAllowImage: (String) -> Unit = {},
+    val previewToolImage: suspend (ChatItem.ToolCall) -> ImageBitmap? = { null },
     val onApprove: (String) -> Unit = {},
     val onDeny: (String) -> Unit = {},
     val onApproveFor: (id: String, choice: ApprovalChoice) -> Unit = { _, _ -> },
@@ -213,6 +214,7 @@ fun ChatScreen(
             previewImage = vm::imagePreview,
             imageAllowed = vm::imageAllowed,
             onAllowImage = vm::allowImage,
+            previewToolImage = vm::toolImage,
             onApprove = vm::approve,
             onDeny = vm::deny,
             onApproveFor = vm::answerApproval,
@@ -395,7 +397,7 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
     val media = remember(state.mediaState, actions) {
         MediaHost(
             state.mediaState, actions.onOpenMedia, actions.previewMedia,
-            actions.previewImage, actions.imageAllowed, actions.onAllowImage,
+            actions.previewImage, actions.imageAllowed, actions.onAllowImage, actions.previewToolImage,
         )
     }
     // Follow the bottom while the user is there; a manual scroll up stops following until they come back.
@@ -447,7 +449,7 @@ internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatAct
                 onToggleReasoning = { actions.onToggleReasoning(item.id) },
             )
         }
-        is ChatItem.ToolCall -> ToolRow(item)
+        is ChatItem.ToolCall -> ToolRow(item, media = media)
         is ChatItem.Subagent -> SubagentRow(item)
         is ChatItem.Approval -> ApprovalCard(
             item = item,

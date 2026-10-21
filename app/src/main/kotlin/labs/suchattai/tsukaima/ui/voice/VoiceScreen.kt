@@ -85,7 +85,7 @@ fun VoiceScreen(
     val media = remember(state.mediaState, actions) {
         MediaHost(
             state.mediaState, actions.onOpenMedia, actions.previewMedia,
-            actions.previewImage, actions.imageAllowed, actions.onAllowImage,
+            actions.previewImage, actions.imageAllowed, actions.onAllowImage, actions.previewToolImage,
         )
     }
     val scroll = rememberScrollState()

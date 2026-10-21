@@ -147,6 +147,44 @@ class ChatReducerTest {
     }
 
     @Test
+    fun visionAnalyzeCarriesItsImageUrl() {
+        val started = live.feed(
+            ev(
+                "tool.start",
+                """{"tool_id":"v1","name":"vision_analyze","context":"what is on screen",
+                   "args":{"image_url":"~/.hermes/screenshots/s1.png","question":"what is on screen"}}""",
+                1,
+            ),
+        )
+        assertEquals("~/.hermes/screenshots/s1.png", (started.items.single() as ChatItem.ToolCall).imageUrl)
+
+        // Completion keeps it (its own args may be absent).
+        val done = started.feed(ev("tool.complete", """{"tool_id":"v1","name":"vision_analyze","result":{"output":"a cat"}}""", 2))
+        val tool = done.items.single() as ChatItem.ToolCall
+        assertEquals("~/.hermes/screenshots/s1.png", tool.imageUrl)
+        assertEquals(ToolStatus.Done, tool.status)
+        assertEquals("a cat", tool.output)
+
+        // A completion with no start fills it from its own args; the raw string is kept as sent.
+        val late = live.feed(
+            ev(
+                "tool.complete",
+                """{"tool_id":"v2","name":"vision_analyze","args":{"image_url":"file:///root/.hermes/images/a.png"},"result":{"output":"x"}}""",
+                3,
+            ),
+        )
+        assertEquals("file:///root/.hermes/images/a.png", (late.items.single() as ChatItem.ToolCall).imageUrl)
+
+        // Only vision_analyze: another tool's image_url arg, or a missing or non-string one, carries nothing.
+        val other = live.feed(
+            ev("tool.start", """{"tool_id":"b1","name":"browser_vision","args":{"image_url":"/tmp/x.png"}}""", 4),
+            ev("tool.start", """{"tool_id":"v3","name":"vision_analyze","args":{"question":"?"}}""", 5),
+            ev("tool.start", """{"tool_id":"v4","name":"vision_analyze","args":{"image_url":42}}""", 6),
+        )
+        assertEquals(listOf<String?>(null, null, null), other.items.filterIsInstance<ChatItem.ToolCall>().map { it.imageUrl })
+    }
+
+    @Test
     fun toolFailureMarksFailed() {
         val s = live.feed(
             ev("message.start", seq = 1),

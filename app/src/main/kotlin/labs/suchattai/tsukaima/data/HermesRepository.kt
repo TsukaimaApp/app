@@ -157,6 +157,12 @@ class HermesRepository(
      */
     suspend fun fetchImage(url: String): Result<ByteArray> = attempt { api.fetchImage(url) }
 
+    /**
+     * An image on the server's disk (`vision_analyze`'s `image_url`) through `/api/media`, as its `data:` URL. Like
+     * [fetchImage], a 401 is that image's verdict, not reported to the connection ([attempt]).
+     */
+    suspend fun media(path: String): Result<String> = attempt { api.fetchMediaDataUrl(path) }
+
     /** One utterance ([mime]: WAV, or Opus in Ogg) through the server's speech-to-text relay. */
     suspend fun transcribe(audio: ByteArray, mime: String = "audio/wav"): Result<TranscriptionDto> =
         call { api.transcribe(audio, mime) }

@@ -377,6 +377,45 @@ class HermesApi(
         client.newBuilder().followRedirects(false).followSslRedirects(false).build()
     }
 
+    /**
+     * `GET /api/media?path=` ([path] absolute or `~/…`): an image on the server's disk (what `vision_analyze`
+     * looked at) as the `data_url` it answers, `data:image/<type>;base64,…`. Same origin, so the authed client
+     * without redirects ([mediaClient]), tagged [NoReLogin]: a 401 is that image's verdict, never a re-login.
+     * Non-2xx (403 outside the media roots, 404 gone, 413 over 25 MiB, 415 not an image, 401) → [ApiException]; a body
+     * over [MEDIA_MAX_BODY_BYTES] → [ImageTooLargeException]; a 2xx without `data_url` → [ApiException]; anything else
+     * is a (transient) [IOException].
+     */
+    suspend fun fetchMediaDataUrl(path: String): String {
+        val request = Request.Builder()
+            .url(url("api/media", managed = false, arrayOf("path" to path)))
+            .tag(NoReLogin::class.java, NoReLogin())
+            .build()
+        val response = mediaClient.newCall(request).await()
+        // `use` first: a cancellation at the dispatcher hop would otherwise discard the response unclosed.
+        return response.use {
+            withContext(Dispatchers.IO) {
+                if (!it.isSuccessful) throw ApiException(it.code, "Image unavailable (${it.code})")
+                val body = it.body
+                val tooLarge = "Image over ${MEDIA_MAX_BODY_BYTES / 1_000_000} MB"
+                if (body.contentLength() > MEDIA_MAX_BODY_BYTES) throw ImageTooLargeException(tooLarge)
+                val source = body.source()
+                if (source.request(MEDIA_MAX_BODY_BYTES + 1)) throw ImageTooLargeException(tooLarge)
+                val text = source.readUtf8()
+                val json = try {
+                    HermesJson.parseToJsonElement(text) as? JsonObject
+                } catch (e: SerializationException) {
+                    null
+                }
+                json?.requireString("data_url", "Image") ?: throw ApiException(it.code, "Image: unexpected response")
+            }
+        }
+    }
+
+    /** [imageClient] with room for a 25 MiB image (~35 MB as base64): 60 s per call, 30 s between bytes. */
+    private val mediaClient: OkHttpClient by lazy {
+        imageClient.newBuilder().callTimeout(60, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
+    }
+
     // ---- audio ---------------------------------------------------------------------------
 
     /**
@@ -539,6 +578,12 @@ class HermesApi(
     companion object {
         /** [fetchImage] reads at most this much; a bigger image is a failure. */
         internal const val IMAGE_MAX_BYTES = 8_000_000L
+
+        /** The server sends at most 25 MiB of image ([MEDIA_MAX_IMAGE_BYTES]); base64 in JSON is about 4/3 of that. */
+        internal const val MEDIA_MAX_BODY_BYTES = 35_000_000L
+
+        /** `/api/media`'s own cap on the file (413 above it); a decoded `data:` image over it is a failure too. */
+        const val MEDIA_MAX_IMAGE_BYTES = 25L * 1024 * 1024
 
         private const val SESSION_COOKIE = "hermes_session_at"
         private val DISPOSITION_PARAM = Regex(""";\s*([^=;\s]+)\s*=\s*(\"((?:[^\"\\]|\\.)*)\"|[^;]*)""")
