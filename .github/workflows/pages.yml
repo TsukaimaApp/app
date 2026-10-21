@@ -13,9 +13,9 @@ permissions:
   pages: write
   id-token: write
 
-# One deployment at a time; a queued run waits instead of cancelling one in progress.
+# One run per ref: deployments from main queue behind each other instead of cancelling; branch checks run independently.
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
