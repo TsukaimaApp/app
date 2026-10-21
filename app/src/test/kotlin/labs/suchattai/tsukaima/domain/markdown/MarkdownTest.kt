@@ -127,7 +127,7 @@ class MarkdownTest {
 
     @Test
     fun randomInputNeverThrows() {
-        val alphabet = "*_`\n -#abc"
+        val alphabet = "*_`\n -#abc$\\[]x"
         val rnd = Random(42)
         repeat(500) {
             val s = buildString { repeat(rnd.nextInt(0, 60)) { append(alphabet[rnd.nextInt(alphabet.length)]) } }
@@ -548,5 +548,106 @@ class MarkdownTest {
         )
         // Emphasis markers inside emphasis stay literal, as before.
         assertEquals(listOf(para(MdSpan.Bold("a *b* [c"))), Markdown.parse("**a *b* [c**"))
+    }
+
+    @Test
+    fun backslashEscapesRenderThePunctuation() {
+        assertEquals(listOf(para(MdSpan.Text("*not italic*"))), Markdown.parse("\\*not italic\\*"))
+        assertEquals(
+            listOf(para(MdSpan.Text("_a_ `b` [c](d) # ~~e~~ \\ \\q"))),
+            Markdown.parse("\\_a\\_ \\`b\\` \\[c\\](d) \\# \\~\\~e\\~\\~ \\\\ \\q"),
+        )
+        // An escaped closer does not close: the italic runs to the next real `*`.
+        assertEquals(listOf(para(MdSpan.Italic("a * b"))), Markdown.parse("*a \\* b*"))
+        // Code spans are literal.
+        assertEquals(listOf(para(MdSpan.Code("\\*x\\*"))), Markdown.parse("`\\*x\\*`"))
+        // Inside emphasis too.
+        assertEquals(listOf(para(MdSpan.Bold("a*b"))), Markdown.parse("**a\\*b**"))
+    }
+
+    @Test
+    fun escapedPipeInATableCellIsUnescapedOnce() {
+        val table = Markdown.parse("| a |\n|---|\n| x \\| y |").single() as MdBlock.Table
+        assertEquals(listOf(t("x | y")), table.rows.single())
+    }
+
+    @Test
+    fun escapedDollarIsNotMath() {
+        assertEquals(listOf(para(MdSpan.Text("costs $5 and $6"))), Markdown.parse("costs \\$5 and \\$6"))
+        assertEquals(listOf(para(MdSpan.Text("\$x$"))), Markdown.parse("\\\$x\\$"))
+    }
+
+    @Test
+    fun taskListItemsCarryChecked() {
+        assertEquals(
+            listOf(
+                MdBlock.Bullets(
+                    listOf(
+                        MdListItem(t("a"), 0, checked = false),
+                        MdListItem(t("b"), 0, checked = true),
+                        MdListItem(t("c"), 0, checked = true),
+                        MdListItem(t("plain"), 0),
+                    ),
+                ),
+            ),
+            Markdown.parse("- [ ] a\n- [x] b\n- [X] c\n- plain"),
+        )
+        assertEquals(
+            listOf(MdBlock.Numbered(listOf(MdListItem(t("d"), 0, 1, checked = true), MdListItem(t("e"), 1, checked = false)))),
+            Markdown.parse("1. [x] d\n   * [ ] e"),
+        )
+        // No text after the box, or no space: not a task.
+        assertEquals(listOf(MdBlock.Bullets(listOf(MdListItem(t("[ ]"), 0), MdListItem(t("[x]b"), 0)))), Markdown.parse("- [ ]\n- [x]b"))
+    }
+
+    @Test
+    fun inlineMathBetweenDollars() {
+        assertEquals(
+            listOf(para(MdSpan.Text("area "), MdSpan.Math("\\pi r^2"), MdSpan.Text(" here"))),
+            Markdown.parse("area $\\pi r^2$ here"),
+        )
+        assertEquals(
+            listOf(para(MdSpan.Text("a "), MdSpan.Math("x_1 + y_2"), MdSpan.Text(" b "), MdSpan.Math("\\alpha"), MdSpan.Text(" c [z]"))),
+            Markdown.parse("a \\(x_1 + y_2\\) b $$\\alpha$$ c \\[z\\]"),
+        )
+        // Math inside emphasis is split out, like code.
+        assertEquals(listOf(para(MdSpan.Bold("is "), MdSpan.Math("x"))), Markdown.parse("**is \$x$**"))
+    }
+
+    @Test
+    fun dollarAmountsAreNotMath() {
+        assertEquals(listOf(para(MdSpan.Text("costs $5 and $10 today"))), Markdown.parse("costs $5 and $10 today"))
+        assertEquals(listOf(para(MdSpan.Text("$ 5 $"))), Markdown.parse("$ 5 $"))
+        assertEquals(listOf(para(MdSpan.Text("from \$a$5"))), Markdown.parse("from \$a$5"))
+    }
+
+    @Test
+    fun displayMathBlock() {
+        assertEquals(listOf(MdBlock.Math("\\frac{a}{b}")), Markdown.parse("$$\n\\frac{a}{b}\n$$"))
+        assertEquals(
+            listOf(para(MdSpan.Text("Then:")), MdBlock.Math("a\n= b"), para(MdSpan.Text("done"))),
+            Markdown.parse("Then:\n$\$a\n= b$$\ndone"),
+        )
+        assertEquals(listOf(MdBlock.Math("E = mc^2")), Markdown.parse("$\$E = mc^2$$"))
+        assertEquals(listOf(MdBlock.Math("x^2")), Markdown.parse("  \\[\n  x^2\n  \\]"))
+        assertEquals(listOf(MdBlock.Math("- y\n# z")), Markdown.parse("$$\n- y\n# z\n$$"))
+    }
+
+    @Test
+    fun unbalancedDollarsStayText() {
+        assertEquals(listOf(para(MdSpan.Text("a \$x b"))), Markdown.parse("a \$x b"))
+        assertEquals(listOf(para(MdSpan.Text("$$\n\\frac{a}{b}"))), Markdown.parse("$$\n\\frac{a}{b}"))
+        assertEquals(listOf(para(MdSpan.Text("$$\\frac{a}{b}"))), Markdown.parse("$$\\frac{a}{b}", streaming = true))
+        assertEquals(listOf(para(MdSpan.Text("(x"))), Markdown.parse("\\(x"))
+        assertEquals(listOf(para(MdSpan.Text("\$a\nb$"))), Markdown.parse("\$a\nb$"))
+    }
+
+    @Test
+    fun manyDollarsAndBackslashesParseInLinearTime() {
+        val n = 200_000
+        val inputs = listOf("\$a ".repeat(n / 3), "\\".repeat(n), "\\(".repeat(n / 2), "$$\n".repeat(n / 3), "$\$a\n".repeat(n / 3), "\\[a\n".repeat(n / 3), "*a\\*".repeat(n / 4))
+        val start = System.nanoTime()
+        for (s in inputs) Markdown.parse(s)
+        assertTrue("took too long", System.nanoTime() - start < 5_000_000_000L)
     }
 }

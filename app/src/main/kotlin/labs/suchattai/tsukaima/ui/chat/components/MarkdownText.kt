@@ -56,18 +56,22 @@ import labs.suchattai.tsukaima.ui.theme.tsukaima
 
 private const val CaretId = "caret"
 
-private fun AnnotatedString.Builder.appendSpans(spans: List<MdSpan>, colors: TsukaimaColors) {
+private fun codeStyle(colors: TsukaimaColors) = SpanStyle(
+    fontFamily = TsukaimaType.mono.fontFamily,
+    fontSize = TsukaimaType.mono.fontSize,
+    background = colors.surfaceSunken,
+)
+
+private fun AnnotatedString.Builder.appendSpans(spans: List<MdSpan>, colors: TsukaimaColors, math: Set<String>) {
     for (span in spans) when (span) {
         is MdSpan.Text -> append(span.s)
         is MdSpan.Bold -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(span.s) }
         is MdSpan.Italic -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(span.s) }
-        is MdSpan.Code -> withStyle(
-            SpanStyle(
-                fontFamily = TsukaimaType.mono.fontFamily,
-                fontSize = TsukaimaType.mono.fontSize,
-                background = colors.surfaceSunken,
-            ),
-        ) { append(span.s) }
+        is MdSpan.Code -> withStyle(codeStyle(colors)) { append(span.s) }
+        is MdSpan.Math -> {
+            val id = mathId(span.tex)
+            if (id in math) appendInlineContent(id, span.tex) else withStyle(codeStyle(colors)) { append(span.tex) }
+        }
         is MdSpan.Strike -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough, color = colors.ink2)) { append(span.s) }
         is MdSpan.Link -> withLink(
             LinkAnnotation.Url(
@@ -89,21 +93,51 @@ private fun AnnotatedString.Builder.appendSpans(spans: List<MdSpan>, colors: Tsu
     }
 }
 
-/** [spans] styled for a `Text`: links are tappable [LinkAnnotation.Url]s that open the browser. */
-internal fun markdownInline(spans: List<MdSpan>, colors: TsukaimaColors, caret: Boolean = false): AnnotatedString =
+/**
+ * [spans] styled for a `Text`: links are tappable [LinkAnnotation.Url]s that open the browser. A math span whose
+ * [mathId] is in [math] is an inline image (the `Text` gets its [rememberMathContent]); any other shows its TeX as code.
+ */
+internal fun markdownInline(
+    spans: List<MdSpan>,
+    colors: TsukaimaColors,
+    caret: Boolean = false,
+    math: Set<String> = emptySet(),
+): AnnotatedString =
     buildAnnotatedString {
-        appendSpans(spans, colors)
+        appendSpans(spans, colors, math)
         if (caret) appendInlineContent(CaretId, "|")
     }
 
 /** [markdownInline], rebuilt only when its input changes (not on every caret blink or parent recomposition). */
 @Composable
-private fun rememberInline(spans: List<MdSpan>, colors: TsukaimaColors, caret: Boolean): AnnotatedString =
-    remember(spans, colors, caret) { markdownInline(spans, colors, caret) }
+private fun rememberInline(spans: List<MdSpan>, colors: TsukaimaColors, caret: Boolean, math: Set<String>): AnnotatedString =
+    remember(spans, colors, caret, math) { markdownInline(spans, colors, caret, math) }
+
+/**
+ * [spans] as a `Text` in [style]: the annotated string and its inline content (the caret and any drawn formulas).
+ */
+@Composable
+private fun InlineText(
+    spans: List<MdSpan>,
+    style: TextStyle,
+    caret: Boolean,
+    caretContent: Map<String, InlineTextContent>,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.tsukaima
+    val math = rememberMathContent(spans, style, colors.ink1)
+    Text(
+        text = rememberInline(spans, colors, caret, math.keys),
+        style = style,
+        color = colors.ink1,
+        inlineContent = if (math.isEmpty()) caretContent else caretContent + math,
+        modifier = modifier,
+    )
+}
 
 /**
  * Renders parsed markdown blocks; `MEDIA:` blocks become [MediaCard]s and whole-line images [ImageCard]s, both
- * served by [media], and tables [MarkdownTable]s. With [streaming], a blinking accent caret is appended inline to
+ * served by [media], tables [MarkdownTable]s and display math [MathBlock]s. With [streaming], a blinking accent caret is appended inline to
  * the last text run (so it follows wrapping) of a trailing paragraph, list or heading; after any other trailing
  * block (code, table, quote, rule, file card, image), or when empty, it sits on its own line.
  */
@@ -123,17 +157,12 @@ fun MarkdownText(
         blocks.forEachIndexed { index, block ->
             val caret = caretInline && index == blocks.lastIndex
             when (block) {
-                is MdBlock.Paragraph -> Text(
-                    text = rememberInline(block.spans, colors, caret),
-                    style = TsukaimaType.body,
-                    color = colors.ink1,
-                    inlineContent = caretContent,
-                )
-                is MdBlock.Heading -> Text(
-                    text = rememberInline(block.spans, colors, caret),
+                is MdBlock.Paragraph -> InlineText(block.spans, TsukaimaType.body, caret, caretContent)
+                is MdBlock.Heading -> InlineText(
+                    spans = block.spans,
                     style = headingStyle(block.level),
-                    color = colors.ink1,
-                    inlineContent = caretContent,
+                    caret = caret,
+                    caretContent = caretContent,
                     modifier = if (index > 0) Modifier.padding(top = 4.dp) else Modifier,
                 )
                 is MdBlock.Code -> CodeBlock(code = block.code, lang = block.lang)
@@ -142,6 +171,7 @@ fun MarkdownText(
                 is MdBlock.Bullets -> MarkdownList(block.items, caret, caretContent)
                 is MdBlock.Numbered -> MarkdownList(block.items, caret, caretContent)
                 is MdBlock.Table -> MarkdownTable(block)
+                is MdBlock.Math -> MathBlock(block.tex)
                 is MdBlock.Quote -> MarkdownText(
                     blocks = block.blocks,
                     media = media,
@@ -178,7 +208,8 @@ private fun headingStyle(level: Int): TextStyle = when (level) {
 
 /**
  * A bullet or numbered list: numbers right-aligned in a two-digit column, bullets `•` / `◦` / `▪` by depth, each
- * nesting level 16dp further in. The caret, if any, follows the last item.
+ * nesting level 16dp further in. A task item shows `☐` / `☑` in place of its bullet (after its number when
+ * numbered). The caret, if any, follows the last item.
  */
 @Composable
 private fun MarkdownList(items: List<MdListItem>, caret: Boolean, caretContent: Map<String, InlineTextContent>) {
@@ -193,6 +224,7 @@ private fun MarkdownList(items: List<MdListItem>, caret: Boolean, caretContent: 
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 val number = item.number
+                val box = item.checked?.let { if (it) "☑" else "☐" }
                 if (number != null) {
                     Text(
                         "$number.",
@@ -203,15 +235,16 @@ private fun MarkdownList(items: List<MdListItem>, caret: Boolean, caretContent: 
                         softWrap = false,
                         modifier = Modifier.widthIn(min = numberColumn),
                     )
-                } else {
+                } else if (box == null) {
                     val glyph = when (item.depth) { 0 -> "•"; 1 -> "◦"; else -> "▪" }
                     Text(glyph, style = TsukaimaType.body, color = colors.ink2)
                 }
-                Text(
-                    text = rememberInline(item.spans, colors, caret && i == items.lastIndex),
+                if (box != null) Text(box, style = TsukaimaType.body, color = colors.ink2)
+                InlineText(
+                    spans = item.spans,
                     style = TsukaimaType.body,
-                    color = colors.ink1,
-                    inlineContent = caretContent,
+                    caret = caret && i == items.lastIndex,
+                    caretContent = caretContent,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -270,6 +303,12 @@ private const val RichMd = "## Services\n\n| Service | State | Uptime |\n|:--|:-
     "### Next steps\n\n1. Restart the bridge\n   - check `journalctl -u matrix-bridge`\n     - look for sync errors\n2. ~~Reboot the host~~ not needed\n\n" +
     "> The watchdog restarted it at 03:12.\n> - once\n\n---\n\nDocs: [Hermes guide](https://example.com/hermes) or https://example.com/status."
 
+private const val MathMd = "The roots of \$ax^2 + bx + c = 0\$ are\n\n" +
+    "$$\nx = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}\n$$\n\n" +
+    "- [x] derive \\(\\Delta = b^2 - 4ac\\)\n- [ ] check \$\\Delta < 0\$\n- [ ] costs \$5 and \$10, not math\n\n" +
+    "$$\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2} \\quad \\int_0^\\infty e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}$$\n\n" +
+    "Broken: \$\\frac{1}{\$"
+
 @Composable
 private fun MarkdownPreview(dark: Boolean) = PreviewPage(dark) {
     MarkdownText(Markdown.parse(SampleMd), modifier = Modifier.padding(16.dp))
@@ -277,6 +316,7 @@ private fun MarkdownPreview(dark: Boolean) = PreviewPage(dark) {
     MarkdownText(Markdown.parse("| a | b |\n|---|---|\n| 1 | 2", streaming = true), streaming = true, modifier = Modifier.padding(16.dp))
     MarkdownText(Markdown.parse("Here is the log:\nMEDIA:/home/hermes/workspace/output/agent.debug.txt"), modifier = Modifier.padding(16.dp))
     MarkdownText(Markdown.parse("The chart:\n![CPU load](https://example.com/cpu.png)"), modifier = Modifier.padding(16.dp))
+    MarkdownText(Markdown.parse(MathMd), modifier = Modifier.padding(16.dp))
     MarkdownText(Markdown.parse("Streaming reply that keeps going and going until it wraps onto a second line"), streaming = true, modifier = Modifier.padding(16.dp))
 }
 

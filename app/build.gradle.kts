@@ -89,6 +89,7 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.security.crypto)
     implementation(libs.okhttp)
+    implementation(libs.jlatexmath.android)
     debugImplementation(libs.androidx.compose.ui.tooling)
     // The empty ComponentActivity that createComposeRule() launches (debug only; the release APK never has it).
     debugImplementation(libs.androidx.compose.ui.test.manifest)

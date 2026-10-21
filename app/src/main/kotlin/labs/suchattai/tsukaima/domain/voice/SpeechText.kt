@@ -14,7 +14,7 @@ object SpeechText {
     private val imageLine = Regex("^\\s*!\\[[^\\]]*]\\(\\s*<?https?://\\S+?>?(?:\\s+\"[^\"]*\")?\\s*\\)\\s*$")
     private val heading = Regex("^\\s{0,3}#{1,6}\\s+")
     private val quote = Regex("^\\s*(?:>\\s?)+")
-    private val listPrefix = Regex("^\\s*(?:[-*+]|\\d+[.)])\\s+")
+    private val listPrefix = Regex("^\\s*(?:[-*+]|\\d+[.)])\\s+(?:\\[[ xX]]\\s+)?")
     private val link = Regex("!?\\[([^\\]]*)]\\([^)]*\\)")
     private val url = Regex("https?://\\S+")
     private val inlineCode = Regex("`([^`]*)`")
@@ -23,38 +23,93 @@ object SpeechText {
     private val multiSpace = Regex(" {2,}")
     private val strike = Regex("~~(.+?)~~")
 
+    /** `\(…\)` inline math (read before escapes are hidden: `\(` is also an escaped parenthesis). */
+    private val parenMath = Regex("\\\\\\((.+?)\\\\\\)")
+    private val displayDollars = Regex("\\$\\$[^\n]+?\\$\\$")
+
+    /** `$…$` as the parser reads it: a non-space after the opener, before the closer, and no digit after it. */
+    private val inlineDollar = Regex("\\$(?=[^\\s$])[^$\n]*?(?<=[^\\s\\\\])\\$(?!\\d)")
+    private val escape = Regex("\\\\([!-/:-@\\[-`{-~])")
+
     /**
-     * Speakable text for [markdown]: fenced code blocks (an unterminated fence runs to the end)
-     * and `MEDIA:` and whole-line image lines are dropped, inline markup is reduced to its text, links keep their
-     * label, bare URLs are dropped, and blank lines disappear. A table row reads as its cells joined with ", "
+     * Speakable text for [markdown]: fenced code blocks and display math (`$$`/`\[` lines; either one unterminated
+     * runs to the end), and `MEDIA:` and whole-line image lines are dropped, inline math is dropped, inline markup is
+     * reduced to its text (task boxes and backslash escapes too), links keep their label, bare URLs are dropped, and
+     * blank lines disappear. A table row reads as its cells joined with ", "
      * (separator rows are dropped), and so are horizontal rules and setext underlines. The result is trimmed.
      */
     fun plain(markdown: String): String {
         val out = ArrayList<String>()
         var inFence = false
+        var mathCloser: String? = null
         for (raw in markdown.lines()) {
-            if (fence.containsMatchIn(raw)) {
+            if (mathCloser == null && fence.containsMatchIn(raw)) {
                 inFence = !inFence
                 continue
             }
             if (inFence || media.containsMatchIn(raw)) continue
+            val closer = mathCloser
+            if (closer != null) {
+                if (raw.trim().endsWith(closer)) mathCloser = null
+                continue
+            }
+            when (val math = displayMath(raw.trim())) {
+                DisplayMath.Line -> continue
+                is DisplayMath.Opens -> { mathCloser = math.closer; continue }
+                null -> Unit
+            }
             // The quote marker goes first, so a quoted table row or rule reads like an unquoted one.
             val line = quote.replace(raw, "")
             if (isRuleOrUnderline(line) || isTableSeparator(line) || imageLine.matches(line)) continue
             var s = tableRow(line)
             s = heading.replace(s, "")
             s = listPrefix.replace(s, "")
+            s = parenMath.replace(s, "")
+            s = hideEscapes(s)
+            s = displayDollars.replace(s, "")
+            s = inlineDollar.replace(s, "")
             s = link.replace(s) { it.groupValues[1] }
             s = url.replace(s, "")
             s = inlineCode.replace(s) { it.groupValues[1] }
             s = strong.replace(s) { it.groupValues[2] }
             s = emphasis.replace(s) { it.groupValues[2] }
             s = strike.replace(s) { it.groupValues[1] }
-            s = multiSpace.replace(s, " ").trim()
+            s = multiSpace.replace(unhideEscapes(s), " ").trim()
             if (s.isNotEmpty()) out += s
         }
         return out.joinToString("\n")
     }
+
+    /** A trimmed line's display math: a whole one-line formula, or the opener of a block that [Opens.closer] ends. */
+    private sealed interface DisplayMath {
+        data object Line : DisplayMath
+        data class Opens(val closer: String) : DisplayMath
+    }
+
+    /** Mirrors the parser: `$$`/`\[` opens; `$$a$$ and $$b$$` is inline math in a sentence, not a block. */
+    private fun displayMath(trimmed: String): DisplayMath? {
+        val (open, close) = when {
+            trimmed.startsWith("$$") -> "$$" to "$$"
+            trimmed.startsWith("\\[") -> "\\[" to "\\]"
+            else -> return null
+        }
+        val head = trimmed.substring(open.length)
+        if (!head.endsWith(close)) return DisplayMath.Opens(close)
+        val tex = head.dropLast(close.length)
+        return if (open !in tex && close !in tex) DisplayMath.Line else null
+    }
+
+    /**
+     * A backslash-escaped punctuation character becomes a private-use stand-in, so no markup pattern (or `$`)
+     * sees it; [unhideEscapes] turns the stand-ins back into the bare characters.
+     */
+    private fun hideEscapes(s: String): String = escape.replace(s) { (HIDDEN + it.groupValues[1][0].code).toChar().toString() }
+
+    private fun unhideEscapes(s: String): String =
+        if (s.none { it.code in HIDDEN until HIDDEN + 128 }) s
+        else buildString { for (c in s) append(if (c.code in HIDDEN until HIDDEN + 128) (c.code - HIDDEN).toChar() else c) }
+
+    private const val HIDDEN = 0xE000
 
     /** `---`, `***`, `___` (spaces allowed between) or a setext `===` underline: nothing to say. */
     private fun isRuleOrUnderline(line: String): Boolean {
@@ -108,11 +163,14 @@ class SentenceChunker {
         if (text.length < cursor) return out
         var i = cursor
         var inFence = false
+        var mathEnd = -1 // no boundary before this index: inside a display-math block
         while (i < text.length) {
             val c = text[i]
-            if ((i == 0 || text[i - 1] == '\n') && togglesFence(text, i)) inFence = !inFence
+            val lineStart = i == 0 || text[i - 1] == '\n'
+            if (lineStart && i >= mathEnd && togglesFence(text, i)) inFence = !inFence
+            if (lineStart && !inFence && i >= mathEnd) mathEnd = displayMathEnd(text, i)
             val end = when {
-                inFence -> -1
+                inFence || i < mathEnd -> -1
                 c == '\n' && i + 1 < text.length -> i + 1
                 c in TERMINATORS && i + 1 < text.length && text[i + 1].isWhitespace() ->
                     if (text[i + 1] == '\n') i + 2 else i + 1
@@ -141,6 +199,28 @@ class SentenceChunker {
         if (k - j < 3) return false
         val lineEnd = text.indexOf('\n', k).let { if (it < 0) text.length else it }
         return text.substring(k, lineEnd).indexOf(mark.toString().repeat(3)) < 0
+    }
+
+    /**
+     * When the line at [start] opens a multi-line display-math block (`$$` or `\[`, as in the parser), the index of
+     * the newline ending its closing line (the text's length when that line is the last); [Int.MAX_VALUE] while the
+     * closer has not arrived; -1 for any other line. The block then reaches `SpeechText.plain` whole, which drops it.
+     */
+    private fun displayMathEnd(text: String, start: Int): Int {
+        var lineEnd = text.indexOf('\n', start).let { if (it < 0) text.length else it }
+        val first = text.substring(start, lineEnd).trim()
+        val close = when {
+            first.startsWith("$$") -> "$$"
+            first.startsWith("\\[") -> "\\]"
+            else -> return -1
+        }
+        if (first.length > 2 && first.endsWith(close)) return -1 // a one-line formula (or inline math): one line anyway
+        while (lineEnd < text.length) {
+            val next = lineEnd + 1
+            lineEnd = text.indexOf('\n', next).let { if (it < 0) text.length else it }
+            if (text.substring(next, lineEnd).trim().endsWith(close)) return lineEnd
+        }
+        return Int.MAX_VALUE
     }
 
     /** Whatever is left, trimmed (null when blank); resets the chunker. */

@@ -19,6 +19,9 @@ sealed interface MdSpan {
         val italic: Boolean = false,
         val strike: Boolean = false,
     ) : MdSpan
+
+    /** Inline TeX from `$…$`, `$$…$$` or `\(…\)` inside a line, verbatim (trimmed) without its delimiters. */
+    data class Math(val tex: String) : MdSpan
 }
 
 /** Column alignment from a table's separator row (`:--`, `:-:`, `--:`). */
@@ -26,9 +29,10 @@ enum class MdAlign { Start, Center, End }
 
 /**
  * One list entry. [depth] is its nesting (0 = top, at most 3); [number] is the shown number of an ordered
- * entry and null for a bullet, so an ordered list can hold nested bullets and the other way round.
+ * entry and null for a bullet, so an ordered list can hold nested bullets and the other way round. [checked] is set
+ * for a GFM task item (`- [ ] a`, `- [x] b`), whose box is not part of [spans]; null for an ordinary item.
  */
-data class MdListItem(val spans: List<MdSpan>, val depth: Int, val number: Int? = null)
+data class MdListItem(val spans: List<MdSpan>, val depth: Int, val number: Int? = null, val checked: Boolean? = null)
 
 sealed interface MdBlock {
     data class Paragraph(val spans: List<MdSpan>) : MdBlock
@@ -61,13 +65,20 @@ sealed interface MdBlock {
 
     /** A line that is only `![alt](url)` with an `http(s)` [url]; [alt] may be empty. Inline images stay links. */
     data class Image(val alt: String, val url: String) : MdBlock
+
+    /**
+     * Display TeX: `$$…$$` or `\[…\]` starting a line and closing at the end of the same or a later line. [tex] is
+     * verbatim (no markdown inside), trimmed; an unclosed opener stays text.
+     */
+    data class Math(val tex: String) : MdBlock
 }
 
 /**
  * The markdown agents emit: fenced code, GFM pipe tables, ATX and setext headings, bullet and numbered lists
- * (nested), block quotes, rules, paragraphs, whole-line `http(s)` images; inline bold, italic, code, strikethrough
- * and links (see [MarkdownInline]); plus Hermes `MEDIA:` file deliveries. Line-based and linear, since a streaming reply is
- * re-parsed on every delta; a half-typed construct reads as text until it is complete enough. Never throws.
+ * (nested, GFM task items), block quotes, rules, paragraphs, whole-line `http(s)` images, display math; inline
+ * bold, italic, code, strikethrough, links, math and backslash escapes (see [MarkdownInline]); plus Hermes `MEDIA:`
+ * file deliveries. Line-based and linear, since a streaming reply is re-parsed on every delta; a half-typed construct
+ * reads as text until it is complete enough. Never throws.
  */
 object Markdown {
     /**
@@ -84,6 +95,7 @@ object Markdown {
         val blocks = mutableListOf<MdBlock>()
         val para = mutableListOf<String>()
         var list: ListBuilder? = null
+        val unclosedMath = HashMap<String, Int>(2)
 
         fun flushPara() {
             if (para.isNotEmpty()) {
@@ -119,6 +131,9 @@ object Markdown {
                 continue
             }
             if (trimmed.isEmpty()) { flush(); i++; continue }
+
+            val math = displayMath(lines, i, unclosedMath)
+            if (math != null) { flush(); blocks += math.first; i = math.second; continue }
 
             val media = if (streaming && i == lines.lastIndex) null else mediaPath(trimmed)
             if (media != null) { flush(); blocks += MdBlock.Media(media); i++; continue }
@@ -215,6 +230,46 @@ object Markdown {
         return w
     }
 
+    /**
+     * The display math starting at `lines[start]` and the index of the line after it, or null. The opener (`$$` or
+     * `\[`) begins the trimmed line; the closer (`$$` or `\]`) ends the trimmed line, on this line or a later one. A
+     * one-line `$$a$$ and $$b$$` is no block (inline math in a paragraph). Without a closer, nothing is one. A scan
+     * that reaches the end is remembered in [unclosedFrom] (per closer), so later openers fail at once and many
+     * unclosed openers stay linear.
+     */
+    private fun displayMath(lines: List<String>, start: Int, unclosedFrom: MutableMap<String, Int>): Pair<MdBlock.Math, Int>? {
+        val first = lines[start].trim()
+        val (open, close) = when {
+            first.startsWith("$$") -> "$$" to "$$"
+            first.startsWith("\\[") -> "\\[" to "\\]"
+            else -> return null
+        }
+        val head = first.substring(open.length)
+        if (head.endsWith(close)) {
+            val tex = head.dropLast(close.length)
+            // `$$a$$ b $$c$$` and a bare `$$` are not one-line blocks; a bare `$$` opens a multi-line one below.
+            return if (tex.isNotBlank() && open !in tex && close !in tex) MdBlock.Math(tex.trim()) to start + 1 else null
+        }
+        // An earlier opener of this kind already scanned to the end without meeting a closer: so would this one.
+        if (unclosedFrom[close]?.let { it < start } == true) return null
+        val body = StringBuilder(head)
+        var i = start + 1
+        while (i < lines.size) {
+            val t = lines[i].trim()
+            if (t.endsWith(close)) {
+                if (body.isNotEmpty()) body.append('\n')
+                body.append(t.dropLast(close.length))
+                val tex = body.toString().trim()
+                return if (tex.isEmpty()) null else MdBlock.Math(tex) to i + 1
+            }
+            if (body.isNotEmpty()) body.append('\n')
+            body.append(t)
+            i++
+        }
+        unclosedFrom[close] = start
+        return null
+    }
+
     /** `#`–`######`, a space, then the text; a closing run of `#`s after a space is dropped (`## C#` keeps its `#`). */
     private fun atxHeading(line: String): MdBlock.Heading? {
         if (indentOf(line) > 3) return null
@@ -282,6 +337,7 @@ object Markdown {
         private val texts = mutableListOf<StringBuilder>()
         private val depths = mutableListOf<Int>()
         private val numbers = mutableListOf<Int?>()
+        private val checks = mutableListOf<Boolean?>()
         private val indents = ArrayList<Int>()
         private val counters = arrayOfNulls<Int>(MAX_DEPTH + 1)
 
@@ -296,9 +352,11 @@ object Markdown {
             for (d in depth + 1..MAX_DEPTH) counters[d] = null
             val number = marker.number?.let { start -> (counters[depth]?.plus(1) ?: start) }
             counters[depth] = number
-            texts += StringBuilder(text)
+            val check = taskBox(text)
+            texts += StringBuilder(if (check == null) text else text.substring(TASK_BOX).trimStart())
             depths += depth
             numbers += number
+            checks += check
         }
 
         fun continueWith(text: String) {
@@ -306,12 +364,23 @@ object Markdown {
         }
 
         fun build(): MdBlock {
-            val items = texts.indices.map { MdListItem(MarkdownInline.parse(texts[it].toString()), depths[it], numbers[it]) }
+            val items = texts.indices.map { MdListItem(MarkdownInline.parse(texts[it].toString()), depths[it], numbers[it], checks[it]) }
             return if (ordered) MdBlock.Numbered(items) else MdBlock.Bullets(items)
+        }
+
+        /** A GFM task box opening an item's text: `[ ]` unchecked, `[x]`/`[X]` checked; whitespace and text must follow. */
+        private fun taskBox(text: String): Boolean? {
+            if (text.length <= TASK_BOX || text[0] != '[' || text[2] != ']' || !text[TASK_BOX].isWhitespace()) return null
+            return when (text[1]) {
+                ' ' -> false
+                'x', 'X' -> true
+                else -> null
+            }
         }
 
         private companion object {
             const val MAX_DEPTH = 3
+            const val TASK_BOX = 3
         }
     }
 

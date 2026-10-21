@@ -108,4 +108,24 @@ class SpeechTextTest {
         assertEquals(listOf("Next one."), c.feed("Use:\n```x``` is it. Next one. Then"))
         assertEquals(listOf("~~ not a fence.", "A."), SentenceChunker().feed("~~ not a fence. A. B"))
     }
+
+    @Test fun mathIsNotSpoken() =
+        assertEquals(
+            "The area is and the sum:\nDone.",
+            SpeechText.plain("The area is $\\pi r^2$ and the sum:\n$$\n\\sum_i x_i\n$$\nDone."),
+        )
+
+    @Test fun mathKeepsDollarAmounts() =
+        assertEquals("costs $5 and $10 today", SpeechText.plain("costs $5 and $10 today"))
+
+    @Test fun taskMarkersAreStripped() =
+        assertEquals("buy milk\nwalk dog\nfeed cat", SpeechText.plain("- [ ] buy milk\n- [x] walk dog\n1. [X] feed cat"))
+
+    @Test fun chunkerKeepsDisplayMathInOneChunk() {
+        val c = SentenceChunker()
+        assertEquals(listOf("So:"), c.feed("So:\n$$\nx = 1.\n"))
+        val chunks = c.feed("So:\n$$\nx = 1.\ny = 2\n$$\nDone.\n")
+        assertEquals(listOf("$$\nx = 1.\ny = 2\n$$", "Done."), chunks)
+        assertEquals("", SpeechText.plain(chunks[0]))
+    }
 }

@@ -2,9 +2,12 @@ package labs.suchattai.tsukaima.domain.markdown
 
 /**
  * Inline markdown for [Markdown]: code spans, `**bold**`, `*italic*` / `_italic_`, `~~strike~~`, `[text](url)`
- * links (`![alt](url)` images read as links) and bare `http(s)://` autolinks. An unbalanced marker stays literal,
- * so a half-streamed construct reads as text until it closes. Every lookahead is either memoised or bounded, so a
- * long line of unmatched markers stays linear. Never throws.
+ * links (`![alt](url)` images read as links), bare `http(s)://` autolinks, TeX math (`$…$`, `$$…$$`, `\(…\)`; see
+ * [MdSpan.Math]; `\[…\]` is display math only, a block of its own) and CommonMark backslash escapes: a backslash
+ * before ASCII punctuation emits that character literally and never opens or closes a construct (inside code spans
+ * and math it stays as typed). An unbalanced marker stays literal, so a half-streamed construct reads as text until
+ * it closes. Every lookahead is either memoised or bounded, so a long line of unmatched markers stays linear. Never
+ * throws.
  */
 internal object MarkdownInline {
     /** A link destination longer than this is not one (bounds the scan for its closing parenthesis). */
@@ -12,6 +15,9 @@ internal object MarkdownInline {
 
     /** Characters an autolink does not end with (GFM extended autolinks); `)` only when unbalanced. */
     private const val AUTOLINK_TRAILING = ".,;:!?*_~'\""
+
+    /** What a backslash escapes (CommonMark: ASCII punctuation); before anything else it is a literal backslash. */
+    private const val ESCAPABLE = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
 
     fun parse(s: String): List<MdSpan> = parse(s, emphasis = true)
 
@@ -29,7 +35,7 @@ internal object MarkdownInline {
 
         /** An emphasis span; a link or code span inside it is split out (a link keeps the emphasis via its flags). */
         fun emphasised(inner: String, wrap: (String) -> MdSpan, link: (MdSpan.Link) -> MdSpan.Link) {
-            if ('[' !in inner && '`' !in inner && "http" !in inner) { emit(wrap(inner)); return }
+            if ('[' !in inner && '`' !in inner && "http" !in inner && '\\' !in inner && '$' !in inner) { emit(wrap(inner)); return }
             for (span in parse(inner, emphasis = false)) emit(
                 when (span) {
                     is MdSpan.Text -> wrap(span.s)
@@ -47,10 +53,46 @@ internal object MarkdownInline {
             return closeBracket
         }
 
+        // Math closers: the next of each at or after a position, memoised the same way.
+        val newline = NextIndex { s.indexOf('\n', it) }
+        val dollarCloser = NextIndex { from ->
+            var k = s.indexOf('$', from)
+            while (k != -1 && !closesDollarMath(s, k)) k = s.indexOf('$', k + 1)
+            k
+        }
+        val doubleDollar = NextIndex { s.indexOf("$$", it) }
+        val parenCloser = NextIndex { s.indexOf("\\)", it) }
+
+        /** Math from [from] to the closer at [close] (no newline between, not blank), emitted; false when it is none. */
+        fun math(from: Int, close: Int): Boolean {
+            if (close < from) return false
+            val nl = newline.next(from)
+            if (nl in from until close) return false
+            val tex = s.substring(from, close).trim()
+            if (tex.isEmpty()) return false
+            emit(MdSpan.Math(tex))
+            return true
+        }
+
         var i = 0
         while (i < s.length) {
             val c = s[i]
             when {
+                c == '\\' && i + 1 < s.length && s[i + 1] == '(' -> {
+                    val j = parenCloser.next(i + 2)
+                    if (math(i + 2, j)) i = j + 2 else { lit.append('('); i += 2 }
+                }
+                c == '\\' && i + 1 < s.length && s[i + 1] in ESCAPABLE -> { lit.append(s[i + 1]); i += 2 }
+                c == '$' && s.startsWith("$$", i) -> {
+                    val j = doubleDollar.next(i + 2)
+                    if (math(i + 2, j)) i = j + 2 else { lit.append("$$"); i += 2 }
+                }
+                c == '$' -> {
+                    // `$5 and $10`: the opener needs a non-space after it, the closer a non-space before it and no digit after.
+                    val opens = i + 1 < s.length && !s[i + 1].isWhitespace()
+                    val j = if (opens) dollarCloser.next(i + 1) else -1
+                    if (j > i + 1 && math(i + 1, j)) i = j + 1 else { lit.append(c); i++ }
+                }
                 c == '`' -> {
                     // A code span opens and closes with backtick runs of the same length (`a`, ``a`b``, ```a```).
                     val run = backtickRun(s, i)
@@ -82,23 +124,23 @@ internal object MarkdownInline {
                 }
                 !emphasis && (c == '~' || c == '*' || c == '_') -> { lit.append(c); i++ }
                 c == '~' && s.startsWith("~~", i) -> {
-                    val j = s.indexOf("~~", i + 2)
+                    val j = unescapedIndexOf(s, "~~", i + 2)
                     if (j > i + 2) { emphasised(s.substring(i + 2, j), MdSpan::Strike) { it.copy(strike = true) }; i = j + 2 }
                     else { lit.append("~~"); i += 2 }
                 }
                 c == '*' && s.startsWith("**", i) -> {
-                    val j = s.indexOf("**", i + 2)
+                    val j = unescapedIndexOf(s, "**", i + 2)
                     if (j > i + 2) { emphasised(s.substring(i + 2, j), MdSpan::Bold) { it.copy(bold = true) }; i = j + 2 }
                     else { lit.append("**"); i += 2 }
                 }
                 c == '*' -> {
-                    val j = s.indexOf('*', i + 1)
-                    if (j > i + 1 && !s[i + 1].isWhitespace()) { emphasised(s.substring(i + 1, j), MdSpan::Italic) { it.copy(italic = true) }; i = j + 1 }
+                    val j = if (i + 1 < s.length && !s[i + 1].isWhitespace()) unescapedIndexOf(s, "*", i + 1) else -1
+                    if (j > i + 1) { emphasised(s.substring(i + 1, j), MdSpan::Italic) { it.copy(italic = true) }; i = j + 1 }
                     else { lit.append(c); i++ }
                 }
                 c == '_' && (i == 0 || !s[i - 1].isLetterOrDigit()) -> {
-                    var j = s.indexOf('_', i + 1)
-                    while (j != -1 && j + 1 < s.length && s[j + 1].isLetterOrDigit()) j = s.indexOf('_', j + 1)
+                    var j = unescapedIndexOf(s, "_", i + 1)
+                    while (j != -1 && j + 1 < s.length && s[j + 1].isLetterOrDigit()) j = unescapedIndexOf(s, "_", j + 1)
                     if (j > i + 1 && !s[i + 1].isWhitespace()) { emphasised(s.substring(i + 1, j), MdSpan::Italic) { it.copy(italic = true) }; i = j + 1 }
                     else { lit.append(c); i++ }
                 }
@@ -170,8 +212,42 @@ internal object MarkdownInline {
                 is MdSpan.Code -> span.s
                 is MdSpan.Strike -> span.s
                 is MdSpan.Link -> span.text
+                is MdSpan.Math -> span.tex
             },
         )
+    }
+
+    /** The next match at or after a position; positions only grow, so one cached answer serves until passed. */
+    private class NextIndex(private val find: (Int) -> Int) {
+        private var cached = -2
+
+        fun next(from: Int): Int {
+            if (cached == -1 || cached >= from) return cached
+            cached = find(from)
+            return cached
+        }
+    }
+
+    /**
+     * Whether the `$` at [k] may close inline math: a non-space before it (and not a backslash: `\$` is a dollar
+     * inside the TeX), no digit after it (`$5 and $10`).
+     */
+    private fun closesDollarMath(s: String, k: Int): Boolean =
+        k > 0 && !s[k - 1].isWhitespace() && s[k - 1] != '\\' && (k + 1 >= s.length || !s[k + 1].isDigit())
+
+    /** Index of [target] at or after [from] whose first character is not backslash-escaped, or -1. */
+    private fun unescapedIndexOf(s: String, target: String, from: Int): Int {
+        var j = s.indexOf(target, from)
+        while (j != -1 && isEscaped(s, j)) j = s.indexOf(target, j + 1)
+        return j
+    }
+
+    /** An odd run of backslashes right before [k] escapes it. */
+    private fun isEscaped(s: String, k: Int): Boolean {
+        var n = 0
+        var j = k - 1
+        while (j >= 0 && s[j] == '\\') { n++; j-- }
+        return n % 2 == 1
     }
 
     private fun backtickRun(s: String, from: Int): Int {

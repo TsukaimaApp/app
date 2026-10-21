@@ -15,6 +15,7 @@ coreKtx = "1.17.0"
 junit = "4.13.2"
 turbine = "1.2.1"
 robolectric = "4.17"
+jlatexmathAndroid = "0.2.0"
 
 [libraries]
 androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
@@ -40,6 +41,7 @@ kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-t
 turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }
 junit = { module = "junit:junit", version.ref = "junit" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
+jlatexmath-android = { module = "ru.noties:jlatexmath-android", version.ref = "jlatexmathAndroid" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

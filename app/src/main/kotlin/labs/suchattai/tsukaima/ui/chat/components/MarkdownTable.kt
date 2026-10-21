@@ -106,9 +106,12 @@ fun MarkdownTable(table: MdBlock.Table, modifier: Modifier = Modifier) {
 @Composable
 private fun TableCell(spans: List<MdSpan>, align: MdAlign?, header: Boolean) {
     val colors = MaterialTheme.tsukaima
+    val style = if (header) TsukaimaType.ui.copy(fontWeight = FontWeight.SemiBold) else TsukaimaType.ui
+    val math = rememberMathContent(spans, style, colors.ink1)
     Text(
-        text = remember(spans, colors) { markdownInline(spans, colors) },
-        style = if (header) TsukaimaType.ui.copy(fontWeight = FontWeight.SemiBold) else TsukaimaType.ui,
+        text = remember(spans, colors, math.keys) { markdownInline(spans, colors, math = math.keys) },
+        style = style,
+        inlineContent = math,
         color = colors.ink1,
         textAlign = when (align) {
             MdAlign.Center -> TextAlign.Center

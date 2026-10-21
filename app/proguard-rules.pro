@@ -25,3 +25,9 @@
 
 # Tink (androidx.security.crypto) references compile-time-only annotations
 -dontwarn com.google.errorprone.annotations.**
+
+# JLatexMath (ru.noties:jlatexmath-android, no consumer rules): MacroInfo reaches classes and methods by name
+# (Class.forName + getDeclaredMethod, e.g. NewCommandMacro.executeMacro for \newcommand), which R8 renames or
+# strips. Its fonts and XML are assets, which R8 and resource shrinking leave alone.
+-keep class org.scilab.forge.jlatexmath.** { *; }
+-keep class ru.noties.jlatexmath.** { *; }
