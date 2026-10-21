@@ -490,6 +490,44 @@ class ChatViewModelTest {
         assertEquals(listOf("notes.txt"), (vm.state.value.chat.items.last() as ChatItem.UserMessage).attachments)
     }
 
+    /** A queued send carrying an image and a file, purged by Stop (an interrupted turn end): its bubble is Not sent. */
+    private suspend fun kotlinx.coroutines.test.TestScope.stoppedQueuedSendWithAnImage(b: FakeBackend, vm: ChatViewModel): String {
+        advanceUntilIdle()
+        vm.setInput("first")
+        vm.send()
+        b.events.emit(ev("message.start", 1))
+        vm.attach(listOf(png, notes))
+        advanceUntilIdle()
+        vm.setInput("look")
+        vm.send()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.attachments.isEmpty())
+        b.events.emit(ev("message.complete", 2, """{"text":"","status":"interrupted"}"""))
+        advanceUntilIdle()
+        val failed = vm.state.value.chat.items.last() as ChatItem.UserMessage
+        assertTrue(failed.failed)
+        return failed.id
+    }
+
+    @Test
+    fun aStoppedQueuedSendDoesNotRestoreItsConsumedImage() = runTest(dispatcher) {
+        val queued = """{"status":"queued"}"""
+        for (retry in listOf(true, false)) {
+            val b = backend().apply {
+                cannedAttach()
+                transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":1}"""), obj(queued))
+            }
+            val vm = vm(b)
+            val id = stoppedQueuedSendWithAnImage(b, vm)
+            if (retry) vm.retrySend(id) else vm.dismissFailed(id)
+            advanceUntilIdle()
+            assertEquals("the server took the image with the purged send", listOf(AttachmentKind.File), vm.state.value.attachments.map { it.kind })
+            assertEquals("look", vm.state.value.input)
+            if (retry) assertEquals("Attach the images again, then send", b.toasts.last())
+            assertTrue(vm.state.value.chat.items.none { it.id == id })
+        }
+    }
+
     @Test
     fun noRewindWhileAQueuedSendWaitsBetweenTurns() = runTest(dispatcher) {
         val b = backend().apply {

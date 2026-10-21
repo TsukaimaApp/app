@@ -978,15 +978,25 @@ class ChatReducerTest {
     }
 
     @Test
-    fun aFailedTurnFailsTheQueuedEchoes() {
+    fun anErrorKeepsTheQueue() {
+        // A bare `error` (model switch, compression, agent build, …) leaves the server's queue alone: it drains next.
         val queued = ChatReducer.onSubmitAccepted(
             ChatReducer.onSubmitted(live.feed(ev("message.start", seq = 1)), "later", "u-l1", flair, queued = true),
             "u-l1", null, status = "queued",
         )
+        fun echo(s: ChatState) = s.items.first { it.id == "u-l1" } as ChatItem.UserMessage
         val failed = queued.feed(ev("error", """{"message":"boom"}""", seq = 2))
-        val echo = failed.items.first { it.id == "u-l1" } as ChatItem.UserMessage
-        assertTrue(echo.failed)
-        assertFalse(echo.queued)
+        assertTrue(echo(failed).queued)
+        assertFalse(echo(failed).failed)
+        assertTrue(failed.queuedTurnNext)
+        // The drained turn starts: the echo is sent.
+        val started = failed.feed(ev("message.start", seq = 3))
+        assertFalse(echo(started).queued)
+        assertFalse(echo(started).failed)
+        // A failed turn (`message.complete` status `error`) keeps the queue too.
+        val errored = queued.feed(ev("message.complete", """{"text":"","status":"error","error":"boom"}""", seq = 2))
+        assertTrue(echo(errored).queued)
+        assertTrue(errored.queuedTurnNext)
     }
 
     @Test
@@ -1420,6 +1430,17 @@ class ChatReducerTest {
         )
         assertTrue((s.items.first() as ChatItem.ConnectionRequest).settled)
         assertEquals(AgentStatus.Idle, s.status)
+    }
+
+    @Test
+    fun anyTurnEndSettlesAnOpenConnectionCard() {
+        // A lost settling update must not leave live buttons (or the status pinned at "Waiting for a connection").
+        val opened = live.feed(ev("message.start", seq = 1), ev("connection.request", connectionRequestJson, seq = 2))
+        val completed = opened.feed(ev("message.complete", """{"text":"done"}""", seq = 3))
+        assertTrue((completed.items.first { it is ChatItem.ConnectionRequest } as ChatItem.ConnectionRequest).settled)
+        assertEquals(AgentStatus.Idle, completed.status)
+        val stopped = opened.feed(ev("message.complete", """{"text":"","status":"interrupted"}""", seq = 3))
+        assertTrue((stopped.items.first { it is ChatItem.ConnectionRequest } as ChatItem.ConnectionRequest).settled)
     }
 
     // ---- v0.9.0: todo checklists --------------------------------------------------------------------------------

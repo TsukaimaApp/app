@@ -166,8 +166,8 @@ From the user's session-testing report (`docs/superpowers/2026-10-21-e2e-gaps-re
 5. **Backslash escapes shown literally** — CommonMark escapes for ASCII punctuation.
 6. **`vision_analyze` image never shown** — thumbnail on the tool row via `/api/media` (paths), inline `data:` or
    http(s) by the reply-image rules; tap to enlarge / load / retry.
-7. **No queueing while a turn runs** — sends mid-turn are `queued: true` ("Queued", "Send when done"); Stop and
-   error turn ends turn them into "Not sent" with Retry.
+7. **No queueing while a turn runs** — sends mid-turn are `queued: true` ("Queued", "Send when done"); Stop
+   turns them into "Not sent" with Retry; a failed turn keeps them queued.
 8. **Interrupted tool looks like an error** — amber "Interrupted" with partial output; orphan-recovery notices
    in a tool row's history result become a warning line on that tool.
 
@@ -193,8 +193,6 @@ Known gaps:
 - `display.suggested` (directory) connection cards render without rows; Continue settles them.
 - Orphan-recovery notices reach the client only for `write_file`, `patch` and `skill_manage` rows in history — the
   Hermes history projection drops other tools' content (Hermes side; source reading, unprobed).
-- Error-turn queue behaviour is unprobed: the app marks queued sends "Not sent" after an `error` turn end without
-  knowing whether the server kept its queue (a Retry could then send twice).
 - `$HOME/$USER` in prose (outside backticks) reads as math.
 - TalkBack reads raw TeX (the formula image's description is its source).
 - No Robolectric UI test for the connection card (reducer, VM and RPC paths are unit-tested).

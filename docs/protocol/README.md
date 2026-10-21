@@ -403,8 +403,11 @@ Each item says how it was established: **[live]** = probed against the test inst
   user_row_id}`).
 - **Stop purges the queue** [live]: `session.interrupt` → `{status:"interrupted"}`, the turn ends with
   `message.complete {status:"interrupted"}`, and the queued prompt never runs — but its accept-time row **stays in
-  `session.history`** (user, user (queued), assistant). The app shows such sends "Not sent" with Retry. It does the
-  same after an `error` / `turn.error` turn end, whose effect on the server queue was **not probed**. A truncation
+  `session.history`** (user, user (queued), assistant). The app shows such sends "Not sent" with Retry. Only Stop
+  purges the queue: a failed turn ends with `message.complete {status:"error"}`, and a bare `error` / `turn.error`
+  (model switch, compression, agent build, a queued prompt that failed) leaves the queue, which drains next
+  (`_drain_queued_prompt`; source reading) — the app keeps those sends "Queued". A voice barge-in (a non-queued
+  submit mid-turn) redirects the turn or queues itself behind the waiting sends without purging them. A truncation
   mid-turn is still `4009`.
 
 **Interrupted tools and orphan notices**

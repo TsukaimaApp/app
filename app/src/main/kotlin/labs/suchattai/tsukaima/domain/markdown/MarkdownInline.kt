@@ -6,8 +6,7 @@ package labs.suchattai.tsukaima.domain.markdown
  * [MdSpan.Math]; `\[…\]` is display math only, a block of its own) and CommonMark backslash escapes: a backslash
  * before ASCII punctuation emits that character literally and never opens or closes a construct (inside code spans
  * and math it stays as typed). An unbalanced marker stays literal, so a half-streamed construct reads as text until
- * it closes. Every lookahead is either memoised or bounded, so a long line of unmatched markers stays linear. Never
- * throws.
+ * it closes. Never throws.
  */
 internal object MarkdownInline {
     /** A link destination longer than this is not one (bounds the scan for its closing parenthesis). */
@@ -139,6 +138,8 @@ internal object MarkdownInline {
                     else { lit.append(c); i++ }
                 }
                 c == '_' && (i == 0 || !s[i - 1].isLetterOrDigit()) -> {
+                    // TODO: this closer scan is neither memoised nor bounded: a long line of unmatched intraword `_`
+                    //  markers is quadratic. Memoise the next word-boundary `_` like the other closers.
                     var j = unescapedIndexOf(s, "_", i + 1)
                     while (j != -1 && j + 1 < s.length && s[j + 1].isLetterOrDigit()) j = unescapedIndexOf(s, "_", j + 1)
                     if (j > i + 1 && !s[i + 1].isWhitespace()) { emphasised(s.substring(i + 1, j), MdSpan::Italic) { it.copy(italic = true) }; i = j + 1 }

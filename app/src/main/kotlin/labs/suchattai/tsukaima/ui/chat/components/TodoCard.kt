@@ -43,6 +43,9 @@ internal const val TODO_COLLAPSE_ABOVE = 6
 /** Indent per subtask level. */
 private val TODO_INDENT = 16.dp
 
+/** Deeper subtasks indent no further, so a deep tree keeps room for its text. */
+private const val MAX_TODO_DEPTH = 4
+
 /** One checklist row: [entry] at nesting [depth] (0 = top level). */
 internal data class TodoRow(val entry: TodoEntry, val depth: Int)
 
@@ -133,7 +136,7 @@ private fun TodoLine(row: TodoRow) {
     val muted = status == TodoStatus.Completed || status == TodoStatus.Cancelled
     Row(
         modifier = Modifier
-            .padding(start = TODO_INDENT * row.depth)
+            .padding(start = TODO_INDENT * row.depth.coerceAtMost(MAX_TODO_DEPTH))
             .fillMaxWidth()
             .semantics(mergeDescendants = true) {},
         horizontalArrangement = Arrangement.spacedBy(8.dp),

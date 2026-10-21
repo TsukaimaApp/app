@@ -21,7 +21,6 @@ import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.voice.DataUrl
 import java.io.IOException
 import java.security.MessageDigest
-import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 enum class MediaKind { Image, Video, Audio, Document, Archive, Other }
@@ -100,13 +99,20 @@ sealed interface ToolImageSource {
          * path is on the server; anything else (another scheme, a relative path, blank) is null.
          */
         fun of(raw: String): ToolImageSource? {
-            val value = raw.trim()
-            val lower = value.lowercase(Locale.ROOT)
-            val path = if (lower.startsWith(FILE_SCHEME)) value.substring(FILE_SCHEME.length) else value
+            // Classified by prefix in place: an inline image can be megabytes, and this runs on the main thread.
+            var start = 0
+            while (start < raw.length && raw[start].isWhitespace()) start++
+            fun has(prefix: String, at: Int = start) = raw.regionMatches(at, prefix, 0, prefix.length, ignoreCase = true)
+            fun value(from: Int = start): String {
+                var end = raw.length
+                while (end > from && raw[end - 1].isWhitespace()) end--
+                return if (from == 0 && end == raw.length) raw else raw.substring(from, end)
+            }
+            val pathAt = if (has(FILE_SCHEME)) start + FILE_SCHEME.length else start
             return when {
-                lower.startsWith("http://") || lower.startsWith("https://") -> Web(value)
-                lower.startsWith("data:") -> Inline(value)
-                path.startsWith("/") || path.startsWith("~/") -> Local(path)
+                has("http://") || has("https://") -> Web(value())
+                has("data:") -> Inline(value())
+                has("/", pathAt) || has("~/", pathAt) -> Local(value(pathAt))
                 else -> null
             }
         }

@@ -69,7 +69,8 @@ enum class ComposerAction { Voice, Send, Stop, StopAndSendWhenDone, SendWhenDone
  * Send when done ([ComposerAction.StopAndSendWhenDone]) once there is something to send (text or attachments);
  * while the turn is otherwise [turnLive] (paused on an approval, question or prompt) a message to send is
  * [ComposerAction.SendWhenDone] (queued behind it); [ComposerAction.Voice] when it is enabled, voice is
- * [voiceAvailable] and there is nothing to send; otherwise [ComposerAction.Send].
+ * [voiceAvailable] and there is nothing to send; otherwise [ComposerAction.Send]. While [editing] a sent message
+ * nothing is queued (an edit waits for the turn to end): Stop alone while it runs, else the plain Send.
  */
 fun composerAction(
     value: String,
@@ -78,9 +79,10 @@ fun composerAction(
     running: Boolean,
     voiceAvailable: Boolean,
     turnLive: Boolean = running,
+    editing: Boolean = false,
 ): ComposerAction = when {
-    running && enabled -> if (value.isBlank() && !hasAttachments) ComposerAction.Stop else ComposerAction.StopAndSendWhenDone
-    turnLive && enabled && (value.isNotBlank() || hasAttachments) -> ComposerAction.SendWhenDone
+    running && enabled -> if ((value.isBlank() && !hasAttachments) || editing) ComposerAction.Stop else ComposerAction.StopAndSendWhenDone
+    turnLive && enabled && !editing && (value.isNotBlank() || hasAttachments) -> ComposerAction.SendWhenDone
     enabled && voiceAvailable && value.isBlank() && !hasAttachments -> ComposerAction.Voice
     else -> ComposerAction.Send
 }
@@ -187,7 +189,7 @@ fun Composer(
                     }
                 },
             )
-            when (composerAction(value, attachments.isNotEmpty(), enabled, running, voiceAvailable = onVoice != null, turnLive = turnLive)) {
+            when (composerAction(value, attachments.isNotEmpty(), enabled, running, voiceAvailable = onVoice != null, turnLive = turnLive, editing = editCaption != null)) {
                 ComposerAction.Stop ->
                     IconButton44(IconName.Stop, "Stop", onClick = onStop, filled = true, tone = Tone.Danger)
                 ComposerAction.StopAndSendWhenDone -> {

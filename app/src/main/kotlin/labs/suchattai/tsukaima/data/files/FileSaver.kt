@@ -69,9 +69,14 @@ fun viewFile(context: Context, uri: String, mime: String): Boolean {
     }
 }
 
-/** Opens web page [url] in the browser (a new task); false when nothing handles it. */
+/**
+ * Opens web page [url] in the browser (a new task); false when nothing handles it. The URL is server-controlled, so
+ * only browsable activities may take it ([Intent.CATEGORY_BROWSABLE]).
+ */
 fun viewUrl(context: Context, url: String): Boolean = try {
-    context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    context.startActivity(
+        Intent(Intent.ACTION_VIEW, url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+    )
     true
 } catch (_: ActivityNotFoundException) {
     false

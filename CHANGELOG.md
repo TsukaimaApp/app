@@ -31,8 +31,9 @@ release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers
 - A command you stopped shows "Interrupted" (amber) with its partial output instead of "Failed"; a tool still running
   when you press Stop ends Interrupted too. In a reopened chat, a file edit or skill change Hermes reports as
   interrupted is marked "May have partially run — check before retrying" or "Did not complete".
-- Stop (or interrupting a spoken reply, or a failed turn) no longer leaves queued messages looking sent: they show
-  "Not sent" with Retry.
+- Stop no longer leaves queued messages looking sent: Hermes drops them, so they show "Not sent" with Retry (their
+  images and PDFs went with them — attach those again). A failed turn or interrupting a spoken reply keeps them
+  queued, and they run next.
 
 ### Security
 - TeX that loads files, defines macros or changes global renderer state (`\includegraphics`, `\input`,

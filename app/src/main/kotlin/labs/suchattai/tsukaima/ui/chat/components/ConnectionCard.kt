@@ -45,8 +45,8 @@ import labs.suchattai.tsukaima.ui.theme.tsukaima
  *
  * An unresolved row offers "Connect" and "Skip". Connect opens the target's link in the browser when it has one
  * ([onOpen]); otherwise it approves the row ([onAnswer]), with the values of its `required_env` fields (masked when
- * secret, prefilled with the default) once every required one is filled. The footer offers "Skip all" and "Continue"
- * (end the operation now). At or past the deadline every button is off. Rows move only with the server's frames;
+ * secret, prefilled with the default; a blank optional one is left out) once every required one is filled. The
+ * footer offers "Skip all" and "Continue" (end the operation now). At or past the deadline every button is off. Rows move only with the server's frames;
  * once settled the card collapses to one line. Field values live only in this composition (`remember`, never the
  * saved-state bundle). Agent-reachable text is revealed through [CommandText.reveal].
  */
@@ -142,7 +142,10 @@ private fun TargetRow(
                     when {
                         target.connectUrl != null -> onOpen(target.name)
                         target.requiredEnv.isNotEmpty() -> onAnswer(
-                            ConnectionAnswers.approve(target.name, target.requiredEnv.associate { it.name to value(it) }),
+                            ConnectionAnswers.approve(
+                                target.name,
+                                target.requiredEnv.filter { it.required || value(it).isNotBlank() }.associate { it.name to value(it) },
+                            ),
                         )
                         else -> onAnswer(ConnectionAnswers.approve(target.name))
                     }

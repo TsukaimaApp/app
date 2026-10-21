@@ -194,6 +194,25 @@ class ChatMediaTest {
     }
 
     @Test
+    fun toolImageSourceOfALargeUrlMakesNoCopy() {
+        // Classified on the main thread: a multi-megabyte inline image must not be lowercased or trimmed whole.
+        val big = "DATA:image/png;base64," + "A".repeat(8 shl 20)
+        // The JVM's per-thread allocation counter (not on the Android compile classpath, hence reflection).
+        val threads = Class.forName("java.lang.management.ManagementFactory").getMethod("getThreadMXBean").invoke(null)
+        val counter = Class.forName("com.sun.management.ThreadMXBean").getMethod("getThreadAllocatedBytes", Long::class.javaPrimitiveType)
+        @Suppress("DEPRECATION") val id = Thread.currentThread().id
+        fun allocatedSoFar() = counter.invoke(threads, id) as Long
+        ToolImageSource.of("data:x") // warm up class loading
+        val before = allocatedSoFar()
+        val source = ToolImageSource.of(big)
+        val allocated = allocatedSoFar() - before
+        assertTrue(source is ToolImageSource.Inline)
+        assertTrue("allocated $allocated bytes", allocated < (1L shl 20))
+        assertEquals(ToolImageSource.Web("HTTPS://x.example/a.png"), ToolImageSource.of(" \tHTTPS://x.example/a.png \n"))
+        assertEquals(ToolImageSource.Local("/a.png"), ToolImageSource.of("  FILE:///a.png"))
+    }
+
+    @Test
     fun localMediaIsFetchedThroughTheMediaRoute() = runTest {
         val b = Backend()
         val h = Harness(this, b)

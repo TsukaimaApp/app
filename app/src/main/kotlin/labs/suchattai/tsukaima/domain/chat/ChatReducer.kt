@@ -313,27 +313,30 @@ object ChatReducer {
 
     /**
      * Queued sends (`prompt.submit {queued: true}`) run one per turn after the live one: when a turn ends with echoes
-     * waiting, the next turn's first event ([QUEUED_TURN_STARTS]) is the oldest echo's ([startQueuedTurn]). An
-     * interrupted turn (Stop, a voice barge-in: `message.complete` status `interrupted`) purges the server's queue, so
-     * the waiting messages never run: their echoes turn failed ("Not sent", Retry). A failed turn (`error`) is treated
-     * the same way, as the queue's fate is not reported. A tool of this turn still running when it is interrupted (its
-     * `tool.complete` never came) is [ToolStatus.Interrupted]; an error turn end has already failed it ([abortTurn]).
+     * waiting, the next turn's first event ([QUEUED_TURN_STARTS]) is the oldest echo's ([startQueuedTurn]). Only an
+     * interrupted turn end (Stop: `message.complete` status `interrupted`) purges the server's queue, so the waiting
+     * messages never run: their echoes turn failed ("Not sent", Retry). Any other end keeps them queued — a failed
+     * turn (`message.complete` status `error`) and a bare `error` (model switch, compression, agent build, …) are
+     * followed by the queue's drain. A tool of this turn still running when it is interrupted (its `tool.complete`
+     * never came) is [ToolStatus.Interrupted]; an error turn end has already failed it ([abortTurn]). Every turn end
+     * settles open connection cards: the operation ended with the turn, and its settling update may have been lost.
      */
     private fun afterTurnEnd(type: String, p: JsonObject, s: ChatState): ChatState {
         if (type !in TURN_ENDS) return s
-        if (type != "message.complete" || p.string("status") == "interrupted") {
+        val items = s.items.map { if (it is ChatItem.ConnectionRequest && !it.settled) it.copy(settled = true) else it }
+        if (type == "message.complete" && p.string("status") == "interrupted") {
             // The live turn starts after the last user message that is not a queued echo (those wait at the bottom).
-            val turnStart = s.items.indexOfLast { it is ChatItem.UserMessage && !it.queued } + 1
-            val items = s.items.mapIndexed { i, it ->
+            val turnStart = items.indexOfLast { it is ChatItem.UserMessage && !it.queued } + 1
+            val purged = items.mapIndexed { i, it ->
                 when {
                     it is ChatItem.UserMessage && it.queued -> it.copy(queued = false, failed = true)
                     it is ChatItem.ToolCall && it.status == ToolStatus.Running && i >= turnStart -> it.copy(status = ToolStatus.Interrupted)
                     else -> it
                 }
             }
-            return s.copy(items = items, queuedTurnNext = false)
+            return s.copy(items = purged, queuedTurnNext = false)
         }
-        return s.copy(queuedTurnNext = s.items.any { it is ChatItem.UserMessage && it.queued })
+        return s.copy(items = items, queuedTurnNext = items.any { it is ChatItem.UserMessage && it.queued })
     }
 
     /** The turn that just started is the oldest queued echo's: it is sent now and its reply lands below it. */

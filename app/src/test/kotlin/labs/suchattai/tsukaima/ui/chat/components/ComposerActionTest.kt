@@ -17,5 +17,9 @@ class ComposerActionTest {
     @Test fun runningWithAttachmentsAlsoSendsWhenDone() =
         assertEquals(ComposerAction.StopAndSendWhenDone, composerAction(" ", true, true, true, false))
     @Test fun noVoiceHandlerIsSend() = assertEquals(ComposerAction.Send, composerAction("", false, true, false, false))
+    @Test fun editingNeverSendsWhenDone() {
+        assertEquals(ComposerAction.Stop, composerAction("fixed", false, true, true, true, editing = true))
+        assertEquals(ComposerAction.Send, composerAction("fixed", false, true, false, true, turnLive = true, editing = true))
+    }
     @Test fun disabledIsSend() = assertEquals(ComposerAction.Send, composerAction("", false, false, false, true))
 }

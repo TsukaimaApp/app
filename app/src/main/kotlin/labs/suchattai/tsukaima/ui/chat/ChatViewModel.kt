@@ -368,13 +368,17 @@ class ChatViewModel(
         }
     }
 
-    /** Dismiss on a failed bubble: removes it; its text (if the composer is empty) and attachments go back to the composer. */
+    /**
+     * Dismiss on a failed bubble: removes it; its text (if the composer is empty) and attachments go back to the
+     * composer — except a purged queued send's images and PDFs, which the server consumed with it.
+     */
     fun dismissFailed(localId: String) {
+        val purged = localId in queuedSends
         val failed = failedSend(localId).also { failedSends.remove(localId); queuedSends.remove(localId) }
         setChat { c -> c.copy(items = c.items.filterNot { it.id == localId && it is ChatItem.UserMessage && it.failed }) }
         if (failed == null) return
         _state.update { if (it.input.isEmpty()) it.copy(input = failed.text) else it }
-        attachments.restore(failed.attachments)
+        attachments.restore(if (purged) failed.attachments.filterNot { it.queued } else failed.attachments)
         chat.liveSessionId?.let(attachments::onLiveSession)
     }
 
