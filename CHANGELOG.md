@@ -12,6 +12,9 @@ release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers
 - Tool rows: tapping a row open unfolds its whole command or summary instead of keeping the one-line "…" cut, and a
   row that came without a summary shows its arguments above the output. Risk and interruption notes are no longer cut
   at two lines. Subagent rows unfold their goal and detail the same way.
+- Reasoning and tool rows keep their arrival order (reasoning, tool, reasoning, tool, reply). The reasoning that led
+  to a tool call was moved below the tool each time one started, so tool rows appeared to hop above it; a loaded
+  history now shows those reasoning rows in their place too, instead of dropping them.
 
 ## 0.9.2 — 2026-10-21 (versionCode 22)
 

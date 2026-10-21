@@ -63,9 +63,10 @@ object ChatReducer {
             val id = "h-${m.rowId ?: index}"
             when (m.role) {
                 "user" -> ChatItem.UserMessage(id, m.text, rowId = m.rowId)
+                // A row with reasoning but no text is the thinking before a tool call: kept, in its place above the tool.
                 "assistant" ->
-                    if (m.text.isBlank()) null
-                    else ChatItem.AssistantMessage(id, m.text, streaming = false, reasoning = m.reasoning, rowId = m.rowId)
+                    if (m.text.isBlank() && m.reasoning.isNullOrBlank()) null
+                    else ChatItem.AssistantMessage(id, m.text, streaming = false, reasoning = m.reasoning?.takeIf { it.isNotBlank() }, rowId = m.rowId)
                 "tool" -> {
                     val note = (m.content as? JsonPrimitive)?.takeIf { it.isString }?.content?.let(::orphanNote)
                     ChatItem.ToolCall(
@@ -886,21 +887,16 @@ object ChatReducer {
 
     /**
      * The item new assistant output goes into. When the streaming bubble is blocked by a later tool
-     * or approval, it is closed and a fresh one is appended below. A blocked bubble with no text
-     * (reasoning only) is removed and its reasoning carried into the fresh one, so the live order
-     * matches history (User, Tool, Assistant) without losing the reasoning.
+     * or approval, it is closed where it is and a fresh one is appended below. A blocked bubble with
+     * no text (reasoning only) stays put as the reasoning that led to that tool: the transcript keeps
+     * arrival order (reasoning, tool, reasoning, tool, reply), as the history rows and the TUI's
+     * segments do. Moving it below the tool made every tool row appear to hop above the reasoning.
      */
     private fun ensureStreamingAssistant(s: ChatState, seq: Long?): Pair<ChatState, ChatItem.AssistantMessage> {
         liveAssistant(s.items)?.let { return s to it }
-        val stale = s.items.lastOrNull { it is ChatItem.AssistantMessage && it.streaming } as ChatItem.AssistantMessage?
-        val carried = stale?.takeIf { it.text.isEmpty() }?.reasoning
-        val remaining = if (carried != null) s.items - stale else s.items
-        val (counted, id) = nextId(s.copy(items = finalizeStreaming(remaining)), seq, "a")
-        val item = ChatItem.AssistantMessage(id, text = "", streaming = true, reasoning = carried, reasoningLive = carried != null && stale!!.reasoningLive)
-        // The reasoning moved to a new id: the user's open/closed choice for it moves along.
-        val choice = if (carried != null) s.reasoningOpen[stale!!.id] else null
-        val choices = if (choice != null) counted.reasoningOpen - stale!!.id + (id to choice) else counted.reasoningOpen
-        return counted.copy(items = counted.items + item, reasoningOpen = choices) to item
+        val (counted, id) = nextId(s.copy(items = finalizeStreaming(s.items)), seq, "a")
+        val item = ChatItem.AssistantMessage(id, text = "", streaming = true, reasoning = null)
+        return counted.copy(items = counted.items + item) to item
     }
 
     /** Whether [item]'s reasoning shows open: the user's choice, else open while it streamed in this session. */

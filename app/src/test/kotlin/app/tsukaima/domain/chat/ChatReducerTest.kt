@@ -51,19 +51,27 @@ class ChatReducerTest {
         val messages = HermesJson.decodeFromString(HistoryResult.serializer(), historyJson).messages
         val items = ChatReducer.fromHistory(messages)
 
-        assertEquals(3, items.size)
+        assertEquals(4, items.size)
         val user = items[0] as ChatItem.UserMessage
         assertEquals("what kernel is this box running?", user.text)
         assertEquals("h-1", user.id)
 
-        val tool = items[1] as ChatItem.ToolCall
+        // The reasoning that led to the tool call keeps its place above the tool row.
+        val thought = items[1] as ChatItem.AssistantMessage
+        assertEquals("", thought.text)
+        assertEquals("I should run uname -a", thought.reasoning)
+        assertFalse(thought.streaming)
+        assertEquals("h-2", thought.id)
+        assertEquals(2L, thought.rowId)
+
+        val tool = items[2] as ChatItem.ToolCall
         assertEquals("terminal", tool.name)
         assertEquals("uname -a", tool.context)
         assertEquals(ToolStatus.Done, tool.status)
         assertNull(tool.output)
         assertEquals("h-3", tool.id)
 
-        val reply = items[2] as ChatItem.AssistantMessage
+        val reply = items[3] as ChatItem.AssistantMessage
         assertTrue(reply.text.startsWith("The kernel"))
         assertFalse(reply.streaming)
         assertEquals("h-4", reply.id)
@@ -382,7 +390,7 @@ class ChatReducerTest {
     }
 
     @Test
-    fun fullTurnSequenceOrdersUserToolAssistant() {
+    fun fullTurnSequenceKeepsReasoningAboveItsTool() {
         val final = "The kernel version is **6.17.2-1-pve** on this Proxmox box."
         val s = ChatReducer.onSubmitted(live, "what kernel?", "local-1", flair).feed(
             ev("session.info", """{"model":"m","running":true}""", 1),
@@ -406,13 +414,18 @@ class ChatReducerTest {
             ev("session.info", """{"running":false}""", 14),
             ev("sessions.changed", session = ""),
         )
-        assertEquals(3, s.items.size)
+        // Arrival order, as the history rows: user, the reasoning that led to the tool, the tool, the reply.
+        assertEquals(4, s.items.size)
         assertTrue(s.items[0] is ChatItem.UserMessage)
-        assertEquals(ToolStatus.Done, (s.items[1] as ChatItem.ToolCall).status)
-        val a = s.items[2] as ChatItem.AssistantMessage
+        val thought = s.items[1] as ChatItem.AssistantMessage
+        assertEquals("", thought.text)
+        assertEquals("I should run uname.", thought.reasoning)
+        assertFalse(thought.streaming)
+        assertEquals(ToolStatus.Done, (s.items[2] as ChatItem.ToolCall).status)
+        val a = s.items[3] as ChatItem.AssistantMessage
         assertFalse(a.streaming)
         assertEquals(final, a.text)
-        assertEquals("I should run uname.", a.reasoning)
+        assertNull("the reply carries no reasoning of its own", a.reasoning)
         assertEquals(AgentStatus.Idle, s.status)
     }
 
@@ -613,18 +626,24 @@ class ChatReducerTest {
     }
 
     @Test
-    fun reasoningCarriedToANewBubbleKeepsItsOpenChoice() {
-        // Reasoning-only bubble, user closes it, then a request blocks it so the next delta opens a new bubble.
+    fun reasoningStaysAboveTheRequestThatFollowedIt() {
+        // Reasoning-only bubble, user closes it, then a request blocks it so the next delta opens a new bubble below.
         val s = live.feed(ev("message.start", seq = 1), ev("reasoning.delta", """{"text":"think"}""", 2))
         val first = s.items.single() as ChatItem.AssistantMessage
         val closed = ChatReducer.toggleReasoning(s, first.id)
         val moved = closed.feed(prompt("srq-1", "clarify", """"questions":[{"qid":"q","question":"Which?"}]"""), ev("reasoning.delta", """{"text":" more"}""", 3))
-        val carried = moved.items.filterIsInstance<ChatItem.AssistantMessage>().last()
-        assertNotEquals(first.id, carried.id)
-        assertEquals("think more", carried.reasoning)
-        assertTrue(carried.reasoningLive)
-        assertFalse("the choice followed the reasoning", ChatReducer.reasoningOpen(moved, carried))
-        assertFalse(first.id in moved.reasoningOpen)
+        assertEquals(3, moved.items.size)
+        val kept = moved.items[0] as ChatItem.AssistantMessage
+        assertEquals(first.id, kept.id)
+        assertEquals("think", kept.reasoning)
+        assertFalse("closed where it was", kept.streaming)
+        assertTrue(moved.items[1] is ChatItem.Clarify)
+        val next = moved.items[2] as ChatItem.AssistantMessage
+        assertEquals(" more", next.reasoning)
+        assertTrue(next.streaming)
+        assertTrue(next.reasoningLive)
+        assertFalse("the user's choice stays with the bubble they closed", ChatReducer.reasoningOpen(moved, kept))
+        assertTrue("a new segment streams open", ChatReducer.reasoningOpen(moved, next))
     }
 
     @Test
@@ -897,7 +916,7 @@ class ChatReducerTest {
         val messages = HermesJson.decodeFromString(HistoryResult.serializer(), historyJson).messages
         val items = ChatReducer.fromHistory(messages)
         assertEquals(1L, (items[0] as ChatItem.UserMessage).rowId)
-        assertEquals(4L, (items[2] as ChatItem.AssistantMessage).rowId)
+        assertEquals(4L, (items[3] as ChatItem.AssistantMessage).rowId)
     }
 
     @Test
