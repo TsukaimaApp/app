@@ -141,11 +141,43 @@ sealed interface ChatItem {
         val seq: Long = -1,
     ) : ChatItem
 
+    /**
+     * The agent's task checklist (`todo.updated`, or the `todos` + `revision` the todo tool's `tool.complete` mirrors):
+     * one per chat ([id] `todos`), the full snapshot of the server's revision-monotonic list. Appended where it is first
+     * seen and replaced in place afterwards; not part of the history (a resume's `todo_state` restores it).
+     */
+    data class Todos(
+        override val id: String = TODOS_ID,
+        val revision: Int,
+        val todos: List<TodoEntry>,
+    ) : ChatItem
+
     /** Placeholder "agent is working" row; replaced by the assistant message on `message.start`. */
     data class Thinking(override val id: String) : ChatItem
 }
 
 enum class SubagentStatus { Running, Done, Failed }
+
+/** The id of the chat's single [ChatItem.Todos] card. */
+const val TODOS_ID = "todos"
+
+/** One task of a [ChatItem.Todos] list; [parent] is another entry's [id] in the same snapshot (a subtask), or null. */
+data class TodoEntry(val id: String, val content: String, val status: TodoStatus, val parent: String? = null)
+
+/** A todo's state as the server names it (`pending`, `in_progress`, `completed`, `cancelled`). */
+enum class TodoStatus {
+    Pending, InProgress, Completed, Cancelled;
+
+    companion object {
+        /** An unknown or missing status reads as [Pending]. */
+        fun of(wire: String?): TodoStatus = when (wire) {
+            "in_progress" -> InProgress
+            "completed" -> Completed
+            "cancelled" -> Cancelled
+            else -> Pending
+        }
+    }
+}
 
 /** What a [ChatItem.SideNote] is: a side question (`prompt.btw`) or a background task (`prompt.background`). */
 enum class SideKind { Question, Background }

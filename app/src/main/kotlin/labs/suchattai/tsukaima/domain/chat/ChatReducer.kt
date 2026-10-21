@@ -252,6 +252,7 @@ object ChatReducer {
                 if (items.size == s.items.size) s
                 else s.copy(items = items, status = statusAfterApproval(s.status, items, flair))
             }
+            "todo.updated" -> applyTodos(s, p, authoritative = false)
             "connection.request" -> onConnectionRequest(s, p)
             "connection.update" -> onConnectionUpdate(s, p, flair)
             "btw.complete" -> onSideComplete(s, SideKind.Question, p)
@@ -392,6 +393,38 @@ object ChatReducer {
         return state.copy(items = items, status = statusAfterApproval(state.status, items, flair))
     }
 
+    /**
+     * A resume's `todo_state {todos, revision}`: the server's current list, authoritative (it replaces the card a
+     * rebuild carried over whatever its revision). Null (no list on the server, or an older Hermes) keeps the card.
+     */
+    fun onTodoState(state: ChatState, todoState: JsonObject?): ChatState =
+        if (todoState == null) state else applyTodos(state, todoState, authoritative = true)
+
+    /**
+     * A full todo snapshot `{todos[{id, content, status, parent?}], revision}`: replaces the chat's one
+     * [ChatItem.Todos] in place when its revision is at least the card's (unless [authoritative]), else appends the
+     * card at the end; an empty list removes it. A malformed snapshot (no list, a revision that is not a number)
+     * changes nothing; entries without an id are skipped.
+     */
+    private fun applyTodos(s: ChatState, p: JsonObject, authoritative: Boolean): ChatState {
+        val list = p["todos"] as? JsonArray ?: return s
+        val revisionElement = p["revision"]
+        val revision = when {
+            revisionElement == null || revisionElement is JsonNull -> 0
+            else -> (revisionElement as? JsonPrimitive)?.intOrNull ?: return s
+        }
+        val existing = s.items.firstOrNull { it is ChatItem.Todos } as? ChatItem.Todos
+        if (!authoritative && existing != null && revision < existing.revision) return s
+        val todos = list.mapNotNull { entry ->
+            val o = entry as? JsonObject ?: return@mapNotNull null
+            val id = o.string("id")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            TodoEntry(id, o.string("content").orEmpty(), TodoStatus.of(o.string("status")), o.string("parent")?.takeIf { it.isNotBlank() })
+        }
+        if (todos.isEmpty()) return if (existing == null) s else s.copy(items = s.items - existing)
+        val card = ChatItem.Todos(revision = revision, todos = todos)
+        return s.copy(items = if (existing != null) s.items.replace(existing) { card } else s.items + card)
+    }
+
     /** "Loading history…", "Loaded 42 messages", or the failure, from `session.resume_progress`. */
     private fun resumeProgressText(p: JsonObject): String? = when (p.string("status")) {
         "loading" -> "Loading history…"
@@ -516,7 +549,9 @@ object ChatReducer {
             durationS = p["duration_s"]?.primitive()?.doubleOrNull,
         )
         val items = if (existing != null) s.items.replace(existing) { done } else s.items + done
-        return s.copy(items = items, status = AgentStatus.Thinking(flair()))
+        val completed = s.copy(items = items, status = AgentStatus.Thinking(flair()))
+        // The todo tool's completion mirrors the list's snapshot at the payload's top level (as `todo.updated` does).
+        return if (p["todos"] is JsonArray) applyTodos(completed, p, authoritative = false) else completed
     }
 
     // ---- server requests ----------------------------------------------------------------------

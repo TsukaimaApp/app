@@ -335,3 +335,16 @@ All need the bearer header unless marked public. Management endpoints accept `?p
 - **RPC `connectors.operation.wake {owner, op_id}`** → `{status:"ok"}`: the browser leg of a `connect_url` came back,
   so the backend reads the account now instead of at its next watcher tick. The app sends it when the chat comes
   back to the foreground after opening the link.
+
+### v0.9.0 — todo checklists (2026-10-21, from the 0.22.2 source)
+
+- **Event `todo.updated`** `{todos[{id, content, status, parent?}], revision}` (`tui_gateway/tool_progress.py`): the
+  full snapshot after every `todo_list` (alias `todo`) call, sent regardless of `display.tool_progress`. `status` ∈
+  pending | in_progress | completed | cancelled (the app reads anything else as pending); `parent` names another
+  entry's `id`; `revision` is monotonic (the app replaces its one "Tasks" card at an equal or higher revision and
+  ignores a lower one; `todos: []` at revision ≥ 1 clears the list). The todo tool's `tool.complete` carries the same
+  `todos` + `revision` at the payload's top level; the `summary` rollup exists only in `tool.complete.result.summary`.
+- **`todo_state {todos, revision}`** is on every `session.resume` result (and `session.activate`) when the session has
+  a list (`_attach_todo_state`; omitted when it never had one — an empty list at revision 0 is not sent). There is no
+  replay event: the app seeds the card from it (authoritative), and keeps its own card through a transcript rebuild
+  when a resume carries none.

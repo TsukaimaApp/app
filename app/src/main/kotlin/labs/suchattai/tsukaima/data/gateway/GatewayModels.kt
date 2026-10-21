@@ -36,6 +36,8 @@ data class SessionResumed(
     @SerialName("open_requests") val openRequests: List<JsonObject> = emptyList(),
     /** The open connection operation (`connection.request` payload), so a client that missed the event restores its card. */
     @SerialName("pending_connection") val pendingConnection: JsonObject? = null,
+    /** The session's todo list snapshot `{todos, revision}` (absent when it never had one); restores the checklist card. */
+    @SerialName("todo_state") val todoState: JsonObject? = null,
     /** The running turn's state (`InflightTurn`): `assistant` is the reply text streamed so far. */
     val inflight: JsonObject? = null,
     /** The `session.info` snapshot (model, reasoning effort, token `usage`, …). */

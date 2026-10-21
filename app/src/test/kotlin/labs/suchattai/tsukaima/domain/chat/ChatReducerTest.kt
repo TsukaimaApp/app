@@ -1122,4 +1122,117 @@ class ChatReducerTest {
         assertTrue((s.items.first() as ChatItem.ConnectionRequest).settled)
         assertEquals(AgentStatus.Idle, s.status)
     }
+
+    // ---- v0.9.0: todo checklists --------------------------------------------------------------------------------
+
+    private fun todosJson(revision: Int, vararg entries: String) =
+        """{"todos":[${entries.joinToString(",")}],"revision":$revision}"""
+
+    private fun todo(id: String, status: String, parent: String? = null, content: String = "Task $id") =
+        """{"id":"$id","content":"$content","status":"$status"${parent?.let { ",\"parent\":\"$it\"" } ?: ""}}"""
+
+    @Test
+    fun todoUpdatedRendersAChecklist() {
+        val s = live.feed(
+            ev("message.start", seq = 1),
+            ev("tool.start", """{"tool_id":"call_t","name":"todo_list"}""", seq = 2),
+            ev(
+                "todo.updated",
+                todosJson(1, todo("1", "completed"), todo("2", "in_progress"), todo("2a", "pending", parent = "2"), todo("3", "weird")),
+                seq = 3,
+            ),
+        )
+
+        val card = s.items.last() as ChatItem.Todos
+        assertEquals(TODOS_ID, card.id)
+        assertEquals(1, card.revision)
+        assertEquals(
+            listOf(
+                TodoEntry("1", "Task 1", TodoStatus.Completed),
+                TodoEntry("2", "Task 2", TodoStatus.InProgress),
+                TodoEntry("2a", "Task 2a", TodoStatus.Pending, parent = "2"),
+                TodoEntry("3", "Task 3", TodoStatus.Pending), // an unknown status reads as pending
+            ),
+            card.todos,
+        )
+        // A newer snapshot replaces the card in place: it keeps its position below later rows.
+        val later = s.feed(
+            ev("tool.complete", """{"tool_id":"call_t","name":"todo_list","result":{}}""", seq = 4),
+            ev("message.start", seq = 5),
+            ev("todo.updated", todosJson(2, todo("1", "completed"), todo("2", "cancelled")), seq = 6),
+        )
+        assertEquals(listOf("call_t", TODOS_ID, "a-5"), later.items.map { it.id }) // the empty a-1 bubble was dropped
+        val replaced = later.items[1] as ChatItem.Todos
+        assertEquals(2, replaced.revision)
+        assertEquals(listOf(TodoStatus.Completed, TodoStatus.Cancelled), replaced.todos.map { it.status })
+        // Malformed snapshots never throw: no list is no change; an entry without an id is skipped.
+        assertEquals(later, later.feed(ev("todo.updated", """{"revision":9}""")))
+        assertEquals(later, later.feed(ev("todo.updated", """{"todos":"nope","revision":9}""")))
+        val sparse = later.feed(ev("todo.updated", """{"todos":[{"content":"x"},7,${todo("4", "pending")}],"revision":"x3"}"""))
+        assertEquals(later.items, sparse.items) // an unreadable revision is a malformed snapshot: ignored
+        val skipped = later.feed(ev("todo.updated", """{"todos":[{"content":"x"},7,${todo("4", "pending")}],"revision":3}"""))
+        assertEquals(listOf("4"), (skipped.items[1] as ChatItem.Todos).todos.map { it.id })
+    }
+
+    @Test
+    fun staleTodoRevisionIsIgnored() {
+        val s = live.feed(ev("todo.updated", todosJson(3, todo("1", "in_progress")), seq = 1))
+        val stale = s.feed(ev("todo.updated", todosJson(2, todo("1", "pending"), todo("2", "pending")), seq = 2))
+        assertEquals(s.items, stale.items)
+        // An equal revision replaces (the same snapshot, from the event and the tool row).
+        val same = s.feed(ev("todo.updated", todosJson(3, todo("1", "completed")), seq = 3))
+        assertEquals(TodoStatus.Completed, (same.items.single() as ChatItem.Todos).todos.single().status)
+    }
+
+    @Test
+    fun toolCompleteMirrorsTodos() {
+        val s = live.feed(
+            ev("tool.start", """{"tool_id":"call_t","name":"todo_list"}""", seq = 1),
+            ev(
+                "tool.complete",
+                """{"tool_id":"call_t","name":"todo_list","result":{"todos":[],"revision":1,"summary":{"total":2}},
+                    "todos":[${todo("1", "pending")},${todo("1a", "completed", parent = "1")}],"revision":1}""",
+                seq = 2,
+            ),
+        )
+        assertEquals(listOf("call_t", TODOS_ID), s.items.map { it.id })
+        assertEquals(ToolStatus.Done, (s.items.first() as ChatItem.ToolCall).status)
+        val card = s.items.last() as ChatItem.Todos
+        assertEquals(listOf("1", "1a"), card.todos.map { it.id })
+        assertEquals("1", card.todos[1].parent)
+        // The `todo.updated` that follows at the same revision keeps one card.
+        val event = s.feed(ev("todo.updated", todosJson(1, todo("1", "pending"), todo("1a", "completed", parent = "1")), seq = 3))
+        assertEquals(s.items, event.items)
+        // A tool.complete without todos (any other tool) leaves the card alone.
+        val other = event.feed(ev("tool.complete", """{"tool_id":"call_x","name":"terminal","result":{"exit_code":0}}""", seq = 4))
+        assertEquals(card, other.items.single { it is ChatItem.Todos })
+    }
+
+    @Test
+    fun emptyTodosAtRevisionOneClearsTheList() {
+        val s = live.feed(
+            ev("todo.updated", todosJson(1, todo("1", "pending")), seq = 1),
+            ev("message.start", seq = 2),
+        )
+        val cleared = s.feed(ev("todo.updated", todosJson(2), seq = 3))
+        assertTrue(cleared.items.none { it is ChatItem.Todos })
+        // The first snapshot can be the clear itself: nothing to show.
+        assertEquals(live.items, live.feed(ev("todo.updated", todosJson(1), seq = 1)).items)
+    }
+
+    @Test
+    fun resumeTodoStateSeedsTheCard() {
+        val history = ChatReducer.fromHistory(HermesJson.decodeFromString(HistoryResult.serializer(), historyJson).messages)
+        val resumed = live.copy(items = history)
+        val seeded = ChatReducer.onTodoState(resumed, obj(todosJson(4, todo("1", "in_progress"))))
+        assertEquals(history.map { it.id } + TODOS_ID, seeded.items.map { it.id })
+        assertEquals(4, (seeded.items.last() as ChatItem.Todos).revision)
+        // The snapshot is authoritative: it replaces a carried card even at a lower revision.
+        val carried = live.copy(items = history + ChatItem.Todos(revision = 6, todos = listOf(TodoEntry("9", "old", TodoStatus.Pending))))
+        val replaced = ChatReducer.onTodoState(carried, obj(todosJson(4, todo("1", "in_progress"))))
+        assertEquals(listOf("1"), (replaced.items.last() as ChatItem.Todos).todos.map { it.id })
+        // No snapshot keeps the carried card; a snapshot that cleared the list removes it.
+        assertEquals(carried, ChatReducer.onTodoState(carried, null))
+        assertTrue(ChatReducer.onTodoState(carried, obj(todosJson(7))).items.none { it is ChatItem.Todos })
+    }
 }

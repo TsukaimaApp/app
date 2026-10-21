@@ -82,6 +82,7 @@ import labs.suchattai.tsukaima.ui.chat.components.SecretCard
 import labs.suchattai.tsukaima.ui.chat.components.ConnectionCard
 import labs.suchattai.tsukaima.ui.chat.components.SideNoteCard
 import labs.suchattai.tsukaima.ui.chat.components.StatusLine
+import labs.suchattai.tsukaima.ui.chat.components.TodoCard
 import labs.suchattai.tsukaima.ui.chat.components.ToolRow
 import labs.suchattai.tsukaima.ui.chat.components.UserBubble
 import labs.suchattai.tsukaima.ui.voice.VoiceScreen
@@ -474,6 +475,7 @@ internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatAct
             onContinue = { actions.onConnectionContinue(item.opId) },
         )
         is ChatItem.SideNote -> SideNoteCard(item, media = media)
+        is ChatItem.Todos -> TodoCard(item)
         is ChatItem.Thinking -> Spacer(Modifier.height(0.dp))
     }
 }

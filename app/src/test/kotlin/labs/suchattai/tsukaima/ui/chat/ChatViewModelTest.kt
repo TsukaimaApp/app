@@ -51,6 +51,8 @@ import labs.suchattai.tsukaima.domain.chat.VaultAnswers
 import labs.suchattai.tsukaima.domain.chat.SideKind
 import labs.suchattai.tsukaima.domain.chat.StatusTone
 import labs.suchattai.tsukaima.domain.chat.running
+import labs.suchattai.tsukaima.domain.chat.TODOS_ID
+import labs.suchattai.tsukaima.domain.chat.TodoStatus
 import labs.suchattai.tsukaima.domain.chat.ToolStatus
 import labs.suchattai.tsukaima.domain.voice.FakeSpeechInput
 import labs.suchattai.tsukaima.domain.voice.FakeSpeechOutput
@@ -3026,5 +3028,30 @@ class ChatViewModelTest {
         val card = vm.state.value.chat.items.last() as ChatItem.ConnectionRequest
         assertEquals(opId, card.opId)
         assertEquals(AgentStatus.Connection, vm.state.value.status)
+    }
+
+    @Test
+    fun resumeSeedsTheTodoChecklistAndARebuildKeepsIt() = runTest(dispatcher) {
+        val todoState = """{"todos":[{"id":"1","content":"Probe the API","status":"in_progress"}],"revision":2}"""
+        val b = backend()
+        b.transport.on("session.resume", obj(resumeJson.replace("\"running\":false", "\"running\":false,\"todo_state\":$todoState")))
+        b.transport.on("session.events.since", obj("""{"events":[],"latest_seq":0,"truncated":false,"open_requests":[]}"""))
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        assertEquals(listOf("h-1", "h-2", TODOS_ID), vm.state.value.chat.items.map { it.id })
+        assertEquals(2, (vm.state.value.chat.items.last() as ChatItem.Todos).revision)
+
+        // A newer snapshot arrives live; then a new live session rebuilds from history, whose resume has no todo_state.
+        b.events.emit(ev("todo.updated", 3, """{"todos":[{"id":"1","content":"Probe the API","status":"completed"}],"revision":3}"""))
+        advanceUntilIdle()
+        b.transport.on("session.resume", obj(resumeJson.replace(live, "beef0001")))
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+        assertEquals(listOf("h-1", "h-2", TODOS_ID), vm.state.value.chat.items.map { it.id })
+        val card = vm.state.value.chat.items.last() as ChatItem.Todos
+        assertEquals(3, card.revision)
+        assertEquals(TodoStatus.Completed, card.todos.single().status)
     }
 }
