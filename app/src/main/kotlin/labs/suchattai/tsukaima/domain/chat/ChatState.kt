@@ -67,9 +67,6 @@ sealed interface ChatItem {
         val orphanNote: String? = null,
     ) : ChatItem
 
-    /** An orphan-recovery notice from the history with no tool above it in its turn: a small system line ([text]). */
-    data class ToolNotice(override val id: String, val text: String) : ChatItem
-
     /**
      * A delegated child agent (`subagent.*` events), one row per child ([id] `sub-<subagent_id>`). [detail] is its
      * latest progress line (tool preview or text), [summary] what it reported when it finished.

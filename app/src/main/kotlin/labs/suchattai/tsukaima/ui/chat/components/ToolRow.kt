@@ -141,12 +141,6 @@ fun ToolRow(
     }
 }
 
-/** A Hermes orphan-recovery notice with no tool row to sit under: a small amber system line. */
-@Composable
-fun ToolNoticeLine(item: ChatItem.ToolNotice) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = Dimens.gutter, vertical = 4.dp)) { WarnLine(item.text) }
-}
-
 /** Where a [ToolImage] is: waiting for a tap (a foreign http(s) origin), loading, shown, or unavailable. */
 private sealed interface ThumbLoad {
     data object Blocked : ThumbLoad

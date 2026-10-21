@@ -6,7 +6,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.ToolStatus
-import labs.suchattai.tsukaima.ui.chat.components.ToolNoticeLine
 import labs.suchattai.tsukaima.ui.chat.components.ToolRow
 import org.junit.Test
 
@@ -32,12 +31,5 @@ class ToolRowUiTest : ComposeUiTest() {
 
         compose.onNodeWithText("Interrupted").assertIsDisplayed()
         compose.onNodeWithText("May have partially run — check before retrying").assertIsDisplayed()
-    }
-
-    @Test
-    fun `a notice with no tool is a small line`() {
-        setThemed { ToolNoticeLine(ChatItem.ToolNotice("h-3", "Did not complete")) }
-
-        compose.onNodeWithText("Did not complete").assertIsDisplayed()
     }
 }

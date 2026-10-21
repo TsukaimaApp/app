@@ -85,7 +85,6 @@ import labs.suchattai.tsukaima.ui.chat.components.SideNoteCard
 import labs.suchattai.tsukaima.ui.chat.components.StatusLine
 import labs.suchattai.tsukaima.ui.chat.components.TodoCard
 import labs.suchattai.tsukaima.ui.chat.components.ToolRow
-import labs.suchattai.tsukaima.ui.chat.components.ToolNoticeLine
 import labs.suchattai.tsukaima.ui.chat.components.UserBubble
 import labs.suchattai.tsukaima.ui.voice.VoiceScreen
 import labs.suchattai.tsukaima.ui.voice.voiceLanguageItems
@@ -454,7 +453,6 @@ internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatAct
             )
         }
         is ChatItem.ToolCall -> ToolRow(item, media = media)
-        is ChatItem.ToolNotice -> ToolNoticeLine(item)
         is ChatItem.Subagent -> SubagentRow(item)
         is ChatItem.Approval -> ApprovalCard(
             item = item,

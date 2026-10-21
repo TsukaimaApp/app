@@ -54,46 +54,36 @@ object ChatReducer {
         }
 
     /**
-     * History rows to items. An orphan-recovery notice ([orphanNote]) is not a bubble: a tool row's own result notice
-     * marks it [ToolStatus.Interrupted]; a notice row of its own attaches to the nearest tool above it in its turn, or
-     * becomes a [ChatItem.ToolNotice] line when there is none.
+     * History rows to items. A tool row whose result `content` is a Hermes orphan-recovery notice ([orphanNote]) is
+     * [ToolStatus.Interrupted] with that note. Only a tool result can carry a notice (Hermes writes them nowhere
+     * else): a user or assistant message starting with the same text is an ordinary bubble.
      */
-    fun fromHistory(messages: List<TranscriptMessage>): List<ChatItem> {
-        val items = mutableListOf<ChatItem>()
-        messages.forEachIndexed { index, m ->
+    fun fromHistory(messages: List<TranscriptMessage>): List<ChatItem> =
+        messages.mapIndexedNotNull { index, m ->
             val id = "h-${m.rowId ?: index}"
-            if (m.role == "tool") {
-                val note = orphanNote((m.content as? JsonPrimitive)?.takeIf { it.isString }?.content ?: m.text)
-                items += ChatItem.ToolCall(
-                    id = id,
-                    name = m.name ?: "tool",
-                    context = m.context,
-                    args = m.args,
-                    status = if (note != null) ToolStatus.Interrupted else ToolStatus.Done,
-                    output = null,
-                    exitCode = null,
-                    durationS = null,
-                    imageUrl = visionImageUrl(m.name.orEmpty(), m.args),
-                    orphanNote = note,
-                )
-                return@forEachIndexed
-            }
-            val note = orphanNote(m.text)
-            if (note != null) {
-                val turnStart = items.indexOfLast { it is ChatItem.UserMessage } + 1
-                val at = items.indexOfLast { it is ChatItem.ToolCall }.takeIf { it >= turnStart }
-                if (at != null) items[at] = (items[at] as ChatItem.ToolCall).copy(status = ToolStatus.Interrupted, orphanNote = note)
-                else items += ChatItem.ToolNotice(id, note)
-                return@forEachIndexed
-            }
             when (m.role) {
-                "user" -> items += ChatItem.UserMessage(id, m.text, rowId = m.rowId)
+                "user" -> ChatItem.UserMessage(id, m.text, rowId = m.rowId)
                 "assistant" ->
-                    if (m.text.isNotBlank()) items += ChatItem.AssistantMessage(id, m.text, streaming = false, reasoning = m.reasoning, rowId = m.rowId)
+                    if (m.text.isBlank()) null
+                    else ChatItem.AssistantMessage(id, m.text, streaming = false, reasoning = m.reasoning, rowId = m.rowId)
+                "tool" -> {
+                    val note = (m.content as? JsonPrimitive)?.takeIf { it.isString }?.content?.let(::orphanNote)
+                    ChatItem.ToolCall(
+                        id = id,
+                        name = m.name ?: "tool",
+                        context = m.context,
+                        args = m.args,
+                        status = if (note != null) ToolStatus.Interrupted else ToolStatus.Done,
+                        output = null,
+                        exitCode = null,
+                        durationS = null,
+                        imageUrl = visionImageUrl(m.name.orEmpty(), m.args),
+                        orphanNote = note,
+                    )
+                }
+                else -> null
             }
         }
-        return items
-    }
 
     /**
      * The app's wording of a Hermes orphan-recovery notice (`agent/replay_cleanup.py`): an effect it calls UNKNOWN
@@ -326,16 +316,18 @@ object ChatReducer {
      * waiting, the next turn's first event ([QUEUED_TURN_STARTS]) is the oldest echo's ([startQueuedTurn]). An
      * interrupted turn (Stop, a voice barge-in: `message.complete` status `interrupted`) purges the server's queue, so
      * the waiting messages never run: their echoes turn failed ("Not sent", Retry). A failed turn (`error`) is treated
-     * the same way, as the queue's fate is not reported. A tool still running when the turn is interrupted (its
+     * the same way, as the queue's fate is not reported. A tool of this turn still running when it is interrupted (its
      * `tool.complete` never came) is [ToolStatus.Interrupted]; an error turn end has already failed it ([abortTurn]).
      */
     private fun afterTurnEnd(type: String, p: JsonObject, s: ChatState): ChatState {
         if (type !in TURN_ENDS) return s
         if (type != "message.complete" || p.string("status") == "interrupted") {
-            val items = s.items.map {
+            // The live turn starts after the last user message that is not a queued echo (those wait at the bottom).
+            val turnStart = s.items.indexOfLast { it is ChatItem.UserMessage && !it.queued } + 1
+            val items = s.items.mapIndexed { i, it ->
                 when {
                     it is ChatItem.UserMessage && it.queued -> it.copy(queued = false, failed = true)
-                    it is ChatItem.ToolCall && it.status == ToolStatus.Running -> it.copy(status = ToolStatus.Interrupted)
+                    it is ChatItem.ToolCall && it.status == ToolStatus.Running && i >= turnStart -> it.copy(status = ToolStatus.Interrupted)
                     else -> it
                 }
             }
@@ -631,20 +623,21 @@ object ChatReducer {
 
     /**
      * `tool.complete`. Failed ⇔ `result.error` truthy, `result.success == false`, or a non-zero `result.exit_code`
-     * (any one: tools report failure differently). A terminal command the user stopped (exit 130 ending in the
-     * [INTERRUPT_MARKER] line) is [ToolStatus.Interrupted] instead, its partial output kept without the marker.
+     * (any one: tools report failure differently). A terminal command the user stopped (exit 130 whose last line is
+     * [INTERRUPT_MARKER]) is [ToolStatus.Interrupted] instead, its partial output kept without that final line.
      */
     private fun onToolComplete(s: ChatState, p: JsonObject, flair: () -> String): ChatState {
         val toolId = p.string("tool_id") ?: return s
         val result = p["result"] as? JsonObject
         val exitCode = result?.get("exit_code")?.primitive()?.intOrNull
         val rawOutput = result?.get("output")?.asText()
-        val interrupted = exitCode == INTERRUPTED_EXIT && rawOutput != null && rawOutput.lines().any { it.trimEnd() == INTERRUPT_MARKER }
+        val lines = rawOutput?.trimEnd()?.lines()
+        val interrupted = exitCode == INTERRUPTED_EXIT && lines?.last() == INTERRUPT_MARKER
         val failed = result?.get("error").truthy() ||
             (result?.get("success") as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull == false ||
             (exitCode != null && exitCode != 0)
         val output = if (interrupted) {
-            rawOutput!!.lines().filterNot { it.trimEnd() == INTERRUPT_MARKER }.joinToString("\n").trimEnd()
+            lines!!.dropLast(1).joinToString("\n").trimEnd()
         } else {
             rawOutput
         }

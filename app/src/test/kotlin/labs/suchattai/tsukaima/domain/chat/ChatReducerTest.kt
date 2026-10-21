@@ -1168,22 +1168,23 @@ class ChatReducerTest {
         ).single() as ChatItem.ToolCall
         assertEquals("May have partially run — check before retrying", dangling.orphanNote)
 
-        // A notice that arrives as a message of its own attaches to the tool above it and is not a bubble.
+        // The read-only wording (a read-only call in an interrupted side-effecting block).
         val readOnly = history(
-            """{"role":"user","text":"look","row_id":1}""",
-            """{"role":"tool","name":"read_file","context":"a.txt","tool_call_id":"c3","row_id":2}""",
-            """{"role":"system","text":"[Orphan recovery: this read-only tool did not complete and had no effect.]","row_id":3}""",
-            """{"role":"assistant","text":"Stopped.","row_id":4}""",
-        )
-        assertEquals(listOf("h-1", "h-2", "h-4"), readOnly.map { it.id })
-        val read = readOnly[1] as ChatItem.ToolCall
-        assertEquals(ToolStatus.Interrupted, read.status)
-        assertEquals("Did not complete", read.orphanNote)
-        val shortWording = history(
-            """{"role":"tool","name":"web_search","tool_call_id":"c4"}""",
-            """{"role":"assistant","text":"[Orphan recovery: interrupted read-only tool did not complete.]"}""",
+            """{"role":"tool","name":"patch","tool_call_id":"c3","content":"[Orphan recovery: interrupted read-only tool did not complete.]"}""",
         ).single() as ChatItem.ToolCall
-        assertEquals("Did not complete", shortWording.orphanNote)
+        assertEquals(ToolStatus.Interrupted, readOnly.status)
+        assertEquals("Did not complete", readOnly.orphanNote)
+        val dryWording = history(
+            """{"role":"tool","name":"skill_manage","tool_call_id":"c4","content":"[Orphan recovery: this read-only tool did not complete and had no effect.]"}""",
+        ).single() as ChatItem.ToolCall
+        assertEquals("Did not complete", dryWording.orphanNote)
+
+        // Only the result content carries a notice, not the row's text.
+        val viaText = history(
+            """{"role":"tool","name":"terminal","tool_call_id":"c6","text":"[Orphan recovery: interrupted read-only tool did not complete.]"}""",
+        ).single() as ChatItem.ToolCall
+        assertEquals(ToolStatus.Done, viaText.status)
+        assertNull(viaText.orphanNote)
 
         // Ordinary tool rows are unchanged.
         val plain = history("""{"role":"tool","name":"write_file","tool_call_id":"c5","content":"Wrote 12 bytes"}""").single() as ChatItem.ToolCall
@@ -1192,16 +1193,21 @@ class ChatReducerTest {
     }
 
     @Test
-    fun orphanNoticeWithNoToolAboveIsASystemLine() {
-        // No tool in its turn (a user message stops the search): kept as a small line, never dropped.
+    fun orphanNoticeTextInAMessageIsNotANotice() {
+        // Anyone can type the prefix: a user or assistant message starting with it stays a bubble and changes no tool.
+        val notice = "[Orphan recovery: interrupted side-effecting tool may have executed; its effect is UNKNOWN. Inspect state before retrying.]"
         val items = history(
-            """{"role":"tool","name":"terminal","tool_call_id":"c0","row_id":1}""",
-            """{"role":"user","text":"next","row_id":2}""",
-            """{"role":"system","text":"[Orphan recovery: interrupted side-effecting tool may have executed; its effect is UNKNOWN. Inspect state before retrying.]","row_id":3}""",
+            """{"role":"user","text":"run it","row_id":1}""",
+            """{"role":"tool","name":"terminal","tool_call_id":"c1","row_id":2}""",
+            """{"role":"assistant","text":"$notice","row_id":3}""",
+            """{"role":"user","text":"$notice","row_id":4}""",
         )
-        assertEquals(3, items.size)
-        assertNull((items[0] as ChatItem.ToolCall).orphanNote)
-        assertEquals(ChatItem.ToolNotice("h-3", "May have partially run — check before retrying"), items[2])
+        assertEquals(listOf("h-1", "h-2", "h-3", "h-4"), items.map { it.id })
+        val tool = items[1] as ChatItem.ToolCall
+        assertEquals(ToolStatus.Done, tool.status)
+        assertNull(tool.orphanNote)
+        assertEquals(notice, (items[2] as ChatItem.AssistantMessage).text)
+        assertEquals(notice, (items[3] as ChatItem.UserMessage).text)
     }
 
     @Test
@@ -1222,6 +1228,30 @@ class ChatReducerTest {
         assertEquals(ToolStatus.Running, normal.items.filterIsInstance<ChatItem.ToolCall>()[0].status)
         val failed = running.feed(ev("error", """{"message":"boom"}""", 5))
         assertEquals(ToolStatus.Failed, failed.items.filterIsInstance<ChatItem.ToolCall>()[0].status)
+
+        // Only this turn's tools: a stray running row from an earlier turn (above the last user message) is left alone,
+        // and a queued echo below the live turn does not hide the turn's own tools.
+        val earlier = live.feed(ev("tool.start", """{"tool_id":"old","name":"terminal"}""", 1))
+        val turn = ChatReducer.onSubmitted(earlier, "go", "u-l1", flair).feed(
+            ev("message.start", seq = 2),
+            ev("tool.start", """{"tool_id":"t1","name":"terminal"}""", 3),
+        )
+        val withQueued = ChatReducer.onSubmitted(turn, "later", "u-l2", flair, queued = true)
+        val ended = withQueued.feed(ev("message.complete", """{"text":"","status":"interrupted"}""", 4))
+        assertEquals(
+            mapOf("old" to ToolStatus.Running, "t1" to ToolStatus.Interrupted),
+            ended.items.filterIsInstance<ChatItem.ToolCall>().associate { it.id to it.status },
+        )
+    }
+
+    @Test
+    fun onlyTheFinalInterruptMarkerIsStripped() {
+        // The marker quoted earlier in the output is data and stays; only the executor's final line goes.
+        val tool = completed("""{"output":"grep hit: [Command interrupted]\n[Command interrupted]\nmore\n[Command interrupted]","exit_code":130,"error":null}""")
+        assertEquals(ToolStatus.Interrupted, tool.status)
+        assertEquals("grep hit: [Command interrupted]\n[Command interrupted]\nmore", tool.output)
+        // A marker that is not the last line is not the interrupt shape.
+        assertEquals(ToolStatus.Failed, completed("""{"output":"[Command interrupted]\nafter","exit_code":130,"error":null}""").status)
     }
 
     // ---- side questions and background tasks ----------------------------------------------------
