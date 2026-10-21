@@ -303,7 +303,7 @@ object ChatReducer {
                 if (items.size == s.items.size) s
                 else s.copy(items = items, status = statusAfterApproval(s.status, items, flair))
             }
-            "todo.updated" -> applyTodos(s, p, authoritative = false)
+            "todo.updated" -> applyTodos(s, p)
             "connection.request" -> onConnectionRequest(s, p)
             "connection.update" -> onConnectionUpdate(s, p, flair)
             "btw.complete" -> onSideComplete(s, SideKind.Question, p)
@@ -588,11 +588,12 @@ object ChatReducer {
     }
 
     /**
-     * A resume's `todo_state {todos, revision}`: the server's current list, authoritative (it replaces the card a
-     * rebuild carried over whatever its revision). Null (no list on the server, or an older Hermes) keeps the card.
+     * A resume's `todo_state {todos, revision}`: the server's current list, applied like a live snapshot. It replaces
+     * the card a rebuild carried over but obeys the revision floor ([ChatState.todoRevision]). Null (no list on the
+     * server, or an older Hermes) keeps the card.
      */
     fun onTodoState(state: ChatState, todoState: JsonObject?): ChatState =
-        if (todoState == null) state else applyTodos(state, todoState, authoritative = true)
+        if (todoState == null) state else applyTodos(state, todoState)
 
     /**
      * A full todo snapshot `{todos[{id, content, status, parent?}], revision}`: replaces the chat's one
@@ -601,7 +602,7 @@ object ChatReducer {
      * it. A malformed snapshot (no list, a revision that is not a number)
      * changes nothing; entries without an id are skipped.
      */
-    private fun applyTodos(s: ChatState, p: JsonObject, authoritative: Boolean): ChatState {
+    private fun applyTodos(s: ChatState, p: JsonObject): ChatState {
         val list = p["todos"] as? JsonArray ?: return s
         val revisionElement = p["revision"]
         val revision = when {
@@ -784,7 +785,7 @@ object ChatReducer {
         val items = if (existing != null) s.items.replace(existing) { done } else s.items + done
         val completed = s.copy(items = items, status = AgentStatus.Thinking(flair()))
         // The todo tool's completion mirrors the list's snapshot at the payload's top level (as `todo.updated` does).
-        return if (p["todos"] is JsonArray) applyTodos(completed, p, authoritative = false) else completed
+        return if (p["todos"] is JsonArray) applyTodos(completed, p) else completed
     }
 
     // ---- server requests ----------------------------------------------------------------------

@@ -31,11 +31,11 @@ object SpeechText {
 
     /**
      * Speakable text for [markdown]: fenced code blocks (an unterminated fence runs to the end), display math
-     * (`$$`/`\[` up to a closing line before any blank line, as in the parser; a stray opener or an empty block is
-     * text), `MEDIA:` and whole-line image lines, and inline math (read as the parser reads it) are dropped; inline
-     * markup is reduced to its text (task boxes and backslash escapes too), links keep their label, bare URLs are
-     * dropped, and blank lines disappear. A table row reads as its cells joined with ", " (separator rows are
-     * dropped), and so are horizontal rules and setext underlines. The result is trimmed.
+     * (`$$`/`\[` up to a closing line before any blank line, as in the parser; a stray opener or an empty block,
+     * one-line `$$ $$` too, is text), `MEDIA:` and whole-line image lines, and inline math (read as the parser reads
+     * it) are dropped; inline markup is reduced to its text (task boxes and backslash escapes too), links keep their
+     * label, bare URLs are dropped, and blank lines disappear. A table row reads as its cells joined with ", "
+     * (separator rows are dropped), and so are horizontal rules and setext underlines. The result is trimmed.
      */
     fun plain(markdown: String): String {
         val out = ArrayList<String>()
@@ -71,7 +71,7 @@ object SpeechText {
             s = listPrefix.replace(s, "")
             s = parenMath.replace(s, "")
             s = hideEscapes(s)
-            s = displayDollars.replace(s, "")
+            s = displayDollars.replace(s) { if (it.value.removeSurrounding("$$").isBlank()) it.value else "" }
             s = dropInlineDollarMath(s)
             s = link.replace(s) { it.groupValues[1] }
             s = url.replace(s, "")
@@ -101,7 +101,7 @@ object SpeechText {
         val head = trimmed.substring(open.length)
         if (!head.endsWith(close)) return DisplayMath.Opens(close, head)
         val tex = head.dropLast(close.length)
-        return if (open !in tex && close !in tex) DisplayMath.Line else null
+        return if (tex.isNotBlank() && open !in tex && close !in tex) DisplayMath.Line else null
     }
 
     /**

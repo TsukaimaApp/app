@@ -8,8 +8,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -52,6 +54,20 @@ class MathUiTest : ComposeUiTest() {
         awaitDescription("Formula: 1 over 2")
         val size = compose.onNodeWithContentDescription("Formula: 1 over 2", useUnmergedTree = true).fetchSemanticsNode().size
         assertTrue("inline formula image is empty: $size", size.width > 0 && size.height > 0)
+    }
+
+    @Test
+    fun `TalkBack reads an inline formula once, in words`() {
+        setThemed { MarkdownText(Markdown.parse("half is \$\\frac{1}{2}\$ here")) }
+
+        awaitDescription("Formula: 1 over 2")
+        // The merged tree is what TalkBack reads: the paragraph says the formula in words, never its TeX.
+        val paragraphs = compose.onAllNodesWithText("Formula: 1 over 2", substring = true).fetchSemanticsNodes()
+        assertEquals(1, paragraphs.size)
+        assertEquals(0, compose.onAllNodesWithText("\\frac", substring = true).fetchSemanticsNodes().size)
+        // The drawn image itself is hidden, so the formula is not announced a second time.
+        val image = compose.onNode(hasContentDescription("Formula: 1 over 2"), useUnmergedTree = true).fetchSemanticsNode()
+        assertTrue(SemanticsProperties.HideFromAccessibility in image.config)
     }
 
     @Test

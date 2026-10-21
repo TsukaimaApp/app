@@ -575,6 +575,38 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun aTruncatedSameLiveReconnectKeepsTheStopFlagOnlyWhileTheSessionRuns() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("session.interrupt", obj("""{"status":"interrupted"}""")) }
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.events.emit(ev("message.start", 1))
+        advanceUntilIdle()
+        vm.interrupt()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.chat.stopRequested)
+
+        // Still running after a truncated replay: the stopped turn's end is still to come.
+        b.transport.on("session.resume", obj(resumeJson.replace("\"running\":false", "\"running\":true")))
+        b.transport.on("session.events.since", obj("""{"events":[],"latest_seq":7,"truncated":true}"""))
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+        assertEquals(live, vm.state.value.chat.liveSessionId)
+        assertTrue("the turn end will still clear it", vm.state.value.chat.stopRequested)
+
+        // The turn ended while offline and the ring lost its end: no turn end will clear the flag, so it goes.
+        b.transport.on("session.resume", obj(resumeJson))
+        b.transport.on("session.events.since", obj("""{"events":[],"latest_seq":9,"truncated":true}"""))
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+        assertEquals(live, vm.state.value.chat.liveSessionId)
+        assertFalse("a later natural turn end must not purge a queued send", vm.state.value.chat.stopRequested)
+    }
+
+    @Test
     fun aStopAckForAnOldLiveSessionIsIgnored() = runTest(dispatcher) {
         val b = backend()
         val vm = vm(b)

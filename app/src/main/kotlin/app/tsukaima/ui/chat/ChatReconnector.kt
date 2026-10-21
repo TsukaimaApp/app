@@ -101,10 +101,15 @@ internal class ChatReconnector(
             // `last_seen` as "evicted" and would report truncation, replacing an optimistic bubble with history.
             val replay = ChatSync.replay(session.eventsSince(r.sessionId, if (sameLive) maxOf(chat.lastSeq, 0) else 0))
             if (replay.truncated) {
-                // The ring lost events we never saw: trust the stored history instead of a replay with holes.
+                // The ring lost events we never saw: trust the stored history instead of a replay with holes. A
+                // pending Stop stays only while the session still runs: a lost turn end will never clear it.
                 val beforeTruncated = chat.items
                 setChat {
-                    it.copy(items = withCarried(ChatSync.transcript(r), it.items), lastSeq = replay.latestSeq ?: it.lastSeq)
+                    it.copy(
+                        items = withCarried(ChatSync.transcript(r), it.items),
+                        lastSeq = replay.latestSeq ?: it.lastSeq,
+                        stopRequested = it.stopRequested && r.running,
+                    )
                 }
                 onRebuilt(beforeTruncated, !sameLive)
             } else {

@@ -45,6 +45,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.Placeholder
@@ -236,12 +237,19 @@ private fun pendingContent(tex: String, style: TextStyle, px: Float, maxWidth: I
     return InlineTextContent(placeholder) { Box(Modifier.fillMaxSize()) }
 }
 
+/** An inline formula image: the paragraph's text already reads it ([formulaDescription] as alternate text). */
+private fun Modifier.readByParagraph(): Modifier = semantics { hideFromAccessibility() }
+
 private fun drawnContent(tex: String, bitmap: ImageBitmap, density: Density): InlineTextContent {
     val placeholder = with(density) {
         Placeholder(bitmap.width.toSp(), bitmap.height.toSp(), PlaceholderVerticalAlign.TextCenter)
     }
     return InlineTextContent(placeholder) {
-        Image(bitmap = bitmap, contentDescription = formulaDescription(tex), modifier = Modifier.fillMaxSize())
+        Image(
+            bitmap = bitmap,
+            contentDescription = formulaDescription(tex),
+            modifier = Modifier.fillMaxSize().readByParagraph(),
+        )
     }
 }
 
@@ -272,7 +280,7 @@ private fun clippedContent(
                     contentDescription = formulaDescription(tex),
                     contentScale = ContentScale.None,
                     alignment = Alignment.CenterStart,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().readByParagraph(),
                 )
             }
             Box(

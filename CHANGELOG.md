@@ -6,23 +6,24 @@ release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers
 ## 0.9.2 — 2026-10-21 (versionCode 22)
 
 ### Fixed
-- Stop and queued sends: Stop no longer leaves a stale "stopping" state after a turn that had already ended, and a
-  Stop that races a turn's end no longer marks a queued send "Not sent" when it actually ran. A message sent between
-  turns, while an earlier queued one waits, is queued too ("Send when done" matches what happens).
+- Stop and queued sends: Stop no longer leaves a stale "stopping" state after a turn that had already ended (also
+  after a reconnect that lost the stopped turn's end), and a Stop that races a turn's end is much less likely to mark
+  a queued send "Not sent" when it actually ran (a narrow race while the server drains its queue remains). A message
+  sent between turns, while an earlier queued one waits, is queued too ("Send when done" matches what happens).
 - A queued send that Stop purged keeps its "Not sent" bubble (with Retry) across a reconnect or history reload instead
   of vanishing or showing twice.
-- Long runs of `_`, `*`, `~~` or `[` in a reply no longer freeze the app while it parses; very long text with a stray
-  `_` parses in milliseconds instead of seconds.
+- Long runs of `_` in a reply no longer freeze the app while it parses; very long text with a stray `_` parses in
+  milliseconds instead of seconds.
 - Dollar amounts and shell variables (`$HOME`, `a$b$c`, "costs $5 and $6") are no longer read as formulas.
 - A backslash-escaped `]` inside link text (`[a\]b](url)`) now makes a link; an empty `$$ $$` block reads as the text it
   shows.
 - Formulas: they no longer block the screen while they draw (a cached one shows in its first frame), an inline formula
   too wide for the line scales down to fit or, if still too wide, shows clipped with a "…" button that opens it in
-  full, and TalkBack reads the formula in words ("x to the power 2", "a over b") instead of raw TeX.
+  full, and TalkBack reads the formula in words ("x to the power 2", "a over b") instead of raw TeX, inline ones once,
+  as part of their sentence.
 - Connection card: the countdown rounds down ("2 min left", then seconds), the buttons lock while an answer is being
   sent so it goes out once, a target with a sign-in link and settings sends the settings first and then offers
-  "Continue in browser", a "Hermes suggests connecting: …" hint shows for directory requests, and a pending request
-  survives a reconnect.
+  "Continue in browser", and a "Hermes suggests connecting: …" hint shows for directory requests.
 - Task card: an older update arriving late (or a cleared list coming back from a stale reload) no longer overwrites a
   newer list; the transcript keeps scrolling to a card that changed in place; children of a folded done task no longer
   stay indented.
@@ -32,8 +33,8 @@ release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers
 - A failed edit or regenerate no longer drops side notes and background-task results that arrived in the meantime.
 - Report a problem: a report that finishes after you left the screen no longer pops the share sheet on a later visit;
   it says "Report ready — tap Report a problem again".
-- Read-aloud with a server voice no longer pauses between sentences: the next sentence is synthesised while the
-  current one plays.
+- Read-aloud with a server voice pauses less between sentences: the next sentence is synthesised while the current
+  one plays (the first sentence, and one that is slow to synthesise, still wait).
 
 ## 0.9.1 — 2026-10-21 (versionCode 21)
 

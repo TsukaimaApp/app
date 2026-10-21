@@ -203,19 +203,21 @@ The known-gaps pass over the parked lists of the v0.8.0 and v0.9.0 passes.
 
 ### Closed
 
-- Queue and Stop edge cases: stop flag lifecycle, "Send when done" between turns, a purged send keeps its Not-sent
-  bubble across a rebuild or reload.
+- Queue and Stop edge cases: stop flag lifecycle (also across a same-live reconnect with a truncated replay),
+  "Send when done" between turns, a purged send keeps its Not-sent bubble across a rebuild or reload. The Stop-ack
+  race is narrowed, not eliminated (see Parked).
 - Markdown: the O(n²) `_` scan (T10) is linear (memoised closers); `$HOME/$USER` and `a$b$c` no longer read as math;
   escaped `]` in link text; empty display math reads as text in both chat and speech.
 - Math UX: formulas draw off the main thread and a cached one in its first frame; inline formulas scale to fit or clip
-  with a full-size dialog; TalkBack reads formulas in words (the "TalkBack reads raw TeX" gap).
+  with a full-size dialog; TalkBack reads formulas in words, an inline one once as its paragraph's alternate text (the
+  "TalkBack reads raw TeX" gap).
 - Connection card: countdown rounding, answers sent once, env then "Continue in browser", suggestion hint for
-  `display.suggested` requests, pending request restored after a real reconnect (unit-tested).
+  `display.suggested` requests; a test now covers the (pre-existing) restore of a pending request after a reconnect.
 - Todo card: stale revisions ignored, tail key follows the card, hidden done parents do not indent children.
 - Images: failures no longer evict bitmaps, one tap loads a foreign URL everywhere, reply previews are not
   strip-capped, inline `data:` keys hashed once.
 - v0.8.0 leftovers: edit/regenerate failure keeps late events; Report a problem no longer shares into a later visit;
-  server TTS prefetches the next sentence.
+  server TTS prefetches the next sentence (a shorter gap, not none: the first sentence and slow syntheses still pause).
 
 ### Still open
 
@@ -230,23 +232,22 @@ Hermes-side limits:
 
 Parked (not worth a wave, listed so they are not rediscovered):
 
-- Stop-ack race where the server catches the interrupt before draining: with several clients it can mark a fresh
-  queued send "Not sent" (duplicate on Retry).
+- Stop-ack race where the server catches the interrupt before draining (the narrow drain-gap race left after the
+  v0.9.2 fix): with several clients it can mark a fresh queued send "Not sent" (duplicate on Retry).
 - A Stop tapped between turns after the server purged a never-started queued send leaves it "Queued" until a new live
   session (needs a probe).
 - A retried matched twin leaves the original history row active (an extra unanswered copy on a later reload); an
   anchor after an earlier queued send drained falls back to append and may show a send twice if Hermes keeps purged
   accept rows active (unverified).
-- Perf tests: one `println`; the `*a ` and `[a ` inputs are guards, not RED evidence.
+- Perf tests: the `*a ` and `[a ` inputs are guards, not RED evidence (only the `_` scan was quadratic).
 - Formulas: a reused whole-fit bitmap is double-counted in the LRU (about half capacity for those formulas, memory
   stays bounded); input nested past the depth limit reads command names flat.
 - Connection card: `typed.clear()` also runs when the VM silently drops an answer; the env-sent mark is lost on a
   rebuild (retype before the browser leg); env fields stay editable while an answer is in flight; the failed env
-  send clears typed values; test gaps (disabled Skip not asserted, no Robolectric test for the card).
+  send clears typed values; test gap: disabled Skip not asserted.
 - Todo: no nested-hidden-ancestor test, collapse threshold not asserted in the UI test.
 - Images: a URL shown in a reply and a tool row is fetched twice (deliberate); weak observability assertion.
-- Server TTS: two speak requests in flight (current and next); a prefetched file can linger after a reconnect rebuild
-  until the next sentence or stop; a report is dropped on any pause.
+- Server TTS: two speak requests in flight (current and next); a report is dropped on any pause.
 
 Device checks (only a phone can verify these):
 

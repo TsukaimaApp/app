@@ -73,7 +73,7 @@ private fun AnnotatedString.Builder.appendSpans(spans: List<MdSpan>, colors: Tsu
         is MdSpan.Code -> withStyle(codeStyle(colors)) { append(span.s) }
         is MdSpan.Math -> {
             val id = mathId(span.tex)
-            if (id in math) appendInlineContent(id, span.tex) else withStyle(codeStyle(colors)) { append(span.tex) }
+            if (id in math) appendInlineContent(id, formulaDescription(span.tex)) else withStyle(codeStyle(colors)) { append(span.tex) }
         }
         is MdSpan.Strike -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough, color = colors.ink2)) { append(span.s) }
         is MdSpan.Link -> withLink(
@@ -98,7 +98,8 @@ private fun AnnotatedString.Builder.appendSpans(spans: List<MdSpan>, colors: Tsu
 
 /**
  * [spans] styled for a `Text`: links are tappable [LinkAnnotation.Url]s that open the browser. A math span whose
- * [mathId] is in [math] is an inline image (the `Text` gets its [rememberMathContent]); any other shows its TeX as code.
+ * [mathId] is in [math] is an inline image (the `Text` gets its [rememberMathContent]) whose alternate text, the one
+ * TalkBack reads, is its [formulaDescription]; any other shows its TeX as code.
  */
 internal fun markdownInline(
     spans: List<MdSpan>,

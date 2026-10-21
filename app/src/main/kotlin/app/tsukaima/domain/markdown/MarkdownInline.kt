@@ -7,7 +7,7 @@ package app.tsukaima.domain.markdown
  * before ASCII punctuation emits that character literally and never opens or closes a construct (inside code spans
  * and math it stays as typed). An unbalanced marker stays literal, so a half-streamed construct reads as text until
  * it closes. Every emphasis, link and math closer search is memoised (positions only grow), so a long line of
- * unmatched markers parses in linear time. Never throws.
+ * unmatched emphasis, link or math markers parses in linear time (code-span closers are not memoised). Never throws.
  */
 internal object MarkdownInline {
     /** A link destination longer than this is not one (bounds the scan for its closing parenthesis). */

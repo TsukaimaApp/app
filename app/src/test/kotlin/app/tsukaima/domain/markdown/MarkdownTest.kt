@@ -704,7 +704,6 @@ class MarkdownTest {
         val start = System.nanoTime()
         Markdown.parse(s)
         val ms = (System.nanoTime() - start) / 1_000_000
-        println("parse of ${s.take(3).replace("\n", "\\n")}× ${s.length / 3}: $ms ms")
         assertTrue("took $ms ms", ms < 2_000)
     }
 

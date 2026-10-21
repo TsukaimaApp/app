@@ -149,7 +149,8 @@ internal class ChatMedia(
     /**
      * The cache keys of recent inline images by the identity of their raw `image_url` (the string the chat's items
      * hold), so a row scrolling back does not rehash megabytes. Weak (a dropped chat's strings are not kept) and
-     * bounded at [DIGEST_MEMO], oldest out.
+     * bounded at [DIGEST_MEMO], oldest out. Confined to the main thread (its callers run in composition), so it needs
+     * no lock.
      */
     private val inlineKeys = ArrayDeque<Pair<WeakReference<String>, String>>()
 
@@ -237,13 +238,15 @@ internal class ChatMedia(
     }
 
     /**
-     * The decoded image at [url] (a reply's `![alt](url)`), or null when it is not [imageAllowed] or failed.
-     * Concurrent callers share one fetch. Final failures are cached (the server's answer, over the 8 MB cap, not
-     * http(s), undecodable), so a broken image is not refetched on every recomposition or scroll; a transient
-     * one (connection, timeout, a 5xx or 429 answer) is not, and a later call retries.
+     * The decoded image at [url] (a reply's `![alt](url)`), or null when it is not http(s) (refused before the cache),
+     * not [imageAllowed], or failed. Concurrent callers share one fetch. Final failures are cached (the server's
+     * answer, over the 8 MB cap, undecodable), so a broken image is not refetched on every recomposition or scroll;
+     * a transient one (connection, timeout, a 5xx or 429 answer) is not, and a later call retries.
      */
     suspend fun imagePreview(url: String): ImageBitmap? {
-        if (!imageAllowed(url)) return null
+        // Only http(s) before the cache: another scheme could share a key with a tool or media entry.
+        val web = url.startsWith("https://", ignoreCase = true) || url.startsWith("http://", ignoreCase = true)
+        if (!web || !imageAllowed(url)) return null
         return (cachedImage(url, backend::decodePreview) { backend.fetchImage(url).getOrThrow() } as? ImageResult.Loaded)?.bitmap
     }
 

@@ -171,4 +171,13 @@ class SpeechTextTest {
         assertEquals("So:\n$$\n$$\nDone.", SpeechText.plain("So:\n$$\n$$\nDone."))
         assertEquals("[\n]", SpeechText.plain("\\[\n\\]"))
     }
+
+    @Test fun oneLineEmptyDisplayMathIsTextInBoth() {
+        // The parser shows a blank one-line `$$ $$` (or `\[ \]`) as text, so speech reads it too.
+        for (line in listOf("$$ $$", "$$  $$", "\\[ \\]", "So $$ $$ there.")) {
+            val shown = Markdown.parse(line).filterIsInstance<MdBlock.Paragraph>().flatMap { it.spans }
+                .joinToString("") { if (it is MdSpan.Text) it.s else "" }
+            assertEquals(line, shown.replace(Regex(" {2,}"), " ").trim(), SpeechText.plain(line))
+        }
+    }
 }
