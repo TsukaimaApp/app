@@ -19,8 +19,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -69,11 +67,13 @@ private sealed interface ImageLoad {
  *
  * An image on another origin than the server's does not load by itself ([MediaHost.imageAllowed]): a
  * prompt-injected reply could leak data through its URL. It shows the alt and "From <host> — tap to load"; the tap
- * ([MediaHost.allowImage]) loads it, and from then on it behaves like any other.
+ * ([MediaHost.allowImage]) loads it, here and wherever else the same URL shows, and from then on it behaves like any
+ * other.
  */
 @Composable
 fun ImageCard(alt: String, url: String, host: MediaHost, modifier: Modifier = Modifier) {
-    var allowed by remember(url) { mutableStateOf(host.imageAllowed(url)) }
+    // Read in composition: a tap on the same URL anywhere (another card, a tool row) loads it here too.
+    val allowed = host.imageAllowed(url)
     val load by produceState<ImageLoad>(if (allowed) ImageLoad.Loading else ImageLoad.Blocked, url, allowed) {
         if (!allowed) {
             value = ImageLoad.Blocked
@@ -82,10 +82,7 @@ fun ImageCard(alt: String, url: String, host: MediaHost, modifier: Modifier = Mo
         value = ImageLoad.Loading
         value = host.previewImage(url)?.let { ImageLoad.Loaded(it) } ?: ImageLoad.Failed
     }
-    ImageCardContent(alt, url, load, modifier) {
-        host.allowImage(url)
-        allowed = true
-    }
+    ImageCardContent(alt, url, load, modifier) { host.allowImage(url) }
 }
 
 @Composable

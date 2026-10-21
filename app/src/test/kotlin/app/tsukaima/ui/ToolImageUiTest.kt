@@ -1,8 +1,12 @@
 package app.tsukaima.ui
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -10,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import app.tsukaima.domain.chat.ChatItem
 import app.tsukaima.domain.chat.ToolStatus
 import app.tsukaima.ui.chat.ImageResult
+import app.tsukaima.ui.chat.components.ImageCard
 import app.tsukaima.ui.chat.components.MediaHost
 import app.tsukaima.ui.chat.components.ToolRow
 import org.junit.Assert.assertEquals
@@ -46,16 +51,16 @@ class ToolImageUiTest : ComposeUiTest() {
 
     @Test
     fun `a foreign image waits for a tap`() {
-        val allowed = mutableListOf<String>()
+        val allowed = mutableStateSetOf<String>()
         var asked = 0
-        val host = MediaHost(imageAllowed = { false }, allowImage = { allowed += it }, toolImage = { asked++; ImageResult.Unavailable })
+        val host = MediaHost(imageAllowed = { it in allowed }, allowImage = { allowed += it }, toolImage = { asked++; ImageResult.Unavailable })
         setThemed { ToolRow(vision("https://tiles.example.org/a.png"), media = host) }
 
         compose.onNodeWithText("From tiles.example.org — tap to load").assertIsDisplayed()
         assertEquals(0, asked)
         compose.onNodeWithText("From tiles.example.org — tap to load").performClick()
         compose.onNodeWithText("image unavailable").assertIsDisplayed()
-        assertEquals(listOf("https://tiles.example.org/a.png"), allowed)
+        assertEquals(setOf("https://tiles.example.org/a.png"), allowed.toSet())
         assertEquals(1, asked)
     }
 
@@ -71,5 +76,33 @@ class ToolImageUiTest : ComposeUiTest() {
         compose.onNodeWithText("image didn’t load — tap to retry").performClick()
         compose.onNodeWithContentDescription("Image the tool looked at").assertIsDisplayed()
         assertEquals(2, asked)
+    }
+
+    @Test
+    fun `one tap loads a foreign url in the reply and the tool row`() {
+        val url = "https://tiles.example.org/a.png"
+        val allowed = mutableStateSetOf<String>()
+        var previews = 0
+        var tools = 0
+        val bitmap = ImageBitmap(40, 40)
+        val host = MediaHost(
+            imageAllowed = { it in allowed },
+            allowImage = { allowed += it },
+            previewImage = { previews++; bitmap },
+            toolImage = { tools++; ImageResult.Loaded(bitmap) },
+        )
+        setThemed {
+            Column {
+                ImageCard("Tiles", url, host)
+                ToolRow(vision(url), media = host)
+            }
+        }
+
+        compose.onAllNodesWithText("From tiles.example.org — tap to load").assertCountEquals(2)
+        compose.onAllNodesWithText("From tiles.example.org — tap to load")[0].performClick()
+        compose.onAllNodesWithText("From tiles.example.org — tap to load").assertCountEquals(0)
+        compose.onNodeWithContentDescription("Image the tool looked at").assertIsDisplayed()
+        assertEquals(1, previews)
+        assertEquals(1, tools)
     }
 }

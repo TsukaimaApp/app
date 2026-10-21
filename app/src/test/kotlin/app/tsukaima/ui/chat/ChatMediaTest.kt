@@ -1,5 +1,6 @@
 package app.tsukaima.ui.chat
 
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.ImageBitmapConfig
 import kotlinx.coroutines.CompletableDeferred
@@ -14,6 +15,7 @@ import app.tsukaima.data.api.ApiException
 import app.tsukaima.data.api.AuthException
 import app.tsukaima.data.api.HermesApi
 import app.tsukaima.data.api.ImageTooLargeException
+import app.tsukaima.data.files.ImagePreview
 import app.tsukaima.data.prefs.Settings
 import app.tsukaima.domain.chat.ChatItem
 import app.tsukaima.domain.chat.ToolStatus
@@ -53,8 +55,12 @@ class ChatMediaTest {
             return result(url)
         }
 
-        override fun decodePreview(bytes: ByteArray): ImageBitmap? = Bitmap.also { decoded++; decodedBytes += bytes.toList() }
+        override fun decodePreview(bytes: ByteArray): ImageBitmap? = Bitmap.also { decoded++; decodedBytes += bytes.toList(); capped += false }
+        override fun decodeToolImage(bytes: ByteArray): ImageBitmap? = Bitmap.also { decoded++; decodedBytes += bytes.toList(); capped += true }
         val decodedBytes = mutableListOf<List<Byte>>()
+
+        /** Per decode: whether it went through the long-side-capped [decodeToolImage]. */
+        val capped = mutableListOf<Boolean>()
 
         val media = mutableListOf<String>()
         var mediaResult: (String) -> Result<String> = { Result.success("data:image/png;base64,AQID") }
@@ -65,7 +71,11 @@ class ChatMediaTest {
     }
 
     private class Harness(scope: TestScope, backend: ChatBackend = Backend()) {
-        val media = ChatMedia(backend, scope, StandardTestDispatcher(scope.testScheduler), MutableStateFlow(ChatUiState()))
+        val digests = mutableListOf<Int>()
+        val media = ChatMedia(backend, scope, StandardTestDispatcher(scope.testScheduler), MutableStateFlow(ChatUiState())) {
+            digests += it.length
+            "d" + it.hashCode()
+        }
     }
 
     private val url = "https://hermes.example.com/api/files/chart.png"
@@ -310,6 +320,93 @@ class ChatMediaTest {
         assertEquals(1, b.decoded)
         assertEquals(ImageResult.Loaded(Bitmap), h.media.toolImage(vision("data:image/png;base64,BAU=")))
         assertEquals(2, b.decoded)
+    }
+
+    @Test
+    fun failuresDoNotEvictBitmaps() = runTest {
+        val b = Backend().apply { result = { if ("broken" in it) Result.failure(ApiException(404, "gone")) else Result.success(byteArrayOf(1)) } }
+        val h = Harness(this, b)
+        assertSame(Bitmap, h.media.imagePreview(url))
+        // A reply with many broken images: each fails once, finally.
+        val broken = (1..40).map { "$url?broken=$it" }
+        broken.forEach { assertNull(h.media.imagePreview(it)) }
+        assertSame(Bitmap, h.media.imagePreview(url)) // still cached: failures took no bitmap slot
+        broken.forEach { assertNull(h.media.imagePreview(it)) } // and none is refetched
+        assertEquals(1 + broken.size, b.fetched.size)
+        assertEquals(1, b.decoded)
+
+        // The failure set is bounded: past 64 the oldest is forgotten (and may be asked again).
+        val more = (41..64 + 1).map { "$url?broken=$it" }
+        more.forEach { assertNull(h.media.imagePreview(it)) }
+        val fetched = b.fetched.size
+        assertNull(h.media.imagePreview(broken.first()))
+        assertEquals(fetched + 1, b.fetched.size)
+        assertNull(h.media.imagePreview(more.last()))
+        assertEquals(fetched + 1, b.fetched.size)
+    }
+
+    @Test
+    fun tapAllowsTheUrlEverywhere() = runTest {
+        val b = Backend()
+        val h = Harness(this, b)
+        // imageAllowed reads snapshot state: every composable that asked recomposes on the tap.
+        val reads = mutableSetOf<Any>()
+        val snapshot = Snapshot.takeSnapshot(readObserver = { reads += it })
+        try {
+            snapshot.enter { assertFalse(h.media.imageAllowed(foreign)) }
+        } finally {
+            snapshot.dispose()
+        }
+        assertTrue("imageAllowed is observable", reads.isNotEmpty())
+
+        h.media.allowImage(foreign)
+        // One tap: the reply image and the tool row with the same URL both load.
+        assertSame(Bitmap, h.media.imagePreview(foreign))
+        assertEquals(ImageResult.Loaded(Bitmap), h.media.toolImage(vision(foreign)))
+        assertTrue(h.media.imageAllowed(foreign))
+    }
+
+    @Test
+    fun inlineDigestIsComputedOnce() = runTest {
+        val b = Backend()
+        val h = Harness(this, b)
+        val inline = "data:image/png;base64,AQID"
+        val tool = vision(inline)
+        assertEquals(ImageResult.Loaded(Bitmap), h.media.toolImage(tool))
+        assertEquals(ImageResult.Loaded(Bitmap), h.media.toolImage(tool.copy(status = ToolStatus.Done))) // same string
+        assertEquals(1, h.digests.size)
+        assertEquals(1, b.decoded)
+
+        // Evicted from the bitmap LRU by eight others: decoded again, but not rehashed.
+        (1..8).forEach { assertEquals(ImageResult.Loaded(Bitmap), h.media.toolImage(vision("~/.hermes/images/$it.png"))) }
+        assertEquals(ImageResult.Loaded(Bitmap), h.media.toolImage(tool))
+        assertEquals(1, h.digests.size)
+        assertEquals(10, b.decoded)
+
+        // An equal URL in another String instance is hashed (identity, not equality), to the same key.
+        val copy = String(inline.toCharArray())
+        assertEquals(ImageResult.Loaded(Bitmap), h.media.toolImage(vision(copy)))
+        assertEquals(2, h.digests.size)
+        assertEquals(10, b.decoded)
+    }
+
+    @Test
+    fun replyPreviewsAreNotSideCapped() = runTest {
+        // A tall reply image keeps the pixel budget alone; a tool image's long side is also held to 2048.
+        assertEquals(2, ImagePreview.sampleSize(1000, 5000))
+        assertEquals(4, ImagePreview.sampleSize(1000, 5000, ImagePreview.MAX_SIDE))
+        assertEquals(1, ImagePreview.sampleSize(16000, 120))
+        assertEquals(8, ImagePreview.sampleSize(16000, 120, ImagePreview.MAX_SIDE))
+
+        val b = Backend()
+        val h = Harness(this, b)
+        assertSame(Bitmap, h.media.imagePreview(url))
+        assertEquals(listOf(false), b.capped)
+        // The same URL in a tool row is decoded on its own, capped.
+        assertEquals(ImageResult.Loaded(Bitmap), h.media.toolImage(vision(url)))
+        assertEquals(ImageResult.Loaded(Bitmap), h.media.toolImage(vision("~/.hermes/images/a.png")))
+        assertEquals(ImageResult.Loaded(Bitmap), h.media.toolImage(vision("data:image/png;base64,BAU=")))
+        assertEquals(listOf(false, true, true, true), b.capped)
     }
 
     private companion object {

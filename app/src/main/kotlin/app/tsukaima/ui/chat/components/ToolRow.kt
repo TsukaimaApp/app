@@ -161,7 +161,8 @@ private fun ToolImage(item: ChatItem.ToolCall, raw: String, host: MediaHost) {
     val source = remember(raw) { ToolImageSource.of(raw) } ?: return
     val web = (source as? ToolImageSource.Web)?.url
     val colors = MaterialTheme.tsukaima
-    var allowed by remember(raw) { mutableStateOf(web == null || host.imageAllowed(web)) }
+    // Read in composition: a tap on the same URL anywhere (another row, a reply's image) loads it here too.
+    val allowed = web == null || host.imageAllowed(web)
     var attempt by remember(raw) { mutableIntStateOf(0) }
     var full by rememberSaveable(item.id) { mutableStateOf(false) }
     val tool by rememberUpdatedState(item)
@@ -182,7 +183,6 @@ private fun ToolImage(item: ChatItem.ToolCall, raw: String, host: MediaHost) {
     when (val l = load) {
         ThumbLoad.Blocked -> TapCaption("From ${web?.let(ImageOrigin::host) ?: "another site"} — tap to load", "Load image") {
             web?.let(host.allowImage)
-            allowed = true
         }
         ThumbLoad.Retry -> TapCaption("image didn’t load — tap to retry", "Retry image") { attempt++ }
         ThumbLoad.Loading -> SkeletonBlock(pad.size(THUMB), radius = 10.dp)

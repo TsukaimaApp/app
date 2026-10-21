@@ -90,6 +90,12 @@ interface ChatBackend {
 
     /** An image preview decoded from [bytes] (downsampled), or null if they are not a decodable image. */
     fun decodePreview(bytes: ByteArray): ImageBitmap?
+
+    /**
+     * A tool row's image ([ChatMedia.toolImage]) decoded like [decodePreview], its long side also held to
+     * [ImagePreview.MAX_SIDE] (an extreme strip would otherwise be a huge texture).
+     */
+    fun decodeToolImage(bytes: ByteArray): ImageBitmap? = decodePreview(bytes)
     fun toast(text: String)
 
     /** One recorded utterance (WAV) through Hermes' speech-to-text relay (`/api/audio/transcribe`). */
@@ -147,6 +153,7 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override fun openFile(uri: String, mime: String) = c.openFile(uri, mime)
     override fun openUrl(url: String) = c.openUrl(url)
     override fun decodePreview(bytes: ByteArray) = ImagePreview.decode(bytes)?.asImageBitmap()
+    override fun decodeToolImage(bytes: ByteArray) = ImagePreview.decode(bytes, ImagePreview.MAX_SIDE)?.asImageBitmap()
     override fun toast(text: String) = c.toastState.show(text)
     override suspend fun transcribe(wav: ByteArray) = c.repository.transcribe(wav)
     override fun speechInput() = c.speechInput()
