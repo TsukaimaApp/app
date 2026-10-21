@@ -311,6 +311,66 @@ function checkBudgets() {
   }
 }
 
+// ---- head metadata and images ---------------------------------------------------------------------------------
+
+function metaContent(markup, attr, name) {
+  for (const tag of markup.matchAll(/<meta\b[^>]*>/gi)) {
+    const a = new RegExp(`\\b${attr}\\s*=\\s*["']${name}["']`, 'i');
+    if (!a.test(tag[0])) continue;
+    const c = /\bcontent\s*=\s*"([^"]*)"/i.exec(tag[0]) ?? /\bcontent\s*=\s*'([^']*)'/i.exec(tag[0]);
+    return c ? decodeEntities(c[1]) : '';
+  }
+  return null;
+}
+
+function linkTag(markup, rel) {
+  for (const tag of markup.matchAll(/<link\b[^>]*>/gi)) {
+    if (new RegExp(`\\brel\\s*=\\s*["']${rel}["']`, 'i').test(tag[0])) return tag[0];
+  }
+  return null;
+}
+
+function pngSize(path) {
+  const b = readFileSync(path);
+  if (b.length < 24 || b.readUInt32BE(0) !== 0x89504e47) return null;
+  return [b.readUInt32BE(16), b.readUInt32BE(20)];
+}
+
+function checkHead(file, html) {
+  const head = /<head\b[^>]*>([\s\S]*?)<\/head\s*>/i.exec(html)?.[1] ?? '';
+  const markup = head.replace(/<!--[\s\S]*?-->/g, ' ');
+  const SITE_URL = 'https://tsukaima.app/';
+  const canonical = linkTag(markup, 'canonical');
+  if (!canonical || !new RegExp(`\\bhref\\s*=\\s*["']${SITE_URL}["']`).test(canonical)) fail(file, 'head: canonical link missing or wrong', SITE_URL);
+  const desc = metaContent(markup, 'name', 'description');
+  if (!desc) fail(file, 'head: meta description missing or empty', '');
+  else if (desc.length > 160) fail(file, 'head: meta description over 160 chars', String(desc.length));
+  const exact = [
+    ['property', 'og:type', 'website'],
+    ['property', 'og:url', SITE_URL],
+    ['property', 'og:image', 'https://tsukaima.app/img/og.png'],
+    ['name', 'twitter:card', 'summary_large_image'],
+    ['name', 'theme-color', '#F7F4ED'],
+  ];
+  for (const [attr, name, want] of exact) {
+    const got = metaContent(markup, attr, name);
+    if (got !== want) fail(file, `head: ${name} must be`, `${want} (found ${got === null ? 'none' : got})`);
+  }
+  for (const name of ['og:title', 'og:description']) {
+    if (!metaContent(markup, 'property', name)) fail(file, `head: ${name} missing or empty`, '');
+  }
+  const icon = linkTag(markup, 'icon');
+  if (!icon || !/\btype\s*=\s*["']image\/svg\+xml["']/i.test(icon)) fail(file, 'head: <link rel="icon" type="image/svg+xml"> missing', '');
+  if (!linkTag(markup, 'apple-touch-icon')) fail(file, 'head: <link rel="apple-touch-icon"> missing', '');
+
+  for (const [img, w, h] of [['img/og.png', 1200, 630], ['img/apple-touch-icon.png', 180, 180]]) {
+    const p = join(SITE, img);
+    if (!existsSync(p)) { fail(p, 'image missing', `site/${img}`); continue; }
+    const size = pngSize(p);
+    if (!size || size[0] !== w || size[1] !== h) fail(p, `image must be ${w}x${h} PNG`, size ? `${size[0]}x${size[1]}` : 'not a PNG');
+  }
+}
+
 // ---- main -----------------------------------------------------------------------------------------------------
 
 const target = process.argv[2];
@@ -329,6 +389,7 @@ checkUrls(page, html, true);
 checkCopy(page, html);
 checkStructure(page, html);
 checkRequired(page, html);
+checkHead(page, html);
 
 const markup = html.replace(/<!--[\s\S]*?-->/g, ' ');
 for (const m of markup.matchAll(/\s(src|href|poster)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {

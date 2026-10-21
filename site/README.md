@@ -9,7 +9,7 @@ page; fonts are subset once by `scripts/site/build-fonts.sh` and committed. Deve
 | `index.html` | The page. |
 | `site.css` | Tokens (light values from `design/tokens/`), `@font-face`, type roles, base styles, then page styles. |
 | `fonts/` | WOFF2 subsets of Source Serif 4, Instrument Sans, IBM Plex Mono and Noto Serif JP, renamed Tsukaima Serif / Sans / Mono / Kanji (OFL reserved names), with `OFL.txt`. |
-| `img/` | The mark and other images. |
+| `img/` | The mark, favicon, Apple touch icon, Open Graph image and other images. `og.png` and `apple-touch-icon.png` are rendered by `scripts/site/render-images.mjs`. |
 | `CNAME` | `tsukaima.app`, for the Pages custom domain. |
 
 ## Links
@@ -52,4 +52,4 @@ swap`, font stacks without a generic fallback, and the size budgets (`fonts/` â‰
 
 ## Attribution
 
-<!-- Task 4: Obtainium badge attribution (project, repo URL, GPL-3.0) goes here. -->
+`img/badge_obtainium.png` is the Obtainium project's badge, from https://github.com/ImranR98/Obtainium (GPL-3.0), used as that project invites.

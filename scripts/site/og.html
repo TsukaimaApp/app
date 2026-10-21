@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tsukaima Open Graph card</title>
+<link rel="stylesheet" href="../../site/site.css">
+<style>
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; }
+  body { background: var(--surface-page); position: relative; }
+  .card { position: absolute; inset: 0; padding: 96px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; }
+  .lock { display: flex; align-items: center; gap: 28px; }
+  .lock img { height: 96px; width: auto; display: block; }
+  .lock .name { font: 600 84px/1 var(--font-serif); color: var(--text-body); letter-spacing: -.01em; }
+  .lock .k { font: 400 28px/1 var(--font-kanji); color: var(--text-tertiary); align-self: flex-end; padding-bottom: 8px; }
+  .line { font: 400 44px/1.2 var(--font-serif); color: var(--text-body); margin: 44px 0 0; }
+  .cap { font: 400 26px/1.4 var(--font-sans); color: var(--text-secondary); margin: 18px 0 0; }
+  .url { position: absolute; right: 96px; bottom: 64px; font: 500 22px/1 var(--font-sans); color: var(--text-tertiary); }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="lock"><img src="../../site/img/mark.svg" alt=""><span class="name">Tsukaima</span><span class="k">使い魔</span></div>
+  <p class="line">A familiar for your Hermes Agent.</p>
+  <p class="cap">Android client · self-hosted · no account</p>
+</div>
+<div class="url">tsukaima.app</div>
+</body>
+</html>
