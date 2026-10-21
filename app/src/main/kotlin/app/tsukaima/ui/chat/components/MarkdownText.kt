@@ -8,6 +8,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -117,6 +118,8 @@ private fun rememberInline(spans: List<MdSpan>, colors: TsukaimaColors, caret: B
 
 /**
  * [spans] as a `Text` in [style]: the annotated string and its inline content (the caret and any drawn formulas).
+ * With math, the paragraph's width is measured first so a formula wider than it can shrink or clip to fit
+ * ([rememberMathContent]); text without math is laid out directly.
  */
 @Composable
 private fun InlineText(
@@ -126,8 +129,28 @@ private fun InlineText(
     caretContent: Map<String, InlineTextContent>,
     modifier: Modifier = Modifier,
 ) {
+    if (spans.none { it is MdSpan.Math }) {
+        InlineTextAt(spans, style, caret, caretContent, Int.MAX_VALUE, modifier)
+        return
+    }
+    BoxWithConstraints(modifier) {
+        val width = if (constraints.hasBoundedWidth) constraints.maxWidth else Int.MAX_VALUE
+        InlineTextAt(spans, style, caret, caretContent, width, Modifier)
+    }
+}
+
+/** [InlineText] with its formulas fitted to [maxWidth] pixels. */
+@Composable
+private fun InlineTextAt(
+    spans: List<MdSpan>,
+    style: TextStyle,
+    caret: Boolean,
+    caretContent: Map<String, InlineTextContent>,
+    maxWidth: Int,
+    modifier: Modifier,
+) {
     val colors = MaterialTheme.tsukaima
-    val math = rememberMathContent(spans, style, colors.ink1)
+    val math = rememberMathContent(spans, style, colors.ink1, maxWidth)
     Text(
         text = rememberInline(spans, colors, caret, math.keys),
         style = style,
