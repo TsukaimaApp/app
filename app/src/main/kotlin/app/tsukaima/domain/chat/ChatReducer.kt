@@ -219,7 +219,7 @@ object ChatReducer {
      */
     fun onSessionBound(state: ChatState, liveId: String, storedId: String?): ChatState {
         val ids = state.copy(liveSessionId = liveId, storedSessionId = storedId ?: state.storedSessionId)
-        return if (state.liveSessionId == liveId) ids else ids.copy(lastSeq = NO_SEQ, localCounter = 0, stopRequested = false)
+        return if (state.liveSessionId == liveId) ids else ids.copy(lastSeq = NO_SEQ, localCounter = 0, stopRequested = false, todoRevision = -1)
     }
 
     fun onConnectionLost(state: ChatState): ChatState =
@@ -596,8 +596,9 @@ object ChatReducer {
 
     /**
      * A full todo snapshot `{todos[{id, content, status, parent?}], revision}`: replaces the chat's one
-     * [ChatItem.Todos] in place when its revision is at least the card's (unless [authoritative]), else appends the
-     * card at the end; an empty list removes it. A malformed snapshot (no list, a revision that is not a number)
+     * [ChatItem.Todos] in place when its revision is at least [ChatState.todoRevision] (the highest applied, kept past
+     * a clear; both live events and a resume's seed obey it), else appends the card at the end; an empty list removes
+     * it. A malformed snapshot (no list, a revision that is not a number)
      * changes nothing; entries without an id are skipped.
      */
     private fun applyTodos(s: ChatState, p: JsonObject, authoritative: Boolean): ChatState {
@@ -608,15 +609,17 @@ object ChatReducer {
             else -> (revisionElement as? JsonPrimitive)?.intOrNull ?: return s
         }
         val existing = s.items.firstOrNull { it is ChatItem.Todos } as? ChatItem.Todos
-        if (!authoritative && existing != null && revision < existing.revision) return s
+        // The floor outlives the card: a clear keeps it, so a lower-revision replay (live or a resume's seed) cannot
+        // bring a stale list back. Equal revisions apply.
+        if (revision < s.todoRevision) return s
         val todos = list.mapNotNull { entry ->
             val o = entry as? JsonObject ?: return@mapNotNull null
             val id = o.string("id")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
             TodoEntry(id, o.string("content").orEmpty(), TodoStatus.of(o.string("status")), o.string("parent")?.takeIf { it.isNotBlank() })
         }
-        if (todos.isEmpty()) return if (existing == null) s else s.copy(items = s.items - existing)
+        if (todos.isEmpty()) return s.copy(items = if (existing == null) s.items else s.items - existing, todoRevision = revision)
         val card = ChatItem.Todos(revision = revision, todos = todos)
-        return s.copy(items = if (existing != null) s.items.replace(existing) { card } else s.items + card)
+        return s.copy(items = if (existing != null) s.items.replace(existing) { card } else s.items + card, todoRevision = revision)
     }
 
     /** "Loading history…", "Loaded 42 messages", or the failure, from `session.resume_progress`. */

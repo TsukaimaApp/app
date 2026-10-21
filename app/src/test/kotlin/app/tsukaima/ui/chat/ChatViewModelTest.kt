@@ -52,6 +52,7 @@ import app.tsukaima.domain.chat.SideKind
 import app.tsukaima.domain.chat.StatusTone
 import app.tsukaima.domain.chat.running
 import app.tsukaima.domain.chat.TODOS_ID
+import app.tsukaima.domain.chat.TodoEntry
 import app.tsukaima.domain.chat.TodoStatus
 import app.tsukaima.domain.chat.ToolStatus
 import app.tsukaima.domain.voice.FakeSpeechInput
@@ -3290,6 +3291,16 @@ class ChatViewModelTest {
         advanceUntilIdle()
         assertEquals("Couldn’t send the side question", b.toasts.last())
         assertEquals("again", vm.state.value.input)
+    }
+
+    @Test
+    fun tailKeyFollowsTheTodoCard() {
+        fun card(rev: Int) = ChatItem.Todos(revision = rev, todos = listOf(TodoEntry("1", "x", TodoStatus.Pending)))
+        val before = transcriptTailKey(listOf(ChatItem.AssistantMessage("a-1", "Hi", streaming = false, reasoning = null)))
+        val appended = transcriptTailKey(listOf(ChatItem.AssistantMessage("a-1", "Hi", streaming = false, reasoning = null), card(1)))
+        assertNotEquals(before, appended)
+        assertNotEquals("an update in place moves the key", appended, transcriptTailKey(listOf(card(2))))
+        assertEquals(transcriptTailKey(listOf(card(2))), transcriptTailKey(listOf(card(2))))
     }
 
     @Test

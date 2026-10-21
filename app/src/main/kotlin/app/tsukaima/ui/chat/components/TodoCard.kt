@@ -71,6 +71,24 @@ internal fun todoRows(todos: List<TodoEntry>): List<TodoRow> {
     return rows
 }
 
+/**
+ * [rows] without the completed ones. A hidden parent's visible children move up to its depth, so none is left
+ * indented under nothing (a completed parent's own parent chain is flattened the same way).
+ */
+internal fun hideDone(rows: List<TodoRow>): List<TodoRow> {
+    val hiddenDepths = ArrayList<Int>() // depths of hidden ancestors on the current path
+    val out = ArrayList<TodoRow>(rows.size)
+    for (row in rows) {
+        while (hiddenDepths.isNotEmpty() && hiddenDepths.last() >= row.depth) hiddenDepths.removeAt(hiddenDepths.lastIndex)
+        if (row.entry.status == TodoStatus.Completed) {
+            hiddenDepths += row.depth
+        } else {
+            out += row.copy(depth = row.depth - hiddenDepths.size)
+        }
+    }
+    return out
+}
+
 /** "2 of 5 done": cancelled tasks count in the total, not as done. */
 internal fun todoProgress(todos: List<TodoEntry>): String =
     "${todos.count { it.status == TodoStatus.Completed }} of ${todos.size} done"
@@ -89,7 +107,7 @@ fun TodoCard(item: ChatItem.Todos, modifier: Modifier = Modifier) {
     val collapsible = rows.size > TODO_COLLAPSE_ABOVE
     val doneCount = rows.count { it.entry.status == TodoStatus.Completed }
     var showDone by rememberSaveable { mutableStateOf(false) }
-    val visible = if (collapsible && !showDone) rows.filter { it.entry.status != TodoStatus.Completed } else rows
+    val visible = if (collapsible && !showDone) hideDone(rows) else rows
     Column(
         modifier = modifier
             .fillMaxWidth()

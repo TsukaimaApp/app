@@ -488,11 +488,17 @@ internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatAct
 
 /**
  * What the transcript follows to the bottom on: the last item's id and, for a reply, its text length (so streaming
- * keeps it pinned). Only a reply's length counts — a [ChatItem.SideNote] finishing keeps the key, so a detached side
+ * keeps it pinned). Only a reply's length and the todo card's revision count — a [ChatItem.SideNote] finishing keeps the key, so a detached side
  * answer landing does not scroll the chat.
  */
 internal fun transcriptTailKey(items: List<ChatItem>): Pair<String, Int>? =
-    items.lastOrNull()?.let { it.id to ((it as? ChatItem.AssistantMessage)?.text?.length ?: 0) }
+    items.lastOrNull()?.let {
+        it.id to when (it) {
+            is ChatItem.AssistantMessage -> it.text.length
+            is ChatItem.Todos -> it.revision // an update replaces the card in place: the revision moves the key
+            else -> 0
+        }
+    }
 
 /**
  * The top bar's overflow entries: Stop while a turn runs, the side entries while text is typed ([ChatSides]), then the

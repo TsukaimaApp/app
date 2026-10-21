@@ -1695,6 +1695,35 @@ class ChatReducerTest {
     }
 
     @Test
+    fun noStaleTodoAfterAClear() {
+        val cleared = live.feed(ev("todo.updated", todosJson(5, todo("1", "pending")), seq = 1))
+            .feed(ev("todo.updated", todosJson(6), seq = 2))
+        assertEquals(emptyList<ChatItem>(), cleared.items.filterIsInstance<ChatItem.Todos>())
+        assertEquals(6, cleared.todoRevision)
+        // A replay of an older snapshot, live or as a resume's seed, does not bring the card back.
+        val replay = cleared.feed(ev("todo.updated", todosJson(5, todo("1", "pending")), seq = 3))
+        assertEquals(cleared.items, replay.items)
+        val seed = ChatReducer.onTodoState(cleared, obj(todosJson(4, todo("1", "pending"))))
+        assertEquals(cleared.items, seed.items)
+        // The next real revision does.
+        assertEquals(1, cleared.feed(ev("todo.updated", todosJson(7, todo("2", "pending")), seq = 4)).items.count { it is ChatItem.Todos })
+    }
+
+    @Test
+    fun staleSeedAfterANewerLiveEventIsIgnored() {
+        val s = live.feed(ev("todo.updated", todosJson(4, todo("1", "completed")), seq = 1))
+        val older = ChatReducer.onTodoState(s, obj(todosJson(3, todo("1", "pending"))))
+        assertEquals(TodoStatus.Completed, (older.items.single() as ChatItem.Todos).todos.single().status)
+        val equal = ChatReducer.onTodoState(s, obj(todosJson(4, todo("1", "pending"), todo("2", "pending"))))
+        assertEquals(2, (equal.items.single() as ChatItem.Todos).todos.size)
+        // A new live session has its own counter.
+        val fresh = ChatReducer.onSessionBound(s, "other-live", null)
+        assertEquals(-1, fresh.todoRevision)
+        val seeded = ChatReducer.onTodoState(fresh, obj(todosJson(1, todo("1", "pending"))))
+        assertEquals(1, (seeded.items.single() as ChatItem.Todos).revision)
+    }
+
+    @Test
     fun staleTodoRevisionIsIgnored() {
         val s = live.feed(ev("todo.updated", todosJson(3, todo("1", "in_progress")), seq = 1))
         val stale = s.feed(ev("todo.updated", todosJson(2, todo("1", "pending"), todo("2", "pending")), seq = 2))

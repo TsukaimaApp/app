@@ -10,6 +10,7 @@ import app.tsukaima.domain.chat.ChatItem
 import app.tsukaima.domain.chat.TodoEntry
 import app.tsukaima.domain.chat.TodoStatus
 import app.tsukaima.ui.chat.components.TodoCard
+import app.tsukaima.ui.chat.components.todoRows
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -82,5 +83,40 @@ class TodoCardUiTest : ComposeUiTest() {
         row("●", "Step 1").assertIsDisplayed()
         compose.onNodeWithText("Hide done").performClick()
         row("●", "Step 1").assertDoesNotExist()
+    }
+
+    @Test
+    fun `hiddenParentsDoNotIndentChildren`() {
+        val tree = ChatItem.Todos(
+            revision = 1,
+            todos = listOf(
+                TodoEntry("p", "Done parent", TodoStatus.Completed),
+                TodoEntry("c", "Open child", TodoStatus.Pending, parent = "p"),
+                TodoEntry("t", "Top open", TodoStatus.Pending),
+                TodoEntry("x1", "Filler one", TodoStatus.Pending),
+                TodoEntry("x2", "Filler two", TodoStatus.Pending),
+                TodoEntry("x3", "Filler three", TodoStatus.Pending),
+                TodoEntry("x4", "Filler four", TodoStatus.Pending),
+            ),
+        )
+        setThemed { TodoCard(tree) }
+
+        row("●", "Done parent").assertDoesNotExist()
+        assertEquals(
+            row("○", "Top open").getUnclippedBoundsInRoot().left,
+            row("○", "Open child").getUnclippedBoundsInRoot().left,
+        )
+        compose.onNodeWithText("Show done (1)").performClick()
+        assertEquals(16f, (row("○", "Open child").getUnclippedBoundsInRoot().left - row("●", "Done parent").getUnclippedBoundsInRoot().left).value, 0.5f)
+    }
+
+    @Test
+    fun todoRowsSurviveCycles() {
+        fun e(id: String, parent: String?) = TodoEntry(id, "T$id", TodoStatus.Pending, parent)
+        val self = todoRows(listOf(e("a", "a"), e("b", null)))
+        assertEquals(listOf("a" to 0, "b" to 0), self.map { it.entry.id to it.depth }.sortedBy { it.first })
+        val cycle = todoRows(listOf(e("a", "b"), e("b", "c"), e("c", "a"), e("d", null)))
+        assertEquals(setOf("a", "b", "c", "d"), cycle.map { it.entry.id }.toSet())
+        assertEquals(4, cycle.size)
     }
 }

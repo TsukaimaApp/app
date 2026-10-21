@@ -306,6 +306,11 @@ data class ChatState(
      * the queued echoes.
      */
     val stopRequested: Boolean = false,
+    /**
+     * The highest todo revision applied for the live session, kept after a clear so a lower-revision replay (or a
+     * stale resume seed) is ignored; -1 before any. A new live session has its own counter and resets it.
+     */
+    val todoRevision: Int = -1,
 )
 
 /** [ChatState.lastSeq] before any event of the live session was applied; `session.events.since` accepts it. */
