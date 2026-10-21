@@ -3,6 +3,13 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.8.1 — 2026-10-21 (versionCode 19)
+
+### Fixed
+- The on-screen keyboard's Enter key inserts a newline again; the Send button sends. A physical keyboard still
+  sends on Enter and inserts a newline on Shift+Enter. (0.8.0 asked the keyboard for a "Send" action, which took
+  the newline key away.)
+
 ## 0.8.0 — 2026-10-21 (versionCode 18)
 
 ### Added

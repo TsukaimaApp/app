@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -147,14 +146,17 @@ fun Composer(
                 enabled = enabled,
                 textStyle = TsukaimaType.body.copy(color = colors.ink1),
                 cursorBrush = SolidColor(colors.accent),
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { send() }),
+                // Default, not Send: the on-screen keyboard's Enter inserts a newline; the Send button sends.
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Default),
                 modifier = Modifier
                     .weight(1f)
                     .heightIn(max = 120.dp)
                     .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
                     .onPreviewKeyEvent { event ->
-                        if (event.key == Key.Enter && !event.isShiftPressed) {
+                        // A physical keyboard sends on Enter (Shift+Enter = newline); the virtual one never does.
+                        if (event.key == Key.Enter &&
+                            ComposerKeys.enterSends(event.nativeKeyEvent.deviceId, event.isShiftPressed)
+                        ) {
                             if (event.type == KeyEventType.KeyDown) send()
                             true
                         } else {
