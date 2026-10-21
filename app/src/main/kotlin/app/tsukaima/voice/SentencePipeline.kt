@@ -46,8 +46,9 @@ class SentencePipeline<T : Any>(
 
     /**
      * The sentence [text], produced (or taken from the prefetch when it is that sentence); then [next], if given, is
-     * prefetched. Null when [produce] gave nothing or [cancel] interrupted it. Cancelling the caller cancels the
-     * production and the prefetch.
+     * prefetched. Null when [produce] gave nothing or [cancel] interrupted it. Cancelling the caller cancels this
+     * call's own sentence, and the prefetch only if this call started it and it is still the one ahead: a newer [take]
+     * that began before this one unwound keeps its sentence and its prefetch.
      */
     suspend fun take(text: String, next: String? = null): T? {
         val entry = ahead?.takeIf { it.text == text }?.also { ahead = null } ?: run {
@@ -55,13 +56,17 @@ class SentencePipeline<T : Any>(
             start(text)
         }
         current = entry
+        val aheadBefore = ahead
         if (next != null) prefetch(next)
+        val ownAhead = ahead?.takeIf { it !== aheadBefore }
         return try {
             entry.job.await()
             if (entry.cancelled) null else entry.result.also { entry.result = null }
         } catch (e: CancellationException) {
             if (!currentCoroutineContext().isActive) {
-                cancel() // the caller was cancelled: nothing it started may play or linger
+                // The caller was cancelled: what this call started may not play or linger (and nothing else is touched).
+                cancelEntry(entry)
+                if (ownAhead != null && ahead === ownAhead) dropAhead()
                 throw e
             }
             null // [cancel] stopped this sentence
@@ -70,11 +75,14 @@ class SentencePipeline<T : Any>(
         }
     }
 
-    /** Starts producing [text] ahead (one sentence at most: an earlier prefetch of other text is dropped). */
-    fun prefetch(text: String) {
+    /**
+     * Starts producing [text] ahead (one sentence at most: an earlier prefetch of other text is dropped); null = no
+     * sentence follows any more, so a prefetch is dropped.
+     */
+    fun prefetch(text: String?) {
         if (ahead?.text == text) return
         dropAhead()
-        ahead = start(text)
+        if (text != null) ahead = start(text)
     }
 
     /** Stop: cancels the sentence being produced and the prefetched one, discarding its result. */

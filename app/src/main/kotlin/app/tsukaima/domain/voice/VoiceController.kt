@@ -163,7 +163,10 @@ class VoiceController(
         val voiceEra = (itemsBeforeRebuild.size - _state.value.startIndex).coerceAtLeast(0)
         val replies = items.filterIsInstance<ChatItem.AssistantMessage>()
         val ids = replies.mapTo(HashSet()) { it.id }
-        queue.removeAll { it.id in ids } // queued from the rebuilt transcript before this call: never spoken
+        val removed = queue.removeAll { it.id in ids } // queued from the rebuilt transcript before this call: never spoken
+        if (removed && current?.text != null && current?.id !in ids) {
+            output.prefetch(queue.firstOrNull { it.text != null }?.text) // the sentence prepared next may be gone
+        }
         if (current?.id in ids) {
             output.stop()
             interruptedSinceLastSend = true

@@ -537,6 +537,29 @@ class VoiceControllerTest {
         }
     }
 
+    @Test fun rebasedDropsThePrefetchOfARemovedSentence() = runTest {
+        val r = rig(unconfined = true)
+        say(r, "which kernel")
+        r.add(ChatItem.UserMessage("u-l1", "which kernel"))
+        r.add(reply("a1", "Version 6.17.", streaming = false), AgentStatus.Idle)
+        assertTrue(r.output.speaking)
+        val before = r.chat.value.items
+        val stops = r.output.stopped
+
+        // The collector queues the rebuilt reply behind the sentence playing, hinting its first sentence...
+        r.chat.update {
+            it.copy(items = listOf(ChatItem.UserMessage("h-1", "which kernel"), reply("h-2", "Yes. Sure.", streaming = false)))
+        }
+        assertEquals(listOf("Yes."), r.output.hints)
+        // ...and the rebase removes it: the prepared sentence is dropped now, the one playing goes on.
+        r.controller.rebased(before)
+        assertEquals(listOf("Yes.", "<none>"), r.output.hints)
+        assertEquals(stops, r.output.stopped)
+        r.output.finishSpeaking()
+        advanceUntilIdle()
+        assertEquals(listOf("Version 6.17."), r.output.spoken)
+    }
+
     @Test fun rebasedStopsARebuiltReplyTheCollectorAlreadyStartedSpeaking() = runTest {
         val r = rig(unconfined = true)
         say(r, "which kernel")

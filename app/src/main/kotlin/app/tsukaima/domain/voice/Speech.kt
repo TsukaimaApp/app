@@ -41,8 +41,11 @@ interface SpeechOutput {
     /** [speak], hinting that [next] (if any) follows: an engine that synthesises remotely may prepare it meanwhile. */
     suspend fun speak(text: String, next: String?) = speak(text)
 
-    /** [text] is the next sentence after the one being spoken (it arrived while that one plays); a hint only. */
-    fun prefetch(text: String) {}
+    /**
+     * [text] is the next sentence after the one being spoken (it arrived while that one plays, or the queue changed);
+     * null = none follows any more. A hint only.
+     */
+    fun prefetch(text: String?) {}
 
     /** Stops whatever is being spoken. */
     fun stop()

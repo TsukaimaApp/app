@@ -64,8 +64,8 @@ internal class FakeSpeechOutput(var instant: Boolean = false, override val avail
         speak(text)
     }
 
-    override fun prefetch(text: String) {
-        hints += text
+    override fun prefetch(text: String?) {
+        hints += text ?: "<none>"
     }
 
     override suspend fun speak(text: String) {

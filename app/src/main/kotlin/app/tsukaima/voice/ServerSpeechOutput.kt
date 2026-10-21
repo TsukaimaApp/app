@@ -11,6 +11,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import app.tsukaima.data.api.ApiException
 import app.tsukaima.data.api.SpeechDto
@@ -64,8 +65,14 @@ class ServerSpeechOutput(
     private val pipeline = SentencePipeline(
         CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
         produce = ::synthesizeToFile,
-        discard = { it.delete() },
+        discard = { file -> io.launch { file.delete() } },
     )
+
+    /** File deletes off the main thread. */
+    private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Held by the stale-file sweep and every write, so the sweep never deletes a sentence just written. */
+    private val writeLock = Any()
 
     /** The stale `cache/tts` files (a process that died mid-sentence) are cleared, once, on the first write. */
     private val swept = AtomicBoolean()
@@ -114,13 +121,15 @@ class ServerSpeechOutput(
         var file: File? = null
         try {
             withContext(Dispatchers.IO) {
-                if (swept.compareAndSet(false, true)) dir.listFiles()?.forEach { it.delete() }
                 val (mime, audio) = DataUrl.decode(speech.dataUrl)
-                if (audio.isEmpty()) return@withContext
-                val f = File(dir, "${UUID.randomUUID()}.${DataUrl.audioExtension(speech.mimeType ?: mime)}")
-                file = f
-                dir.mkdirs()
-                f.writeBytes(audio)
+                synchronized(writeLock) {
+                    if (swept.compareAndSet(false, true)) dir.listFiles()?.forEach { it.delete() }
+                    if (audio.isEmpty()) return@withContext
+                    val f = File(dir, "${UUID.randomUUID()}.${DataUrl.audioExtension(speech.mimeType ?: mime)}")
+                    file = f
+                    dir.mkdirs()
+                    f.writeBytes(audio)
+                }
             }
         } catch (e: IllegalArgumentException) {
             Log.w(TAG, "Server speech output: unreadable audio (${e.message})")
@@ -159,8 +168,8 @@ class ServerSpeechOutput(
         }
     }
 
-    override fun prefetch(text: String) {
-        if (text.isNotBlank()) pipeline.prefetch(text)
+    override fun prefetch(text: String?) {
+        pipeline.prefetch(text?.takeIf { it.isNotBlank() })
     }
 
     override fun stop() {

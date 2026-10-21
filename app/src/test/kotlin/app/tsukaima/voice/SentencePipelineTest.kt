@@ -1,6 +1,7 @@
 package app.tsukaima.voice
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.TestScope
@@ -96,5 +97,24 @@ class SentencePipelineTest {
 
         // The next sentence after the stop is produced afresh.
         assertEquals("E.#5", p.take("E."))
+    }
+
+    @Test
+    fun aCancelledTakeUnwindingLateLeavesTheNewerTakeAndItsPrefetchAlone() = runTest {
+        val s = Synth()
+        val p = pipeline(s)
+        s.gates["A."] = CompletableDeferred()
+        val a = async { p.take("A.", next = "A2.") }
+        runCurrent() // A synthesising, A2 ready ahead
+        a.cancel() // the speak job is cancelled (a rebase); A has not unwound yet...
+        // ...when the next speak starts on the immediate dispatcher.
+        val b = async(start = CoroutineStart.UNDISPATCHED) { p.take("B.", next = "C.") }
+        runCurrent()
+        assertTrue(a.isCancelled)
+        assertEquals("B.#3", b.await())
+        assertEquals("C.", p.prefetched) // B's prefetch survived A's unwinding
+        runCurrent()
+        assertEquals(listOf("A2.#2"), s.discarded) // only A's own prefetch, dropped because B is not A2
+        assertEquals("C.#4", p.take("C."))
     }
 }
