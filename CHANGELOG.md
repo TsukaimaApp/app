@@ -3,6 +3,16 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## Unreleased
+
+### Fixed
+- Clarify questions: choices are full-width rows whose text wraps, so a long choice is read in full (they were
+  one-line chips cut with "…", which hid what was being picked). The question notification shows up to 300 characters
+  instead of 120.
+- Tool rows: tapping a row open unfolds its whole command or summary instead of keeping the one-line "…" cut, and a
+  row that came without a summary shows its arguments above the output. Risk and interruption notes are no longer cut
+  at two lines. Subagent rows unfold their goal and detail the same way.
+
 ## 0.9.2 — 2026-10-21 (versionCode 22)
 
 ### Fixed

@@ -55,6 +55,8 @@ import app.tsukaima.ui.theme.Motion
 import app.tsukaima.ui.theme.TsukaimaShapes
 import app.tsukaima.ui.theme.TsukaimaType
 import app.tsukaima.ui.theme.tsukaima
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Slim expandable row for a tool call: quiet by default, output on tap. [margin] is its outer spacing (none in the
@@ -109,7 +111,8 @@ fun ToolRow(
                 },
                 style = TsukaimaType.ui,
                 color = colors.ink2,
-                maxLines = 1,
+                // One line while collapsed; the tap that opens the row also unfolds the whole command.
+                maxLines = if (open) Int.MAX_VALUE else 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
@@ -127,6 +130,17 @@ fun ToolRow(
         item.risk?.let { RiskNote(it) }
         if (media != null) item.imageUrl?.let { ToolImage(item, it, media) }
         if (open) {
+            // Without a server-written summary the arguments are the only account of what the tool was asked to do.
+            if (item.context.isNullOrBlank()) argsText(item.args)?.let { args ->
+                Text(
+                    text = args,
+                    style = TsukaimaType.caption.copy(fontFamily = TsukaimaType.mono.fontFamily),
+                    color = colors.ink3,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
+                )
+            }
             Text(
                 text = item.output?.takeIf { it.isNotBlank() } ?: "No output",
                 style = if (thinking) TsukaimaType.caption else TsukaimaType.caption.copy(fontFamily = TsukaimaType.mono.fontFamily),
@@ -236,9 +250,18 @@ private fun WarnLine(text: String) {
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         TsukaimaIcon(IconName.Warning, contentDescription = null, size = 14.dp, tint = colors.warn)
-        Text(text, style = TsukaimaType.caption, color = colors.warn, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(text, style = TsukaimaType.caption, color = colors.warn)
     }
 }
+
+/**
+ * The tool's arguments as `key: value` lines (a string value verbatim, anything else as JSON), shown in an open
+ * row that has no [ChatItem.ToolCall.context]. Null when there are none.
+ */
+internal fun argsText(args: JsonObject?): String? =
+    args?.takeIf { it.isNotEmpty() }?.entries?.joinToString("\n") { (key, value) ->
+        "$key: ${(value as? JsonPrimitive)?.takeIf { it.isString }?.content ?: value.toString()}"
+    }
 
 /** "Output flagged: high risk · prompt injection · redacted". */
 internal fun riskText(risk: ToolRisk): String =

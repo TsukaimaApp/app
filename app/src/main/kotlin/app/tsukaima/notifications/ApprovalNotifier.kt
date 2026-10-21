@@ -70,7 +70,7 @@ object ApprovalNotifier {
     private const val HIDDEN_SUFFIX = " (hidden characters)"
     private const val APPROVAL_METHOD = "approval"
     private const val CLARIFY_METHOD = "clarify"
-    private const val MAX_QUESTION = 120
+    private const val MAX_QUESTION = 300
 
     fun approvalId(srqId: String): Int = srqId.hashCode()
     fun pairingId(platform: String, requestId: String): Int = "pairing:$platform:$requestId".hashCode()

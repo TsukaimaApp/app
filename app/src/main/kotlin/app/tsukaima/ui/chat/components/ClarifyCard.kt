@@ -1,11 +1,21 @@
 package app.tsukaima.ui.chat.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -17,6 +27,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.tsukaima.domain.chat.ChatItem
@@ -27,6 +40,10 @@ import app.tsukaima.ui.components.GhostButton
 import app.tsukaima.ui.components.IconName
 import app.tsukaima.ui.components.PrimaryButton
 import app.tsukaima.ui.components.TsukaimaTextField
+import app.tsukaima.ui.components.pressWash
+import app.tsukaima.ui.theme.Dimens
+import app.tsukaima.ui.theme.Motion
+import app.tsukaima.ui.theme.TsukaimaShapes
 import app.tsukaima.ui.theme.TsukaimaType
 import app.tsukaima.ui.theme.tsukaima
 
@@ -34,9 +51,9 @@ import app.tsukaima.ui.theme.tsukaima
 private class Draft(val picked: MutableState<List<String>>, val other: MutableState<String>, val otherOpen: MutableState<Boolean>)
 
 /**
- * Inline `clarify` request (same tier as [ApprovalCard]). Each question shows its choices as chips (one
- * selected, or toggles for `multi_select`) plus "Other…" with a text field, or just a text field when it has no
- * choices. Send carries every question (unanswered ones as null) and is enabled once one has an answer; Skip
+ * Inline `clarify` request (same tier as [ApprovalCard]). Each question shows its choices as full-width rows
+ * ([ChoiceRow]: one selected, or toggles for `multi_select`) plus "Other…" with a text field, or just a text field
+ * when it has no choices. Question and choice text wraps: nothing agent-written is cut short here. Send carries every question (unanswered ones as null) and is enabled once one has an answer; Skip
  * cancels them all. Question and choice text is agent-controlled, so it goes through [CommandText.reveal].
  * Once [ChatItem.Clarify.answered], the card shows the answers read-only.
  */
@@ -110,21 +127,21 @@ private fun QuestionInput(q: ClarifyQuestion, draft: Draft) {
         QuestionText(q)
         val choices = q.choices
         if (choices != null) {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 choices.forEach { choice ->
                     val label = remember(choice) { CommandText.reveal(choice).text }
-                    Chip(label, onClick = {
+                    ChoiceRow(label, selected = choice in picked, multi = q.multiSelect) {
                         picked = when {
                             q.multiSelect -> if (choice in picked) picked - choice else ArrayList(picked + choice)
                             else -> ArrayList(listOf(choice))
                         }
                         if (!q.multiSelect) otherOpen = false
-                    }, selected = choice in picked)
+                    }
                 }
-                Chip("Other…", onClick = {
+                ChoiceRow("Other…", selected = otherOpen, multi = q.multiSelect) {
                     otherOpen = !otherOpen
                     if (otherOpen && !q.multiSelect) picked = ArrayList()
-                }, selected = otherOpen)
+                }
             }
         }
         if (choices == null || otherOpen) {
@@ -136,6 +153,57 @@ private fun QuestionInput(q: ClarifyQuestion, draft: Draft) {
                 maxLines = 3,
             )
         }
+    }
+}
+
+/**
+ * One pickable choice: a full-width row whose text wraps, so a long choice (Hermes allows thousands of characters)
+ * is read in full, never cut to a chip. A dot (single) or square (multi) marks the selection; [selected] fills the
+ * row with `accentSelected` like a selected [Chip].
+ */
+@Composable
+private fun ChoiceRow(label: String, selected: Boolean, multi: Boolean, onClick: () -> Unit) {
+    val colors = MaterialTheme.tsukaima
+    val shape = TsukaimaShapes.row
+    val source = remember { MutableInteractionSource() }
+    val fill by animateColorAsState(
+        targetValue = if (selected) colors.accentSelected else Color.Transparent,
+        animationSpec = tween(Motion.quick, easing = Motion.easing),
+        label = "choiceFill",
+    )
+    val markShape = if (multi) RoundedCornerShape(4.dp) else CircleShape
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = Dimens.hit)
+            .clip(shape)
+            .background(fill)
+            .border(1.dp, if (selected) Color.Transparent else colors.hairline, shape)
+            .pressWash(source, shape)
+            .selectable(
+                selected = selected,
+                interactionSource = source,
+                indication = null,
+                role = if (multi) Role.Checkbox else Role.RadioButton,
+                onClick = onClick,
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            Modifier
+                .size(16.dp)
+                .clip(markShape)
+                .background(if (selected) colors.accent else Color.Transparent)
+                .border(1.5.dp, if (selected) colors.accent else colors.ink3, markShape),
+        )
+        Text(
+            label,
+            style = TsukaimaType.ui,
+            color = if (selected) colors.ink1 else colors.ink2,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
@@ -153,7 +221,11 @@ private fun AnsweredQuestion(q: ClarifyQuestion, answer: String?) {
 }
 
 private val sampleQuestions = listOf(
-    ClarifyQuestion("q1", "Which colour do you prefer?", listOf("red", "green", "blue"), multiSelect = false),
+    ClarifyQuestion(
+        "q1", "Which colour do you prefer?",
+        listOf("red (Recommended) — the warm one that matches the existing accent and keeps the contrast ratio above 4.5:1", "green", "blue"),
+        multiSelect = false,
+    ),
     ClarifyQuestion("q2", "Which toppings?", listOf("ham", "olives", "pineapple"), multiSelect = true),
     ClarifyQuestion("q3", "Anything else I should know?", null, multiSelect = false),
 )

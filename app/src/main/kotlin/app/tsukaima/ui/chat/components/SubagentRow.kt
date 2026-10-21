@@ -86,7 +86,8 @@ fun SubagentRow(item: ChatItem.Subagent, modifier: Modifier = Modifier) {
                 },
                 style = TsukaimaType.ui,
                 color = colors.ink2,
-                maxLines = 1,
+                // One line while collapsed; opening the row unfolds the whole goal.
+                maxLines = if (open) Int.MAX_VALUE else 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
@@ -105,7 +106,7 @@ fun SubagentRow(item: ChatItem.Subagent, modifier: Modifier = Modifier) {
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(subagentState(item), style = TsukaimaType.caption, color = colors.ink3)
-                item.detail?.let { Text(it, style = TsukaimaType.caption, color = colors.ink2, maxLines = 6, overflow = TextOverflow.Ellipsis) }
+                item.detail?.let { Text(it, style = TsukaimaType.caption, color = colors.ink2) }
                 item.summary?.let { Text(it, style = TsukaimaType.caption, color = colors.ink1) }
             }
         }

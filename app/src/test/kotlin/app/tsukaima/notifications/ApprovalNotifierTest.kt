@@ -201,9 +201,9 @@ class ApprovalNotifierTest {
         assertEquals(ApprovalNotifier.SCREEN_CHAT, spec.openScreen)
         assertEquals("20261020_010916_48c967", spec.sessionId)
 
-        // Agent-controlled text: hidden characters revealed, capped at 120 chars.
-        val long = ApprovalNotifier.forClarify(clarify("srq-r", "x".repeat(130) + "\u202E"))
-        assertEquals("x".repeat(120) + "…", long.text)
+        // Agent-controlled text: hidden characters revealed, capped at 300 chars (a BigTextStyle notification shows that much; the card in the chat shows all of it).
+        val long = ApprovalNotifier.forClarify(clarify("srq-r", "x".repeat(310) + "\u202E"))
+        assertEquals("x".repeat(300) + "…", long.text)
         val hidden = ApprovalNotifier.forClarify(clarify("srq-s", "ok\u202Eexe"))
         assertTrue(hidden.text, hidden.text.contains("U+202E"))
     }
