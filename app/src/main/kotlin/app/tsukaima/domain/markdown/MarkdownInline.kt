@@ -6,7 +6,8 @@ package app.tsukaima.domain.markdown
  * [MdSpan.Math]; `\[…\]` is display math only, a block of its own) and CommonMark backslash escapes: a backslash
  * before ASCII punctuation emits that character literally and never opens or closes a construct (inside code spans
  * and math it stays as typed). An unbalanced marker stays literal, so a half-streamed construct reads as text until
- * it closes. Never throws.
+ * it closes. Every emphasis, link and math closer search is memoised (positions only grow), so a long line of
+ * unmatched markers parses in linear time. Never throws.
  */
 internal object MarkdownInline {
     /** A link destination longer than this is not one (bounds the scan for its closing parenthesis). */
@@ -44,15 +45,18 @@ internal object MarkdownInline {
             )
         }
 
-        // Next `]` at or after a position; positions only grow, so one cached answer serves until passed.
-        var closeBracket = -2
-        fun nextCloseBracket(from: Int): Int {
-            if (closeBracket == -1 || closeBracket >= from) return closeBracket
-            closeBracket = s.indexOf(']', from)
-            return closeBracket
+        // Closers: the next of each at or after a position, memoised (see [NextIndex]). Each test depends on the
+        // closer's position alone, never on the opener, so a cached answer is right for any later opener.
+        val closeBracket = NextIndex { unescapedIndexOf(s, "]", it) } // `[a\]b](u)`: an escaped `]` is link text
+        val doubleTilde = NextIndex { unescapedIndexOf(s, "~~", it) }
+        val doubleStar = NextIndex { unescapedIndexOf(s, "**", it) }
+        val star = NextIndex { unescapedIndexOf(s, "*", it) }
+        // `_` closes only at a word boundary (`snake_case_name` has no closer).
+        val underscore = NextIndex { from ->
+            var k = unescapedIndexOf(s, "_", from)
+            while (k != -1 && k + 1 < s.length && s[k + 1].isLetterOrDigit()) k = unescapedIndexOf(s, "_", k + 1)
+            k
         }
-
-        // Math closers: the next of each at or after a position, memoised the same way.
         val newline = NextIndex { s.indexOf('\n', it) }
         val dollarCloser = NextIndex { from ->
             var k = s.indexOf('$', from)
@@ -87,9 +91,8 @@ internal object MarkdownInline {
                     if (math(i + 2, j)) i = j + 2 else { lit.append("$$"); i += 2 }
                 }
                 c == '$' -> {
-                    // `$5 and $10`: the opener needs a non-space after it, the closer a non-space before it and no digit after.
-                    val opens = i + 1 < s.length && !s[i + 1].isWhitespace()
-                    val j = if (opens) dollarCloser.next(i + 1) else -1
+                    // `$5 and $10`, `$HOME/$USER`, `a$b$c`: see [opensDollarMath] and [closesDollarMath].
+                    val j = if (opensDollarMath(s, i)) dollarCloser.next(i + 1) else -1
                     if (j > i + 1 && math(i + 1, j)) i = j + 1 else { lit.append(c); i++ }
                 }
                 c == '`' -> {
@@ -101,7 +104,7 @@ internal object MarkdownInline {
                 }
                 c == '[' || (c == '!' && i + 1 < s.length && s[i + 1] == '[') -> {
                     val open = if (c == '!') i + 1 else i
-                    val close = nextCloseBracket(open + 1)
+                    val close = closeBracket.next(open + 1)
                     val end = if (close > open && close + 1 < s.length && s[close + 1] == '(') destinationEnd(s, close + 2) else -1
                     if (end < 0) { lit.append(c); i++; continue }
                     val text = plainText(s.substring(open + 1, close))
@@ -123,25 +126,22 @@ internal object MarkdownInline {
                 }
                 !emphasis && (c == '~' || c == '*' || c == '_') -> { lit.append(c); i++ }
                 c == '~' && s.startsWith("~~", i) -> {
-                    val j = unescapedIndexOf(s, "~~", i + 2)
+                    val j = doubleTilde.next(i + 2)
                     if (j > i + 2) { emphasised(s.substring(i + 2, j), MdSpan::Strike) { it.copy(strike = true) }; i = j + 2 }
                     else { lit.append("~~"); i += 2 }
                 }
                 c == '*' && s.startsWith("**", i) -> {
-                    val j = unescapedIndexOf(s, "**", i + 2)
+                    val j = doubleStar.next(i + 2)
                     if (j > i + 2) { emphasised(s.substring(i + 2, j), MdSpan::Bold) { it.copy(bold = true) }; i = j + 2 }
                     else { lit.append("**"); i += 2 }
                 }
                 c == '*' -> {
-                    val j = if (i + 1 < s.length && !s[i + 1].isWhitespace()) unescapedIndexOf(s, "*", i + 1) else -1
+                    val j = if (i + 1 < s.length && !s[i + 1].isWhitespace()) star.next(i + 1) else -1
                     if (j > i + 1) { emphasised(s.substring(i + 1, j), MdSpan::Italic) { it.copy(italic = true) }; i = j + 1 }
                     else { lit.append(c); i++ }
                 }
                 c == '_' && (i == 0 || !s[i - 1].isLetterOrDigit()) -> {
-                    // TODO: this closer scan is neither memoised nor bounded: a long line of unmatched intraword `_`
-                    //  markers is quadratic. Memoise the next word-boundary `_` like the other closers.
-                    var j = unescapedIndexOf(s, "_", i + 1)
-                    while (j != -1 && j + 1 < s.length && s[j + 1].isLetterOrDigit()) j = unescapedIndexOf(s, "_", j + 1)
+                    val j = underscore.next(i + 1)
                     if (j > i + 1 && !s[i + 1].isWhitespace()) { emphasised(s.substring(i + 1, j), MdSpan::Italic) { it.copy(italic = true) }; i = j + 1 }
                     else { lit.append(c); i++ }
                 }
@@ -230,11 +230,21 @@ internal object MarkdownInline {
     }
 
     /**
-     * Whether the `$` at [k] may close inline math: a non-space before it, not backslash-escaped (`\$` is a dollar
-     * inside the TeX; `\\$` closes), no digit after it (`$5 and $10`).
+     * Whether the `$` at [i] may open inline math: a non-space after it (`$ 5`), and no ASCII letter or digit before
+     * it (`a$b$c`, `$HOME/$USER`). Shared with `SpeechText`, which must drop exactly what the chat shows as math.
      */
-    private fun closesDollarMath(s: String, k: Int): Boolean =
-        k > 0 && !s[k - 1].isWhitespace() && !isEscaped(s, k) && (k + 1 >= s.length || !s[k + 1].isDigit())
+    internal fun opensDollarMath(s: String, i: Int): Boolean =
+        i + 1 < s.length && !s[i + 1].isWhitespace() && (i == 0 || !s[i - 1].isAsciiLetterOrDigit())
+
+    /**
+     * Whether the `$` at [k] may close inline math: a non-space before it, not backslash-escaped (`\$` is a dollar
+     * inside the TeX; `\\$` closes), and no digit (`$5 and $10`) or ASCII letter (`$HOME/$USER`) after it.
+     */
+    internal fun closesDollarMath(s: String, k: Int): Boolean =
+        k > 0 && !s[k - 1].isWhitespace() && !isEscaped(s, k) &&
+            (k + 1 >= s.length || (!s[k + 1].isDigit() && !s[k + 1].isAsciiLetterOrDigit()))
+
+    private fun Char.isAsciiLetterOrDigit(): Boolean = this in 'a'..'z' || this in 'A'..'Z' || this in '0'..'9'
 
     /** Index of [target] at or after [from] whose first character is not backslash-escaped, or -1. */
     private fun unescapedIndexOf(s: String, target: String, from: Int): Int {

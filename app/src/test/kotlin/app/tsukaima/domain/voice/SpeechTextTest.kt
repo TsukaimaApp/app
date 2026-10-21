@@ -1,5 +1,8 @@
 package app.tsukaima.domain.voice
 
+import app.tsukaima.domain.markdown.Markdown
+import app.tsukaima.domain.markdown.MdBlock
+import app.tsukaima.domain.markdown.MdSpan
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -142,5 +145,30 @@ class SpeechTextTest {
         val long = SentenceChunker()
         val text = "$$ x\n" + (1..25).joinToString("") { "line $it\n" }
         assertEquals(true, long.feed(text).isNotEmpty())
+    }
+
+    @Test fun speechMatchesTheParserForDollars() {
+        // The parser reads `$a $b$` as one formula (the space before the middle `$` keeps it from closing).
+        assertEquals("see now", SpeechText.plain("see \$a \$b\$ now"))
+        assertEquals("echo \$HOME/\$USER", SpeechText.plain("echo \$HOME/\$USER"))
+        assertEquals("a\$b\$c", SpeechText.plain("a\$b\$c"))
+        assertEquals("(a\$x\$) () .", SpeechText.plain("(a\$x\$) (\$y\$) \$z\$."))
+        // Whatever the parser shows as text is what is spoken (no other markup in these lines).
+        val lines = listOf(
+            "see \$a \$b\$ now", "\$HOME/\$USER", "a\$b\$c", "(\$a+b\$)", "\$x\$.", "costs \$5 and \$10", "\$a \$b \$c\$ d\$",
+            "x \$y\$z \$w\$", "\$\$a\$ b\$",
+        )
+        for (line in lines) {
+            val shown = Markdown.parse(line).filterIsInstance<MdBlock.Paragraph>().flatMap { it.spans }
+                .joinToString("") { if (it is MdSpan.Text) it.s else "" }
+            assertEquals(line, shown.replace(Regex(" {2,}"), " ").trim(), SpeechText.plain(line))
+        }
+    }
+
+    @Test fun emptyDisplayMathIsTextInBoth() {
+        // The parser shows an empty `$$`/`$$` pair as text, so speech reads it too.
+        assertEquals("$$\n$$", SpeechText.plain("$$\n$$"))
+        assertEquals("So:\n$$\n$$\nDone.", SpeechText.plain("So:\n$$\n$$\nDone."))
+        assertEquals("[\n]", SpeechText.plain("\\[\n\\]"))
     }
 }

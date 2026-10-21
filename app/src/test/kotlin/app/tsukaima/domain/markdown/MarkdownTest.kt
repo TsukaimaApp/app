@@ -127,7 +127,7 @@ class MarkdownTest {
 
     @Test
     fun randomInputNeverThrows() {
-        val alphabet = "*_`\n -#abc$\\[]x"
+        val alphabet = "*_`\n -#abc$\\[](){}x"
         val rnd = Random(42)
         repeat(500) {
             val s = buildString { repeat(rnd.nextInt(0, 60)) { append(alphabet[rnd.nextInt(alphabet.length)]) } }
@@ -665,4 +665,58 @@ class MarkdownTest {
         assertEquals(listOf(para(MdSpan.Math("a\\\\"))), Markdown.parse("\$a\\\\\$"))
         assertEquals(listOf(para(MdSpan.Text("\$a\$"))), Markdown.parse("\$a\\\$"))
     }
+
+    @Test
+    fun shellVariablesAreNotMath() {
+        assertEquals(listOf(para(MdSpan.Text("echo \$HOME/\$USER"))), Markdown.parse("echo \$HOME/\$USER"))
+        assertEquals(listOf(para(MdSpan.Text("\$HOME/\$USER"))), Markdown.parse("\$HOME/\$USER"))
+    }
+
+    @Test
+    fun mathNextToLettersIsNotMath() {
+        assertEquals(listOf(para(MdSpan.Text("a\$b\$c"))), Markdown.parse("a\$b\$c"))
+        assertEquals(listOf(para(MdSpan.Text("x\$y\$ z"))), Markdown.parse("x\$y\$ z"))
+        assertEquals(listOf(para(MdSpan.Text("\$y\$z"))), Markdown.parse("\$y\$z"))
+        // Still math: delimited by punctuation or the line's ends.
+        assertEquals(listOf(para(MdSpan.Math("x"))), Markdown.parse("\$x\$"))
+        assertEquals(listOf(para(MdSpan.Text("("), MdSpan.Math("a+b"), MdSpan.Text(")"))), Markdown.parse("(\$a+b\$)"))
+        assertEquals(listOf(para(MdSpan.Math("x"), MdSpan.Text("."))), Markdown.parse("\$x\$."))
+    }
+
+    @Test
+    fun escapedBracketInLinkText() {
+        assertEquals(listOf(para(MdSpan.Link("a]b", "https://x.io"))), Markdown.parse("[a\\]b](https://x.io)"))
+        // An escaped backslash before `]` does not escape it.
+        assertEquals(listOf(para(MdSpan.Link("a\\", "https://x.io"))), Markdown.parse("[a\\\\](https://x.io)"))
+    }
+
+    @Test
+    fun emptyDisplayMathIsTextInBoth() {
+        assertEquals(listOf(para(MdSpan.Text("$$\n$$"))), Markdown.parse("$$\n$$"))
+        assertEquals(listOf(para(MdSpan.Text("[\n]"))), Markdown.parse("\\[\n\\]"))
+    }
+
+    /** Repeats per pathological input: large enough that a quadratic closer scan takes well over the 2 s bound. */
+    private val pathologicalRepeats = 40_000
+
+    /** One parse of a pathological input, timed with no warm-up; quadratic scans blow well past the bound. */
+    private fun assertParsesQuickly(s: String) {
+        val start = System.nanoTime()
+        Markdown.parse(s)
+        val ms = (System.nanoTime() - start) / 1_000_000
+        println("parse of ${s.take(3).replace("\n", "\\n")}× ${s.length / 3}: $ms ms")
+        assertTrue("took $ms ms", ms < 2_000)
+    }
+
+    @Test
+    fun underscoreClosersAreLinear() = assertParsesQuickly("_a ".repeat(pathologicalRepeats))
+
+    @Test
+    fun asteriskClosersAreLinear() = assertParsesQuickly("*a ".repeat(pathologicalRepeats))
+
+    @Test
+    fun dollarClosersAreLinear() = assertParsesQuickly("\$a ".repeat(pathologicalRepeats))
+
+    @Test
+    fun bracketClosersAreLinear() = assertParsesQuickly("[a ".repeat(pathologicalRepeats))
 }

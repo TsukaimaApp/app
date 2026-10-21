@@ -1,5 +1,6 @@
 package app.tsukaima.domain.voice
 
+import app.tsukaima.domain.markdown.MarkdownInline
 import app.tsukaima.domain.markdown.MarkdownTables
 
 /** Turns Hermes' markdown replies into what text-to-speech should say. */
@@ -26,18 +27,15 @@ object SpeechText {
     /** `\(…\)` inline math (read before escapes are hidden: `\(` is also an escaped parenthesis). */
     private val parenMath = Regex("\\\\\\((.+?)\\\\\\)")
     private val displayDollars = Regex("\\$\\$[^\n]+?\\$\\$")
-
-    /** `$…$` as the parser reads it: a non-space after the opener, before the closer, and no digit after it. */
-    private val inlineDollar = Regex("\\$(?=[^\\s$])[^$\n]*?(?<=[^\\s\\\\])\\$(?!\\d)")
     private val escape = Regex("\\\\([!-/:-@\\[-`{-~])")
 
     /**
      * Speakable text for [markdown]: fenced code blocks (an unterminated fence runs to the end), display math
-     * (`$$`/`\[` up to a closing line before any blank line, as in the parser; a stray opener is text), `MEDIA:` and
-     * whole-line image lines, and inline math are dropped; inline markup is reduced to its text (task boxes and
-     * backslash escapes too), links keep their label, bare URLs are dropped, and blank lines disappear. A table row
-     * reads as its cells joined with ", " (separator rows are dropped), and so are horizontal rules and setext
-     * underlines. The result is trimmed.
+     * (`$$`/`\[` up to a closing line before any blank line, as in the parser; a stray opener or an empty block is
+     * text), `MEDIA:` and whole-line image lines, and inline math (read as the parser reads it) are dropped; inline
+     * markup is reduced to its text (task boxes and backslash escapes too), links keep their label, bare URLs are
+     * dropped, and blank lines disappear. A table row reads as its cells joined with ", " (separator rows are
+     * dropped), and so are horizontal rules and setext underlines. The result is trimmed.
      */
     fun plain(markdown: String): String {
         val out = ArrayList<String>()
@@ -57,8 +55,11 @@ object SpeechText {
                 DisplayMath.Line -> continue
                 is DisplayMath.Opens -> if (unclosed[math.closer]?.let { index in it } != true) {
                     val close = closingLine(lines, index, math.closer)
-                    if (close > 0) { mathEnd = close; continue }
-                    unclosed[math.closer] = index..-close
+                    // An empty block (`$$` then `$$`) is no formula in the parser either: both lines read as text.
+                    val empty = close == index + 1 && math.head.isBlank() &&
+                        lines[close].trim().dropLast(math.closer.length).isBlank()
+                    if (close > 0 && !empty) { mathEnd = close; continue }
+                    if (close <= 0) unclosed[math.closer] = index..-close
                 }
                 null -> Unit
             }
@@ -71,7 +72,7 @@ object SpeechText {
             s = parenMath.replace(s, "")
             s = hideEscapes(s)
             s = displayDollars.replace(s, "")
-            s = inlineDollar.replace(s, "")
+            s = dropInlineDollarMath(s)
             s = link.replace(s) { it.groupValues[1] }
             s = url.replace(s, "")
             s = inlineCode.replace(s) { it.groupValues[1] }
@@ -87,7 +88,7 @@ object SpeechText {
     /** A trimmed line's display math: a whole one-line formula, or the opener of a block that [Opens.closer] ends. */
     private sealed interface DisplayMath {
         data object Line : DisplayMath
-        data class Opens(val closer: String) : DisplayMath
+        data class Opens(val closer: String, val head: String) : DisplayMath
     }
 
     /** Mirrors the parser: `$$`/`\[` opens; `$$a$$ and $$b$$` is inline math in a sentence, not a block. */
@@ -98,9 +99,41 @@ object SpeechText {
             else -> return null
         }
         val head = trimmed.substring(open.length)
-        if (!head.endsWith(close)) return DisplayMath.Opens(close)
+        if (!head.endsWith(close)) return DisplayMath.Opens(close, head)
         val tex = head.dropLast(close.length)
         return if (open !in tex && close !in tex) DisplayMath.Line else null
+    }
+
+    /**
+     * The line without its `$…$` inline math, read exactly as the parser reads it (the same opener and closer tests,
+     * the first closer after an opener ends it): `$a $b$` is one formula, `$HOME/$USER` and `$5 and $10` are text.
+     * Runs after [hideEscapes] (an escaped `$` is no delimiter) and after `$$…$$` is dropped; a leftover `$$` is
+     * text, as in the parser. Linear: the next closer is memoised, as in the parser.
+     */
+    private fun dropInlineDollarMath(s: String): String {
+        if ('$' !in s) return s
+        val out = StringBuilder(s.length)
+        var closer = -2
+        fun nextCloser(from: Int): Int {
+            if (closer == -1 || closer >= from) return closer
+            var k = s.indexOf('$', from)
+            while (k != -1 && !MarkdownInline.closesDollarMath(s, k)) k = s.indexOf('$', k + 1)
+            closer = k
+            return k
+        }
+        var i = 0
+        while (i < s.length) {
+            val c = s[i]
+            when {
+                c == '$' && s.startsWith("$$", i) -> { out.append("$$"); i += 2 }
+                c == '$' && MarkdownInline.opensDollarMath(s, i) -> {
+                    val j = nextCloser(i + 1)
+                    if (j > i + 1) i = j + 1 else { out.append(c); i++ }
+                }
+                else -> { out.append(c); i++ }
+            }
+        }
+        return out.toString()
     }
 
     /**
