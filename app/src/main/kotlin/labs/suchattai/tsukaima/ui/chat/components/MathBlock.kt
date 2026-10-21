@@ -30,6 +30,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
+import labs.suchattai.tsukaima.domain.markdown.MathSafety
 import labs.suchattai.tsukaima.domain.markdown.MdSpan
 import labs.suchattai.tsukaima.ui.theme.TsukaimaType
 import labs.suchattai.tsukaima.ui.theme.tsukaima
@@ -52,8 +53,12 @@ private val texCache = object : LruCache<TexKey, TexResult>(16 * 1024 * 1024) {
     override fun sizeOf(key: TexKey, value: TexResult): Int = value.bitmap?.asAndroidBitmap()?.byteCount ?: 1
 }
 
-/** [tex] drawn by JLatexMath at [px] text size in [argb], or null when it does not parse or is too big to draw. */
+/**
+ * [tex] drawn by JLatexMath at [px] text size in [argb], or null when [MathSafety] refuses it, it does not parse, or
+ * it is too big to draw.
+ */
 private fun texBitmap(context: Context, tex: String, px: Float, argb: Int): ImageBitmap? {
+    if (!MathSafety.allowed(tex)) return null
     val key = TexKey(tex, px, argb)
     texCache.get(key)?.let { return it.bitmap }
     val bitmap = runCatching {
@@ -103,8 +108,8 @@ internal fun rememberMathContent(spans: List<MdSpan>, style: TextStyle, color: C
 }
 
 /**
- * A display formula, centred; wider than the column, it scrolls sideways. A formula JLatexMath cannot draw shows
- * its TeX source as a code block.
+ * A display formula, centred; wider than the column, it scrolls sideways. A formula JLatexMath cannot draw (or
+ * [MathSafety] refuses) shows its TeX source as a code block.
  */
 @Composable
 fun MathBlock(tex: String, modifier: Modifier = Modifier) {

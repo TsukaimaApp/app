@@ -67,8 +67,8 @@ sealed interface MdBlock {
     data class Image(val alt: String, val url: String) : MdBlock
 
     /**
-     * Display TeX: `$$…$$` or `\[…\]` starting a line and closing at the end of the same or a later line. [tex] is
-     * verbatim (no markdown inside), trimmed; an unclosed opener stays text.
+     * Display TeX: `$$…$$` or `\[…\]` starting a line and closing at the end of the same or a later line, with no
+     * blank line between. [tex] is verbatim (no markdown inside), trimmed; an unclosed opener stays text.
      */
     data class Math(val tex: String) : MdBlock
 }
@@ -95,7 +95,7 @@ object Markdown {
         val blocks = mutableListOf<MdBlock>()
         val para = mutableListOf<String>()
         var list: ListBuilder? = null
-        val unclosedMath = HashMap<String, Int>(2)
+        val unclosedMath = HashMap<String, IntRange>(2)
 
         fun flushPara() {
             if (para.isNotEmpty()) {
@@ -233,11 +233,12 @@ object Markdown {
     /**
      * The display math starting at `lines[start]` and the index of the line after it, or null. The opener (`$$` or
      * `\[`) begins the trimmed line; the closer (`$$` or `\]`) ends the trimmed line, on this line or a later one. A
-     * one-line `$$a$$ and $$b$$` is no block (inline math in a paragraph). Without a closer, nothing is one. A scan
-     * that reaches the end is remembered in [unclosedFrom] (per closer), so later openers fail at once and many
-     * unclosed openers stay linear.
+     * one-line `$$a$$ and $$b$$` is no block (inline math in a paragraph). As in pandoc, a blank line ends the search:
+     * a typo'd `$$a = b` cannot swallow the blocks after it. Without a closer, nothing is one. A failed scan is
+     * remembered in [unclosed] (per closer: its start and where it stopped), so a later opener inside the same stretch
+     * fails at once and many unclosed openers stay linear.
      */
-    private fun displayMath(lines: List<String>, start: Int, unclosedFrom: MutableMap<String, Int>): Pair<MdBlock.Math, Int>? {
+    private fun displayMath(lines: List<String>, start: Int, unclosed: MutableMap<String, IntRange>): Pair<MdBlock.Math, Int>? {
         val first = lines[start].trim()
         val (open, close) = when {
             first.startsWith("$$") -> "$$" to "$$"
@@ -250,12 +251,13 @@ object Markdown {
             // `$$a$$ b $$c$$` and a bare `$$` are not one-line blocks; a bare `$$` opens a multi-line one below.
             return if (tex.isNotBlank() && open !in tex && close !in tex) MdBlock.Math(tex.trim()) to start + 1 else null
         }
-        // An earlier opener of this kind already scanned to the end without meeting a closer: so would this one.
-        if (unclosedFrom[close]?.let { it < start } == true) return null
+        // An earlier opener of this kind already scanned past this line without meeting a closer: so would this one.
+        if (unclosed[close]?.let { start in it } == true) return null
         val body = StringBuilder(head)
         var i = start + 1
         while (i < lines.size) {
             val t = lines[i].trim()
+            if (t.isEmpty()) break
             if (t.endsWith(close)) {
                 if (body.isNotEmpty()) body.append('\n')
                 body.append(t.dropLast(close.length))
@@ -266,7 +268,7 @@ object Markdown {
             body.append(t)
             i++
         }
-        unclosedFrom[close] = start
+        unclosed[close] = start..i
         return null
     }
 

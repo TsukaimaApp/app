@@ -41,6 +41,8 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.ui.unit.dp
@@ -239,7 +241,16 @@ private fun MarkdownList(items: List<MdListItem>, caret: Boolean, caretContent: 
                     val glyph = when (item.depth) { 0 -> "•"; 1 -> "◦"; else -> "▪" }
                     Text(glyph, style = TsukaimaType.body, color = colors.ink2)
                 }
-                if (box != null) Text(box, style = TsukaimaType.body, color = colors.ink2)
+                if (box != null) {
+                    Text(
+                        box,
+                        style = TsukaimaType.body,
+                        color = colors.ink2,
+                        modifier = Modifier.semantics {
+                            stateDescription = if (item.checked == true) "Checked" else "Not checked"
+                        },
+                    )
+                }
                 InlineText(
                     spans = item.spans,
                     style = TsukaimaType.body,

@@ -128,4 +128,19 @@ class SpeechTextTest {
         assertEquals(listOf("$$\nx = 1.\ny = 2\n$$", "Done."), chunks)
         assertEquals("", SpeechText.plain(chunks[0]))
     }
+
+    @Test fun aStrayDisplayMathOpenerIsText() {
+        val spoken = SpeechText.plain("$$ is the PID\nThen restart.")
+        assertEquals(true, "Then restart." in spoken)
+        // Unclosed before the blank line: text in the chat, so read as text too.
+        assertEquals("$$\n\\sum x\nThen restart.", SpeechText.plain("$$\n\\sum x\n\nThen restart."))
+    }
+
+    @Test fun chunkerIsNotBlockedByAStrayDisplayMathOpener() {
+        val c = SentenceChunker()
+        assertEquals(listOf("$$ is the PID", "Then restart."), c.feed("$$ is the PID\n\nThen restart. Next"))
+        val long = SentenceChunker()
+        val text = "$$ x\n" + (1..25).joinToString("") { "line $it\n" }
+        assertEquals(true, long.feed(text).isNotEmpty())
+    }
 }

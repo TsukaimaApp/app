@@ -229,11 +229,11 @@ internal object MarkdownInline {
     }
 
     /**
-     * Whether the `$` at [k] may close inline math: a non-space before it (and not a backslash: `\$` is a dollar
-     * inside the TeX), no digit after it (`$5 and $10`).
+     * Whether the `$` at [k] may close inline math: a non-space before it, not backslash-escaped (`\$` is a dollar
+     * inside the TeX; `\\$` closes), no digit after it (`$5 and $10`).
      */
     private fun closesDollarMath(s: String, k: Int): Boolean =
-        k > 0 && !s[k - 1].isWhitespace() && s[k - 1] != '\\' && (k + 1 >= s.length || !s[k + 1].isDigit())
+        k > 0 && !s[k - 1].isWhitespace() && !isEscaped(s, k) && (k + 1 >= s.length || !s[k + 1].isDigit())
 
     /** Index of [target] at or after [from] whose first character is not backslash-escaped, or -1. */
     private fun unescapedIndexOf(s: String, target: String, from: Int): Int {

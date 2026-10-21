@@ -36,4 +36,11 @@ class MathUiTest : ComposeUiTest() {
         compose.onNodeWithText("\\nosuchmacro{1}").assertExists()
         compose.onNodeWithText("x \\left( y").assertExists()
     }
+
+    @Test
+    fun `a refused formula renders as its source text`() {
+        setThemed { MarkdownText(listOf(MdBlock.Math("\\input{/etc/passwd}"))) }
+
+        compose.onNodeWithText("\\input{/etc/passwd}").assertExists()
+    }
 }

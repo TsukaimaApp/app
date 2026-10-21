@@ -650,4 +650,19 @@ class MarkdownTest {
         for (s in inputs) Markdown.parse(s)
         assertTrue("took too long", System.nanoTime() - start < 5_000_000_000L)
     }
+
+    @Test
+    fun displayMathSearchStopsAtABlankLine() {
+        assertEquals(
+            listOf(para(MdSpan.Text("$$" + "a = b")), MdBlock.Heading(1, t("Title")), para(MdSpan.Text("more $$"))),
+            Markdown.parse("$$" + "a = b\n\n# Title\n\nmore $$"),
+        )
+        assertEquals(listOf(para(MdSpan.Text("$$\nx")), MdBlock.Math("y")), Markdown.parse("$$\nx\n\n$$" + "y$$"))
+    }
+
+    @Test
+    fun anEscapedBackslashBeforeTheDollarStillCloses() {
+        assertEquals(listOf(para(MdSpan.Math("a\\\\"))), Markdown.parse("\$a\\\\\$"))
+        assertEquals(listOf(para(MdSpan.Text("\$a\$"))), Markdown.parse("\$a\\\$"))
+    }
 }

@@ -32,8 +32,8 @@ object SpeechText {
     private val escape = Regex("\\\\([!-/:-@\\[-`{-~])")
 
     /**
-     * Speakable text for [markdown]: fenced code blocks and display math (`$$`/`\[` lines; either one unterminated
-     * runs to the end), and `MEDIA:` and whole-line image lines are dropped, inline math is dropped, inline markup is
+     * Speakable text for [markdown]: fenced code blocks (an unterminated fence runs to the end) and display math
+     * (`$$`/`\[` up to a closing line before any blank line, as in the parser; a stray opener is text), and `MEDIA:` and whole-line image lines are dropped, inline math is dropped, inline markup is
      * reduced to its text (task boxes and backslash escapes too), links keep their label, bare URLs are dropped, and
      * blank lines disappear. A table row reads as its cells joined with ", "
      * (separator rows are dropped), and so are horizontal rules and setext underlines. The result is trimmed.
@@ -41,21 +41,23 @@ object SpeechText {
     fun plain(markdown: String): String {
         val out = ArrayList<String>()
         var inFence = false
-        var mathCloser: String? = null
-        for (raw in markdown.lines()) {
-            if (mathCloser == null && fence.containsMatchIn(raw)) {
+        val lines = markdown.lines()
+        var mathEnd = -1 // lines up to this index belong to a display-math block
+        val unclosed = HashMap<String, IntRange>(2) // as in the parser: a failed scan, so later openers in it fail at once
+        for ((index, raw) in lines.withIndex()) {
+            if (index <= mathEnd) continue
+            if (fence.containsMatchIn(raw)) {
                 inFence = !inFence
                 continue
             }
             if (inFence || media.containsMatchIn(raw)) continue
-            val closer = mathCloser
-            if (closer != null) {
-                if (raw.trim().endsWith(closer)) mathCloser = null
-                continue
-            }
             when (val math = displayMath(raw.trim())) {
                 DisplayMath.Line -> continue
-                is DisplayMath.Opens -> { mathCloser = math.closer; continue }
+                is DisplayMath.Opens -> if (unclosed[math.closer]?.let { index in it } != true) {
+                    val close = closingLine(lines, index, math.closer)
+                    if (close > 0) { mathEnd = close; continue }
+                    unclosed[math.closer] = index..-close
+                }
                 null -> Unit
             }
             // The quote marker goes first, so a quoted table row or rule reads like an unquoted one.
@@ -97,6 +99,21 @@ object SpeechText {
         if (!head.endsWith(close)) return DisplayMath.Opens(close)
         val tex = head.dropLast(close.length)
         return if (open !in tex && close !in tex) DisplayMath.Line else null
+    }
+
+    /**
+     * The index of the line after [start] that ends with [closer], before any blank line (as in the parser); when
+     * there is none, minus the index where the search stopped (a stray `$$` line is then ordinary text).
+     */
+    private fun closingLine(lines: List<String>, start: Int, closer: String): Int {
+        var i = start + 1
+        while (i < lines.size) {
+            val t = lines[i].trim()
+            if (t.isEmpty()) break
+            if (t.endsWith(closer)) return i
+            i++
+        }
+        return -i
     }
 
     /**
@@ -203,8 +220,10 @@ class SentenceChunker {
 
     /**
      * When the line at [start] opens a multi-line display-math block (`$$` or `\[`, as in the parser), the index of
-     * the newline ending its closing line (the text's length when that line is the last); [Int.MAX_VALUE] while the
-     * closer has not arrived; -1 for any other line. The block then reaches `SpeechText.plain` whole, which drops it.
+     * the newline ending its closing line (the text's length when that line is the last), so the block reaches
+     * `SpeechText.plain` whole, which drops it. While the closer may still arrive (no blank line yet, fewer than
+     * [MATH_HOLD_LINES] lines so far), [Int.MAX_VALUE] holds the rest back. -1 for any other line, a blank line before
+     * a closer, or a longer wait: a stray `$$` line never silences the rest of the reply.
      */
     private fun displayMathEnd(text: String, start: Int): Int {
         var lineEnd = text.indexOf('\n', start).let { if (it < 0) text.length else it }
@@ -215,12 +234,17 @@ class SentenceChunker {
             else -> return -1
         }
         if (first.length > 2 && first.endsWith(close)) return -1 // a one-line formula (or inline math): one line anyway
-        while (lineEnd < text.length) {
+        var lines = 0
+        while (lineEnd < text.length && lines < MATH_HOLD_LINES) {
             val next = lineEnd + 1
             lineEnd = text.indexOf('\n', next).let { if (it < 0) text.length else it }
-            if (text.substring(next, lineEnd).trim().endsWith(close)) return lineEnd
+            val t = text.substring(next, lineEnd).trim()
+            // A trailing empty "line" after a final newline is where the next line will stream in, not a blank line.
+            if (t.isEmpty() && lineEnd < text.length) return -1
+            if (t.endsWith(close)) return lineEnd
+            lines++
         }
-        return Int.MAX_VALUE
+        return if (lineEnd >= text.length && lines < MATH_HOLD_LINES) Int.MAX_VALUE else -1
     }
 
     /** Whatever is left, trimmed (null when blank); resets the chunker. */
@@ -233,5 +257,8 @@ class SentenceChunker {
 
     private companion object {
         const val TERMINATORS = ".!?…:"
+
+        /** A display-math opener holds speech back for at most this many lines while its closer streams in. */
+        const val MATH_HOLD_LINES = 20
     }
 }
