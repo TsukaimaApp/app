@@ -8,7 +8,8 @@
 //   - axe-core (wcag2a + wcag2aa) reports no serious or critical violations;
 //   - no horizontal page scroll at 360, 390 and 1280 px wide;
 //   - prefers-reduced-motion: reduce stops the flair cycling and the dot pulse;
-//   - without reduced motion the hero flair verb changes within 4 s;
+//   - without reduced motion the hero flair verb changes within 4 s, makes one pass and settles on the static line;
+//   - every request the page makes is file:, data: or about: (no third-party requests), in every step;
 //   - with JavaScript disabled the approval card is visible;
 //   - Approve swaps the card for a tool row and a reply, Deny swaps in the other reply, Reset restores the card.
 // Writes full-page screenshots site-1280.png and site-390.png to SHOTS_DIR. Exit 0 = pass, 1 = any failure.
@@ -38,11 +39,14 @@ async function step(browser, name, opts, fn) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('requestfailed', (r) => errors.push(`request failed: ${r.url()} (${r.failure()?.errorText})`));
+  const offPage = [];
+  page.on('request', (r) => { if (!/^(file|data|about):/i.test(r.url())) offPage.push(r.url()); });
   try {
     await page.goto(PAGE, { waitUntil: 'load' });
     await page.evaluate(() => document.fonts.ready);
     await fn(page);
     check(errors.length === 0, `${name}: no page errors or failed requests`, errors.join('; '));
+    check(offPage.length === 0, `${name}: only file:, data: and about: requests`, offPage.join(', '));
   } catch (e) {
     check(false, name, e.message.split('\n')[0]);
   } finally {
@@ -104,12 +108,18 @@ try {
     const changed = await page.waitForFunction((b) => document.querySelector('#flair').textContent !== b, before, { timeout: 4000 })
       .then(() => true, () => false);
     check(changed, 'flair changes within 4 s', `${JSON.stringify(before)} -> ${JSON.stringify(await flair(page))}`);
+    // One pass of ten verbs at 2.2 s each, then the static line again; it must then stay put.
+    const settled = await page.waitForFunction((b) => document.querySelector('#flair').textContent === b, before, { timeout: 30000 })
+      .then(() => true, () => false);
+    await page.waitForTimeout(3000);
+    const last = await flair(page);
+    check(settled && last === before, 'flair stops on the static line after one pass', JSON.stringify(last));
   });
 
   await step(browser, 'no javascript', { javaScriptEnabled: false }, async (page) => {
     check(await page.locator('#d-approval .approval').isVisible(), 'JS off: approval card visible');
     check(!(await page.locator('#d-approval .approval-done').isVisible()), 'JS off: approval result hidden');
-    check(await page.locator('#flair').textContent() === 'Running shell command…', 'JS off: hero status is the static line');
+    check(await page.locator('#flair').textContent() === 'Running shell command', 'JS off: hero status is the static line');
   });
 
   await step(browser, 'approval demo', {}, async (page) => {

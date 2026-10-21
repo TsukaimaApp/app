@@ -1,17 +1,16 @@
 name: Site
 
-# Checks run on every branch and pull request that touches the site or its tooling; only main deploys.
+# Checks run on every branch and pull request that touches the site, its tooling or this workflow; only main deploys.
 on:
   push:
-    paths: ['site/**', 'scripts/site/**']
+    paths: ['site/**', 'scripts/site/**', '.github/workflows/pages.yml']
   pull_request:
-    paths: ['site/**', 'scripts/site/**']
+    paths: ['site/**', 'scripts/site/**', '.github/workflows/pages.yml']
   workflow_dispatch:
 
+# The check job reads the repo only; the Pages permissions are granted to the deploy job alone.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # One run per ref: deployments from main queue behind each other instead of cancelling; branch checks run independently.
 concurrency:
@@ -36,6 +35,10 @@ jobs:
     # Only main deploys: a push, or a manual run on main. Other branches and pull requests stop after the checks.
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

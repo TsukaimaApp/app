@@ -64,6 +64,7 @@ a{color:var(--accent);text-decoration:none}a:hover{color:var(--accent-pressed)}
 :focus-visible{outline:2px solid transparent;box-shadow:var(--ring-focus);border-radius:4px}
 .wrap{max-width:1080px;margin:0 auto;padding:0 var(--sp-6)}
 nav{display:flex;align-items:center;justify-content:space-between;padding:22px 0}
+[lang="ja"]{font-family:var(--font-kanji)}
 .lock{display:flex;align-items:center;gap:10px;font:var(--type-wordmark);font-size:22px;color:var(--text-body)}.lock img{height:24px;width:auto}.lock .k{font-family:var(--font-kanji);font-size:11px;color:var(--text-tertiary)}
 .links{display:flex;gap:28px;font:var(--type-ui);color:var(--text-secondary)}.links a{color:inherit}.links a:hover{color:var(--text-body)}
 .hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:48px;align-items:center;padding:56px 0 72px}
@@ -177,6 +178,7 @@ details p{margin:10px 0 0;color:var(--text-secondary);text-wrap:pretty}
 .bubble{width:fit-content;max-width:82%;box-sizing:border-box;margin:4px var(--gutter-page) 4px auto;padding:10px 14px;background:var(--bubble-user);color:var(--bubble-user-ink);font:var(--type-body);border-radius:var(--radius-card) var(--radius-card) 6px var(--radius-card)}
 .msg{max-width:640px;padding:4px var(--gutter-page);font:var(--type-body);color:var(--text-body)}
 .msg p{margin:0;color:inherit}
+.msg .rsn{display:flex;align-items:center;gap:4px;margin:0 0 6px;padding:4px 0;font:var(--type-caption);color:var(--text-tertiary)}.msg .rsn .i{width:16px;height:16px}
 
 /* tool row (ToolRow.jsx) */
 .toolrow{margin:6px var(--gutter-page);border:1px solid var(--border-hairline);border-radius:var(--radius-row);background:var(--surface-raised);overflow:hidden}

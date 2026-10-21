@@ -2,10 +2,10 @@ name: Android CI
 
 on:
   push:
-    # Site, docs and design-kit commits do not rebuild the app.
-    paths-ignore: ['site/**', 'docs/**', 'design/**']
+    # Site (and site tooling), docs and design-kit commits do not rebuild the app.
+    paths-ignore: ['site/**', 'scripts/site/**', 'docs/**', 'design/**']
   pull_request:
-    paths-ignore: ['site/**', 'docs/**', 'design/**']
+    paths-ignore: ['site/**', 'scripts/site/**', 'docs/**', 'design/**']
 
 permissions:
   contents: read

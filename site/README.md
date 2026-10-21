@@ -22,8 +22,8 @@ Each release carries the signed APK as an asset; "Download APK" and Obtainium bo
 
 ## Publishing
 
-`.github/workflows/pages.yml` runs the checks on every push and pull request that touches `site/**` or
-`scripts/site/**`, on any branch, and deploys this directory only from `main` (a push, or a manual run on `main`).
+`.github/workflows/pages.yml` runs the checks on every push and pull request that touches `site/**`,
+`scripts/site/**` or the workflow itself, on any branch, and deploys this directory only from `main` (a push, or a manual run on `main`).
 Until Pages is enabled the deploy job fails; that is expected. When the repo goes
 public:
 
@@ -31,10 +31,18 @@ public:
 2. DNS for `tsukaima.app`: apex `A` records `185.199.108.153`, `185.199.109.153`, `185.199.110.153`,
    `185.199.111.153` and `AAAA` records `2606:50c0:8000::153`, `2606:50c0:8001::153`, `2606:50c0:8002::153`,
    `2606:50c0:8003::153` (GitHub Pages), or a `CNAME` to `tsukaimaapp.github.io` where the DNS host supports
-   CNAME flattening at the apex.
-3. Settings → Pages: set the custom domain to `tsukaima.app` and, once the certificate is issued, enable
-   **Enforce HTTPS**.
-4. Push a change under `site/` (or run the workflow by hand).
+   CNAME flattening at the apex. Also a `www` `CNAME` record to `tsukaimaapp.github.io`, so `www.tsukaima.app`
+   redirects to the apex.
+3. Verify the domain for the organisation first: org Settings → Pages → Verified domains → add `tsukaima.app` and
+   publish the TXT record it shows. This stops any other account from claiming the domain on its own Pages site.
+4. Repo Settings → Pages: set the custom domain to `tsukaima.app` and, once the certificate is issued, enable
+   **Enforce HTTPS**. `.app` is on the HSTS preload list, so browsers only ever load it over HTTPS: the site will
+   not load at all until GitHub has issued the certificate, which can take up to about an hour after the domain
+   is saved.
+5. Push a change under `site/` (or run the workflow by hand).
+
+The Android CI workflow ignores `site/**` and `scripts/site/**`, so a site-only pull request never runs it. If that
+job is ever made a required status check, such pull requests wait for it for ever; use an always-run job then.
 
 ## Checks
 

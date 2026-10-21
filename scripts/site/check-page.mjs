@@ -24,6 +24,8 @@ const EXAMPLE_TEXT_HOSTS = new Set(['hermes.your-tailnet.ts.net']);
 // From the plan's Global Constraints. `token` is matched as a whole word; every term gets a word boundary on any
 // edge that is a letter or digit, so "SSE" does not fire on "assess" and "hm_" still fires on "hm_3f9a".
 const FORBIDDEN = ['SSE', 'hm_', '405B', 'Hermes 4', 'web build', 'token', 'fonts.googleapis.com', 'unpkg.com', 'cdn.'];
+// Why a term is forbidden, where the term alone does not say.
+const FORBIDDEN_WHY = { token: 'the page never mentions tokens as a sign-in credential' };
 const forbiddenRe = (term) => {
   const esc = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const pre = /^[a-z0-9]/i.test(term) ? '(?<![A-Za-z0-9])' : '';
@@ -44,15 +46,18 @@ const TEXT_ATTRS = ['alt', 'title', 'aria-label', 'content', 'placeholder'];
 
 const failures = [];
 const rel = (p) => relative(REPO, p) || p;
-const fail = (file, rule, value) => failures.push(`${rel(file)}: ${rule}: ${value}`);
+const fail = (file, rule, value) => {
+  const line = `${rel(file)}: ${rule}: ${value}`;
+  if (!failures.includes(line)) failures.push(line);
+};
 const isInside = (p, dir) => p === dir || p.startsWith(dir + sep);
 
 function decodeEntities(s) {
   return s
     .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
     .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
-    .replace(/&(nbsp|amp|lt|gt|quot|apos|excl);/g, (_, n) =>
-      ({ nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", excl: '!' })[n]);
+    .replace(/&(nbsp|amp|lt|gt|quot|apos|excl|colon|sol);/gi, (_, n) =>
+      ({ nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", excl: '!', colon: ':', sol: '/' })[n.toLowerCase()]);
 }
 
 // ---- external hosts -------------------------------------------------------------------------------------------
@@ -66,10 +71,10 @@ function checkUrls(file, text, isHtml = false) {
     if (isHtml && isExampleText(textOnly, m.index, m[0])) continue;
     checkHttpUrl(file, m[0]);
   }
-  // Scheme-relative URLs in attributes and CSS url().
-  for (const m of text.matchAll(/(?:\b(?:src|href|srcset|action|poster|data)\s*=\s*["']?|url\(\s*["']?)(\/\/[^\s"'<>()]+)/gi)) {
-    checkHttpUrl(file, 'https:' + m[1]);
-  }
+  // Scheme-relative URLs: unquoted attribute values, and any `//host` after a quote, a comma, whitespace (srcset
+  // candidates, JS strings, CSS values), `url(` or `@import`. A `//` followed by whitespace (a JS comment) never matches.
+  const schemeRel = /(?:\b(?:src|href|srcset|action|poster|data)\s*=\s*|^|["'`,\s]|url\(\s*|@import\s*)(\/\/[^\s"'`<>(),\\]+)/gim;
+  for (const m of text.matchAll(schemeRel)) checkHttpUrl(file, 'https:' + m[1]);
 }
 
 // Blanks comments and <script>/<style>/<template> bodies with spaces of the same length (the same elements
@@ -149,12 +154,16 @@ function visibleText(html) {
 
 function checkCopy(file, html) {
   const text = visibleText(html);
+  // Code samples may hold a `!` (shell history, negation); prose may not.
+  const prose = visibleText(html.replace(/<(code|pre)\b[\s\S]*?<\/\1\s*>/gi, ' '));
+  const aroundProse = (i) => JSON.stringify(prose.slice(Math.max(0, i - 30), i + 31).trim());
   const around = (i, len) => JSON.stringify(text.slice(Math.max(0, i - 30), i + len + 30).trim());
   for (const term of FORBIDDEN) {
     const re = new RegExp(forbiddenRe(term).source, 'gi');
-    for (const m of text.matchAll(re)) fail(file, `forbidden term "${term}"`, around(m.index, m[0].length));
+    const why = FORBIDDEN_WHY[term] ? ` (${FORBIDDEN_WHY[term]})` : '';
+    for (const m of text.matchAll(re)) fail(file, `forbidden term "${term}"${why}`, around(m.index, m[0].length));
   }
-  for (const m of text.matchAll(/!/g)) fail(file, 'exclamation mark in text', around(m.index, 1));
+  for (const m of prose.matchAll(/!/g)) fail(file, 'exclamation mark in text', aroundProse(m.index));
   // Extended_Pictographic includes ©, ® and ™, which are ordinary typography, not emoji.
   for (const m of text.matchAll(/(?![\u00A9\u00AE\u2122])\p{Extended_Pictographic}/gu)) {
     fail(file, 'emoji in text', `U+${m[0].codePointAt(0).toString(16).toUpperCase().padStart(4, '0')} ${around(m.index, m[0].length)}`);
@@ -221,7 +230,7 @@ const REQUIRED_TEXT = [
   'no account',
   'Connected · Hermes 0.22.2',
   'Opens in Obtainium on your phone',
-  'Running shell command…',
+  'Running shell command',
   'Hermes dashboard',
   'username and password',
   'not affiliated with Nous',
@@ -359,6 +368,19 @@ function checkHead(file, html) {
   for (const name of ['og:title', 'og:description']) {
     if (!metaContent(markup, 'property', name)) fail(file, `head: ${name} missing or empty`, '');
   }
+  // Every preview card shows the same title, description and image as the page.
+  const title = decodeEntities(/<title\b[^>]*>([\s\S]*?)<\/title\s*>/i.exec(markup)?.[1] ?? '').trim();
+  const same = [
+    ['<title>', title, [['property', 'og:title'], ['name', 'twitter:title']]],
+    ['description', desc, [['property', 'og:description'], ['name', 'twitter:description']]],
+    ['og:image', metaContent(markup, 'property', 'og:image'), [['name', 'twitter:image']]],
+  ];
+  for (const [label, want, others] of same) {
+    for (const [attr, name] of others) {
+      const got = metaContent(markup, attr, name);
+      if (got !== want) fail(file, `head: ${name} must equal ${label}`, `${JSON.stringify(want)} (found ${got === null ? 'none' : JSON.stringify(got)})`);
+    }
+  }
   const icon = linkTag(markup, 'icon');
   if (!icon || !/\btype\s*=\s*["']image\/svg\+xml["']/i.test(icon)) fail(file, 'head: <link rel="icon" type="image/svg+xml"> missing', '');
   if (!linkTag(markup, 'apple-touch-icon')) fail(file, 'head: <link rel="apple-touch-icon"> missing', '');
@@ -386,6 +408,8 @@ if (!existsSync(page)) {
 const html = readFileSync(page, 'utf8');
 
 checkUrls(page, html, true);
+// Again on the entity-decoded page, so `https&#58;//host` or `&sol;&sol;host` cannot slip past the scan.
+checkUrls(page, decodeEntities(html), true);
 checkCopy(page, html);
 checkStructure(page, html);
 checkRequired(page, html);
