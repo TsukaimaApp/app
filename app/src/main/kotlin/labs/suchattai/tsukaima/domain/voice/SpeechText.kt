@@ -32,18 +32,20 @@ object SpeechText {
     private val escape = Regex("\\\\([!-/:-@\\[-`{-~])")
 
     /**
-     * Speakable text for [markdown]: fenced code blocks (an unterminated fence runs to the end) and display math
-     * (`$$`/`\[` up to a closing line before any blank line, as in the parser; a stray opener is text), and `MEDIA:` and whole-line image lines are dropped, inline math is dropped, inline markup is
-     * reduced to its text (task boxes and backslash escapes too), links keep their label, bare URLs are dropped, and
-     * blank lines disappear. A table row reads as its cells joined with ", "
-     * (separator rows are dropped), and so are horizontal rules and setext underlines. The result is trimmed.
+     * Speakable text for [markdown]: fenced code blocks (an unterminated fence runs to the end), display math
+     * (`$$`/`\[` up to a closing line before any blank line, as in the parser; a stray opener is text), `MEDIA:` and
+     * whole-line image lines, and inline math are dropped; inline markup is reduced to its text (task boxes and
+     * backslash escapes too), links keep their label, bare URLs are dropped, and blank lines disappear. A table row
+     * reads as its cells joined with ", " (separator rows are dropped), and so are horizontal rules and setext
+     * underlines. The result is trimmed.
      */
     fun plain(markdown: String): String {
         val out = ArrayList<String>()
         var inFence = false
         val lines = markdown.lines()
         var mathEnd = -1 // lines up to this index belong to a display-math block
-        val unclosed = HashMap<String, IntRange>(2) // as in the parser: a failed scan, so later openers in it fail at once
+        // As in the parser: a failed scan per closer, so a later opener inside it fails at once.
+        val unclosed = HashMap<String, IntRange>(2)
         for ((index, raw) in lines.withIndex()) {
             if (index <= mathEnd) continue
             if (fence.containsMatchIn(raw)) {
@@ -120,11 +122,14 @@ object SpeechText {
      * A backslash-escaped punctuation character becomes a private-use stand-in, so no markup pattern (or `$`)
      * sees it; [unhideEscapes] turns the stand-ins back into the bare characters.
      */
-    private fun hideEscapes(s: String): String = escape.replace(s) { (HIDDEN + it.groupValues[1][0].code).toChar().toString() }
+    private fun hideEscapes(s: String): String =
+        escape.replace(s) { (HIDDEN + it.groupValues[1][0].code).toChar().toString() }
 
     private fun unhideEscapes(s: String): String =
         if (s.none { it.code in HIDDEN until HIDDEN + 128 }) s
-        else buildString { for (c in s) append(if (c.code in HIDDEN until HIDDEN + 128) (c.code - HIDDEN).toChar() else c) }
+        else buildString {
+            for (c in s) append(if (c.code in HIDDEN until HIDDEN + 128) (c.code - HIDDEN).toChar() else c)
+        }
 
     private const val HIDDEN = 0xE000
 
