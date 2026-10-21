@@ -359,3 +359,16 @@ All need the bearer header unless marked public. Management endpoints accept `?p
   `~/.hermes/{images,screenshots,cache}`, `404` missing, `413` over 25 MiB, `415` a suffix other than
   png/jpg/jpeg/gif/webp/svg/bmp/ico, `400` an unresolvable path. The app treats every non-2xx (401 included, never a
   re-login) as final for that path ("image unavailable"); a dropped connection is retried.
+
+### v0.9.0 — sends while a turn runs (2026-10-21, verified live against 0.22.2)
+
+- **`prompt.submit {…, queued: true}`** while the session runs → `{status:"queued"}` with **no `user_row_id`**
+  (`tui_gateway/session_auto_continue.py` `_handle_busy_submit`). The server persists the user row at accept, holds
+  the prompt (with any images attached meanwhile) and runs it as its own turn after the live one
+  (`_drain_queued_prompt`): the live turn's `message.complete`, `session.info`, then **`message.start`** of the queued
+  turn, whose `message.complete.persisted_turn.user_row_id` is a fresh row (re-placed at the transcript end). Several
+  queued prompts run one per turn, in order. Without `queued` the server applies `display.busy_input_mode` (default
+  `interrupt` = redirect/kill the live turn), so the app always sends `queued: true` mid-turn (voice turns excepted).
+  A send that finds the session idle runs at once (`{status:"streaming", user_row_id}`). Stop (`session.interrupt`)
+  purges the queue: the turn ends with `message.complete {status:"interrupted"}`, the queued rows stay in the history
+  but never run. A truncation mid-turn is still `4009`.

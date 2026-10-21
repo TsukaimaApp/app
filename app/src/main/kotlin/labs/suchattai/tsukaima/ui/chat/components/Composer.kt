@@ -58,13 +58,17 @@ import labs.suchattai.tsukaima.ui.theme.TsukaimaShapes
 import labs.suchattai.tsukaima.ui.theme.TsukaimaType
 import labs.suchattai.tsukaima.ui.theme.tsukaima
 
-/** What the 44dp trailing slot of the [Composer] does. */
-enum class ComposerAction { Voice, Send, Stop }
+/**
+ * What the trailing slot of the [Composer] does: one 44dp button, or for [StopAndSendWhenDone] two (Stop, then a
+ * Send that queues the message behind the running turn).
+ */
+enum class ComposerAction { Voice, Send, Stop, StopAndSendWhenDone }
 
 /**
- * Pure choice for the trailing slot: [ComposerAction.Stop] while a turn [running] on an [enabled] composer;
- * [ComposerAction.Voice] when it is enabled, voice is [voiceAvailable] and there is nothing to send (blank
- * [value], no attachments); otherwise [ComposerAction.Send].
+ * Pure choice for the trailing slot: while a turn [running] on an [enabled] composer, [ComposerAction.Stop], plus
+ * Send when done ([ComposerAction.StopAndSendWhenDone]) once there is something to send (text or attachments);
+ * [ComposerAction.Voice] when it is enabled, voice is [voiceAvailable] and there is nothing to send; otherwise
+ * [ComposerAction.Send].
  */
 fun composerAction(
     value: String,
@@ -73,7 +77,7 @@ fun composerAction(
     running: Boolean,
     voiceAvailable: Boolean,
 ): ComposerAction = when {
-    running && enabled -> ComposerAction.Stop
+    running && enabled -> if (value.isBlank() && !hasAttachments) ComposerAction.Stop else ComposerAction.StopAndSendWhenDone
     enabled && voiceAvailable && value.isBlank() && !hasAttachments -> ComposerAction.Voice
     else -> ComposerAction.Send
 }
@@ -82,7 +86,9 @@ fun composerAction(
  * Bottom composer pill: pending attachments (chips) above the row of attach, multiline field (max 120dp) and
  * send. The IME Send action and a hardware Enter send; hardware Shift+Enter inserts a newline. [canSend]
  * gates sending (text or a ready attachment); the caller clears [value] in [onSend]. While the agent is
- * [running] a turn, send becomes a danger-filled Stop ([onStop]) in the same 44dp slot, and Enter does nothing. When [onVoice] is set and there is nothing to send, send
+ * [running] a turn, send becomes a danger-filled Stop ([onStop]) in the same 44dp slot; typed text adds "Send when done"
+ * beside it (a Send with a clock badge: [onSend] while running queues the message behind the turn), and Enter does
+ * the same. When [onVoice] is set and there is nothing to send, send
  * becomes an accent mic that calls it (see [composerAction]). [focusRequester], when set, is attached to the text
  * field (leaving voice mode for the keyboard focuses it). While a sent message is edited, [editCaption] ("Editing —
  * tap to cancel") sits above the field; a tap on it calls [onCancelEdit].
@@ -110,7 +116,7 @@ fun Composer(
 ) {
     val colors = MaterialTheme.tsukaima
     val shape = TsukaimaShapes.composer
-    val send = { if (enabled && canSend && !running) onSend() }
+    val send = { if (enabled && canSend) onSend() }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -179,12 +185,37 @@ fun Composer(
             when (composerAction(value, attachments.isNotEmpty(), enabled, running, voiceAvailable = onVoice != null)) {
                 ComposerAction.Stop ->
                     IconButton44(IconName.Stop, "Stop", onClick = onStop, filled = true, tone = Tone.Danger)
+                ComposerAction.StopAndSendWhenDone -> {
+                    IconButton44(IconName.Stop, "Stop", onClick = onStop, filled = true, tone = Tone.Danger)
+                    SendWhenDone(onClick = send, enabled = canSend)
+                }
                 ComposerAction.Voice ->
                     IconButton44(IconName.Mic, "Voice", onClick = { onVoice?.invoke() }, filled = true)
                 ComposerAction.Send ->
                     IconButton44(IconName.ArrowUpward, "Send", onClick = send, filled = enabled && canSend, enabled = enabled && canSend)
             }
         }
+    }
+}
+
+/** The 44dp Send shown beside Stop while a turn runs, its clock badge saying the message waits for the turn. */
+@Composable
+private fun SendWhenDone(onClick: () -> Unit, enabled: Boolean) {
+    val colors = MaterialTheme.tsukaima
+    Box {
+        IconButton44(IconName.ArrowUpward, "Send when done", onClick = onClick, filled = enabled, enabled = enabled)
+        TsukaimaIcon(
+            IconName.Schedule,
+            contentDescription = null,
+            size = 14.dp,
+            tint = colors.ink2,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 2.dp, bottom = 2.dp)
+                .background(colors.surfaceRaised, TsukaimaShapes.pill)
+                .border(1.dp, colors.hairline, TsukaimaShapes.pill)
+                .padding(1.dp),
+        )
     }
 }
 
@@ -300,6 +331,7 @@ private fun ComposerPreview(dark: Boolean) = PreviewPage(dark) {
     Composer("Restart the agent and tail the logs.", {}, {}, {}, enabled = true)
     Composer("", {}, {}, {}, enabled = false)
     Composer("", {}, {}, {}, enabled = true, running = true)
+    Composer("Then summarize it.", {}, {}, {}, enabled = true, running = true)
     Composer("", {}, {}, {}, enabled = true, onVoice = {})
     Composer("And the init system?", {}, {}, {}, enabled = true, editCaption = "Editing — attachments not included — tap to cancel")
     Composer(

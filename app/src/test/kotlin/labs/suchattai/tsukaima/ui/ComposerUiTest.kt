@@ -39,4 +39,31 @@ class ComposerUiTest : ComposeUiTest() {
         compose.onNodeWithContentDescription("Voice").assertDoesNotExist()
         assertEquals(1, sends)
     }
+
+    @Test
+    fun `text typed while a turn runs offers Stop and a 44dp Send when done`() {
+        var sends = 0
+        var stops = 0
+        setThemed { Composer("And then?", {}, { sends++ }, {}, enabled = true, running = true, onStop = { stops++ }, onVoice = {}) }
+
+        compose.onNodeWithContentDescription("Stop")
+            .assertWidthIsAtLeast(44.dp)
+            .assertHeightIsAtLeast(44.dp)
+        compose.onNodeWithContentDescription("Send when done")
+            .assertIsEnabled()
+            .assertWidthIsAtLeast(44.dp)
+            .assertHeightIsAtLeast(44.dp)
+            .performClick()
+        compose.onNodeWithContentDescription("Send").assertDoesNotExist()
+        assertEquals(1, sends)
+        assertEquals(0, stops)
+    }
+
+    @Test
+    fun `an empty composer while a turn runs shows Stop only`() {
+        setThemed { Composer("", {}, {}, {}, enabled = true, running = true, onVoice = {}) }
+
+        compose.onNodeWithContentDescription("Stop").assertExists()
+        compose.onNodeWithContentDescription("Send when done").assertDoesNotExist()
+    }
 }

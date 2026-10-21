@@ -431,6 +431,7 @@ internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatAct
             item.text,
             attachments = item.attachments,
             failed = item.failed,
+            queued = item.queued,
             onRetry = { actions.onRetrySend(item.id) },
             onDismiss = { actions.onDismissFailed(item.id) },
             onLongPress = { actions.onMessageMenu(item.id) },

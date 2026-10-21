@@ -28,10 +28,19 @@ object ChatReducer {
     /** Terminal `subagent.complete` statuses that mean the child did not finish its goal. */
     private val SUBAGENT_FAILED = setOf("failed", "error", "timeout", "interrupted")
 
+    /** `prompt.submit` status of a send held until the live turn ends. */
+    private const val QUEUED = "queued"
+
+    /** Events that end a turn ([afterTurnEnd]). */
+    private val TURN_ENDS = setOf("message.complete", "error", "turn.error")
+
+    /** The first event of a turn (observed: `message.start` right after the previous `message.complete`). */
+    private val QUEUED_TURN_STARTS = setOf("message.start", "message.delta", "reasoning.delta", "tool.start", "message.complete")
+
     fun reduce(state: ChatState, frame: Frame, flair: () -> String = ThinkingFlair::next): ChatState =
         when (frame) {
-            is Frame.Event -> reduceEvent(state, frame, flair)
-            is Frame.ServerRequest -> reduceServerRequest(state, frame)
+            is Frame.Event -> pinQueued(reduceEvent(state, frame, flair))
+            is Frame.ServerRequest -> pinQueued(reduceServerRequest(state, frame))
             is Frame.Response, is Frame.Unknown -> state
         }
 
@@ -66,30 +75,37 @@ object ChatReducer {
         attachments: List<String> = emptyList(),
         promptText: String? = null,
         imagesSent: Boolean = false,
+        queued: Boolean = false,
     ): ChatState = state.copy(
         items = state.items + ChatItem.UserMessage(
             localId, text, attachments, promptText = promptText?.takeIf { it != text }, imagesSent = imagesSent,
+            queued = queued,
         ),
-        status = AgentStatus.Thinking(flair()),
+        // A queued send waits behind the live turn: its status stays that turn's.
+        status = if (queued) state.status else AgentStatus.Thinking(flair()),
     )
 
     /**
      * `prompt.submit` accepted user message [localId]: stores its persisted [userRowId] (null = not proven yet, kept
      * unknown). After a truncation, [survivorUserRowIds] are the kept user turns' ids in order (the server may mint
      * new rows on a rewrite): they rebind the user messages above [localId] when the counts match, a null entry
-     * dropping a stale id.
+     * dropping a stale id. A queued echo stays queued only while the server answers [status] `queued` (a send that
+     * found the session idle ran at once); an echo that is no longer queued never turns queued again.
      */
     fun onSubmitAccepted(
         state: ChatState,
         localId: String,
         userRowId: Long?,
         survivorUserRowIds: List<Long?>? = null,
+        status: String? = null,
     ): ChatState {
         val index = state.items.indexOfFirst { it.id == localId && it is ChatItem.UserMessage }
         if (index < 0) return state
         var items = state.items
-        if (userRowId != null) {
-            items = items.mapIndexed { i, item -> if (i == index) (item as ChatItem.UserMessage).copy(rowId = userRowId) else item }
+        val echo = items[index] as ChatItem.UserMessage
+        if (userRowId != null || (echo.queued && status != QUEUED)) {
+            val queued = echo.queued && status == QUEUED
+            items = items.mapIndexed { i, item -> if (i == index) echo.copy(rowId = userRowId ?: echo.rowId, queued = queued) else item }
         }
         if (survivorUserRowIds != null) {
             val kept = items.subList(0, index).withIndex().filter { it.value is ChatItem.UserMessage && !(it.value as ChatItem.UserMessage).failed }
@@ -198,9 +214,10 @@ object ChatReducer {
         // watermark are dropped. Global (empty-id) events and unbound states never touch lastSeq.
         val bound = state.liveSessionId != null && ev.sessionId == state.liveSessionId
         if (bound && ev.seq != null && ev.seq <= state.lastSeq) return state
-        val s = if (bound && ev.seq != null) state.copy(lastSeq = ev.seq) else state
+        val seen = if (bound && ev.seq != null) state.copy(lastSeq = ev.seq) else state
+        val s = if (seen.queuedTurnNext && ev.type in QUEUED_TURN_STARTS) startQueuedTurn(seen) else seen
         val p = ev.payload
-        return when (ev.type) {
+        return afterTurnEnd(ev.type, p, when (ev.type) {
             "message.start" -> onMessageStart(s, ev.seq, flair)
             "thinking.delta" -> s.copy(status = AgentStatus.Thinking(flair()))
             "reasoning.delta" -> {
@@ -261,7 +278,38 @@ object ChatReducer {
             "btw.complete" -> onSideComplete(s, SideKind.Question, p)
             "background.complete" -> onSideComplete(s, SideKind.Background, p)
             else -> if (ev.type.startsWith(SUBAGENT_PREFIX)) onSubagent(s, ev.type, p) else s
+        })
+    }
+
+    /**
+     * Queued sends (`prompt.submit {queued: true}`) run one per turn after the live one: when a turn ends with echoes
+     * waiting, the next turn's first event ([QUEUED_TURN_STARTS]) is the oldest echo's ([startQueuedTurn]). Stop
+     * (`message.complete` status `interrupted`) purges the server's queue: the messages stay in the transcript but
+     * never run, so their echoes stop showing "Queued".
+     */
+    private fun afterTurnEnd(type: String, p: JsonObject, s: ChatState): ChatState {
+        if (type !in TURN_ENDS) return s
+        if (type == "message.complete" && p.string("status") == "interrupted") {
+            val items = s.items.map { if (it is ChatItem.UserMessage && it.queued) it.copy(queued = false) else it }
+            return s.copy(items = items, queuedTurnNext = false)
         }
+        return s.copy(queuedTurnNext = s.items.any { it is ChatItem.UserMessage && it.queued })
+    }
+
+    /** The turn that just started is the oldest queued echo's: it is sent now and its reply lands below it. */
+    private fun startQueuedTurn(s: ChatState): ChatState {
+        val echo = s.items.firstOrNull { it is ChatItem.UserMessage && it.queued } as ChatItem.UserMessage?
+        val items = if (echo == null) s.items else s.items.replace(echo) { echo.copy(queued = false) }
+        return s.copy(items = items, queuedTurnNext = false)
+    }
+
+    /** Queued echoes wait at the bottom: rows the live turn adds go above them, in order. */
+    private fun pinQueued(s: ChatState): ChatState {
+        fun ChatItem.isQueued() = this is ChatItem.UserMessage && queued
+        val first = s.items.indexOfFirst { it.isQueued() }
+        if (first < 0 || (first until s.items.size).all { s.items[it].isQueued() }) return s
+        val (queued, rest) = s.items.partition { it.isQueued() }
+        return s.copy(items = rest + queued)
     }
 
     /**
@@ -499,7 +547,7 @@ object ChatReducer {
         if (turn == null) return s
         fun long(key: String) = (turn[key] as? JsonPrimitive)?.longOrNull
         val items = s.items.toMutableList()
-        val userIndex = items.indexOfLast { it is ChatItem.UserMessage }
+        val userIndex = items.indexOfLast { it is ChatItem.UserMessage && !it.queued }
         val user = items.getOrNull(userIndex) as? ChatItem.UserMessage
         val userRow = long("user_row_id")
         if (user != null && userRow != null && user.rowId == null && !user.failed) items[userIndex] = user.copy(rowId = userRow)

@@ -56,7 +56,9 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
      * persona); [interrupted]: the user barged in on the previous spoken reply. [truncateBeforeRowId] rewinds first
      * (edit / regenerate): the rows from that user row on are archived before the new turn. The cut is always
      * confirmed, including one that archives several user turns (`confirm_deep_truncate`) or the whole transcript
-     * (`confirm_empty_truncate`, editing the first message): the user asked for exactly that rewind.
+     * (`confirm_empty_truncate`, editing the first message): the user asked for exactly that rewind. [queued]: sent
+     * while a turn runs, the server holds it until that turn ends (result `status` `queued`) instead of applying its
+     * `display.busy_input_mode` (by default a redirect of the live turn).
      */
     suspend fun submit(
         sessionId: String,
@@ -64,12 +66,14 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
         voice: Boolean = false,
         interrupted: Boolean = false,
         truncateBeforeRowId: Long? = null,
+        queued: Boolean = false,
     ): SubmitResult {
         val result = rpc("prompt.submit", buildJsonObject {
             put("session_id", sessionId)
             put("text", text)
             if (voice) put("voice_turn", true)
             if (interrupted) put("interrupted", true)
+            if (queued) put("queued", true)
             if (truncateBeforeRowId != null) {
                 put("truncate_before_row_id", truncateBeforeRowId)
                 put("confirm_truncate", true)

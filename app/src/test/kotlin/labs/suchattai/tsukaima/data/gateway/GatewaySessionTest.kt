@@ -150,6 +150,15 @@ class GatewaySessionTest {
     }
 
     @Test
+    fun submitAddsQueuedOnlyWhenSet() = runBlocking {
+        val t = FakeTransport(obj("""{"status":"queued"}"""))
+        assertEquals("queued", GatewaySession(t).submit("s1", "later", queued = true).status)
+        val params = t.calls.single().second
+        assertEquals(setOf("session_id", "text", "queued"), params.keys)
+        assertEquals(JsonPrimitive(true), params["queued"])
+    }
+
+    @Test
     fun missingSessionIdThrowsIOException() = runBlocking {
         val t = FakeTransport(obj("""{"stored_session_id":"st1","info":{},"messages":[]}"""))
         try {

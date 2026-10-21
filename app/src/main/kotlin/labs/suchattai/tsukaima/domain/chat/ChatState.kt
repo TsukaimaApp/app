@@ -15,7 +15,8 @@ sealed interface ChatItem {
      * until known. Edit and Regenerate rewind the transcript to it.
      * [promptText]: what a live send actually submitted when it differs from [text] (attachment `@file:` refs, the
      * image placeholder); null = [text]. Regenerate replays it. [imagesSent]: the send queued images, which the turn
-     * consumed on the server, so it cannot be replayed as it was.
+     * consumed on the server, so it cannot be replayed as it was. [queued]: sent while a turn ran, the server holds it
+     * until that turn ends (`prompt.submit {queued: true}`); it shows "Queued" and stays below the live turn.
      */
     data class UserMessage(
         override val id: String,
@@ -25,6 +26,7 @@ sealed interface ChatItem {
         val rowId: Long? = null,
         val promptText: String? = null,
         val imagesSent: Boolean = false,
+        val queued: Boolean = false,
     ) : ChatItem
 
     data class AssistantMessage(
@@ -274,6 +276,8 @@ data class ChatState(
     val resumeProgress: String? = null,
     /** The user's explicit open/closed choice for a message's reasoning, by item id; absent = the item's default. */
     val reasoningOpen: Map<String, Boolean> = emptyMap(),
+    /** A turn ended while a [ChatItem.UserMessage.queued] echo waited: the next turn to start is that echo's. */
+    val queuedTurnNext: Boolean = false,
 )
 
 /** [ChatState.lastSeq] before any event of the live session was applied; `session.events.since` accepts it. */

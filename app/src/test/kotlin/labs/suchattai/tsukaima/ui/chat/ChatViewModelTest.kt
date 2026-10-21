@@ -320,6 +320,87 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun sendWhileRunningIsQueued() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":1}"""), obj("""{"status":"queued"}"""))
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("write a story")
+        vm.send()
+        b.events.emit(ev("message.start", 1))
+        b.events.emit(ev("message.delta", 2, """{"text":"Once"}"""))
+        advanceUntilIdle()
+        assertFalse("the first send is a plain turn", "queued" in b.transport.last("prompt.submit"))
+
+        vm.setInput("then summarize it")
+        vm.send()
+        advanceUntilIdle()
+
+        val params = b.transport.last("prompt.submit")
+        assertEquals(true, params["queued"]!!.jsonPrimitive.content.toBooleanStrict())
+        assertEquals("then summarize it", params["text"]!!.jsonPrimitive.content)
+        val s = vm.state.value
+        assertEquals("", s.input)
+        val echo = s.chat.items.last() as ChatItem.UserMessage
+        assertTrue(echo.queued)
+        assertEquals("the live turn keeps streaming", AgentStatus.Replying, s.chat.status)
+    }
+
+    @Test
+    fun queuedBubbleBecomesSentWhenItsTurnStarts() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":1}"""), obj("""{"status":"queued"}"""))
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("first")
+        vm.send()
+        b.events.emit(ev("message.start", 1))
+        advanceUntilIdle()
+        vm.setInput("second")
+        vm.send()
+        advanceUntilIdle()
+        fun echo() = vm.state.value.chat.items.first { it is ChatItem.UserMessage && it.text == "second" } as ChatItem.UserMessage
+        assertTrue(echo().queued)
+
+        b.events.emit(ev("message.complete", 2, """{"text":"one","persisted_turn":{"user_row_id":1}}"""))
+        advanceUntilIdle()
+        assertTrue("still waiting for its turn", echo().queued)
+        vm.setInput("third") // idle between turns, but the server is about to run "second": this one queues too
+        vm.send()
+        advanceUntilIdle()
+        assertEquals(true, b.transport.last("prompt.submit")["queued"]!!.jsonPrimitive.content.toBooleanStrict())
+        b.events.emit(ev("message.start", 3))
+        advanceUntilIdle()
+        assertFalse(echo().queued)
+        b.events.emit(ev("message.complete", 4, """{"text":"two","persisted_turn":{"user_row_id":5}}"""))
+        advanceUntilIdle()
+        assertEquals(5L, echo().rowId)
+    }
+
+    @Test
+    fun queuedSendThatRunsAtOnceIsNotMarkedQueued() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":1}"""), obj("""{"status":"streaming","user_row_id":3}"""))
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("first")
+        vm.send()
+        b.events.emit(ev("message.start", 1))
+        advanceUntilIdle()
+        vm.setInput("second")
+        vm.send() // the turn ended on the server meanwhile: it ran at once
+        advanceUntilIdle()
+
+        assertEquals(true, b.transport.last("prompt.submit")["queued"]!!.jsonPrimitive.content.toBooleanStrict())
+        val echo = vm.state.value.chat.items.last { it is ChatItem.UserMessage } as ChatItem.UserMessage
+        assertFalse(echo.queued)
+        assertEquals(3L, echo.rowId)
+    }
+
+    @Test
     fun streamedReplyUpdatesState() = runTest(dispatcher) {
         val b = backend()
         val vm = vm(b)

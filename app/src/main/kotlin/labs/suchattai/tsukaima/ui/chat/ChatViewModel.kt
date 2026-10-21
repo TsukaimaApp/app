@@ -37,6 +37,7 @@ import labs.suchattai.tsukaima.domain.chat.ConnectionAnswer
 import labs.suchattai.tsukaima.domain.chat.ConnectionAnswers
 import labs.suchattai.tsukaima.domain.chat.SideKind
 import labs.suchattai.tsukaima.domain.chat.ThinkingFlair
+import labs.suchattai.tsukaima.domain.chat.running
 import labs.suchattai.tsukaima.domain.voice.VoiceLanguages
 import labs.suchattai.tsukaima.domain.voice.VoiceMode
 
@@ -265,20 +266,24 @@ class ChatViewModel(
         return true
     }
 
-    /** Adds the user bubble (status Thinking) and submits it; [fromComposer] also clears the typed text. */
+    /**
+     * Adds the user bubble (status Thinking) and submits it; [fromComposer] also clears the typed text. While a turn
+     * runs a typed send is queued behind it (never a redirect that would end it); a voice turn is not.
+     */
     private fun startTurn(
         live: String, text: String, sent: List<PendingAttachment>, fromComposer: Boolean,
         voice: Boolean = false, interrupted: Boolean = false,
     ) {
         val localId = "u-l${++userCounter}"
+        val queued = mustQueue(voice)
         _state.update {
             val chat = ChatReducer.onSubmitted(
                 it.chat, text, localId, flair, sent.map(PendingAttachment::name),
-                promptText = Attachments.promptText(text, sent), imagesSent = sent.any { a -> a.queued },
+                promptText = Attachments.promptText(text, sent), imagesSent = sent.any { a -> a.queued }, queued = queued,
             )
             if (fromComposer) it.copy(input = "", chat = chat) else it.copy(chat = chat)
         }
-        launch { submit(live, localId, text, sent, voice, interrupted) }
+        launch { submit(live, localId, text, sent, voice, interrupted, queued) }
     }
 
     /**
@@ -287,17 +292,18 @@ class ChatViewModel(
      */
     private suspend fun submit(
         live: String, localId: String, text: String, sent: List<PendingAttachment>,
-        voice: Boolean = false, interrupted: Boolean = false,
+        voice: Boolean = false, interrupted: Boolean = false, queued: Boolean = false,
     ) {
         try {
-            val accepted = session.submit(live, Attachments.promptText(text, sent), voice, interrupted)
+            val accepted = session.submit(live, Attachments.promptText(text, sent), voice, interrupted, queued = queued)
             attachments.sent(sent)
-            setChat { ChatReducer.onSubmitAccepted(it, localId, accepted.userRowId) }
+            setChat { ChatReducer.onSubmitAccepted(it, localId, accepted.userRowId, status = accepted.status) }
         } catch (c: CancellationException) {
             throw c
         } catch (e: Exception) {
             failedSends[localId] = FailedSend(text, sent, voice, interrupted)
-            setChat { c -> c.copy(items = c.items.markFailed(localId, true), status = unlessOffline(c.status, AgentStatus.Idle)) }
+            // A queued send that failed leaves the live turn running.
+            setChat { c -> c.copy(items = c.items.markFailed(localId, true), status = if (queued) c.status else unlessOffline(c.status, AgentStatus.Idle)) }
             backend.toast("Message not sent: ${e.message ?: "gateway error"}")
         }
     }
@@ -320,8 +326,12 @@ class ChatViewModel(
             return backend.toast("Attach the images again, then send")
         }
         failedSends.remove(localId)
-        setChat { c -> c.copy(items = c.items.markFailed(localId, false), status = AgentStatus.Thinking(flair())) }
-        launch { submit(live, localId, failed.text, failed.attachments, failed.voice, failed.interrupted) }
+        val queued = mustQueue(failed.voice)
+        setChat { c ->
+            val items = c.items.markFailed(localId, false, queued)
+            c.copy(items = items, status = if (queued) c.status else AgentStatus.Thinking(flair()))
+        }
+        launch { submit(live, localId, failed.text, failed.attachments, failed.voice, failed.interrupted, queued) }
     }
 
     /** The reasoning header of message [id] was tapped. */
@@ -356,8 +366,16 @@ class ChatViewModel(
         chat.liveSessionId?.let(attachments::onLiveSession)
     }
 
-    private fun List<ChatItem>.markFailed(localId: String, failed: Boolean) =
-        map { if (it.id == localId && it is ChatItem.UserMessage) it.copy(failed = failed) else it }
+    /**
+     * A typed send goes behind the running turn (`queued: true`), and behind earlier queued sends still waiting (the
+     * server may be between turns, about to run them). A voice turn never queues.
+     */
+    private fun mustQueue(voice: Boolean) =
+        !voice && (chat.status.running || chat.items.any { it is ChatItem.UserMessage && it.queued })
+
+    /** A failed echo is never [ChatItem.UserMessage.queued]; a retry is queued again while a turn runs. */
+    private fun List<ChatItem>.markFailed(localId: String, failed: Boolean, queued: Boolean = false) =
+        map { if (it.id == localId && it is ChatItem.UserMessage) it.copy(failed = failed, queued = queued) else it }
 
     /** Uploads picked files at once (creating the session first if needed); see [ChatAttachments]. */
     fun attach(files: List<PickedFile>) = attachments.attach(files)

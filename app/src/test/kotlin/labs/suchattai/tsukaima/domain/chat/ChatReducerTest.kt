@@ -910,6 +910,71 @@ class ChatReducerTest {
     }
 
     @Test
+    fun queuedEchoFlipsOnNextTurn() {
+        // A turn is streaming; the user sends mid-turn and the server queues it.
+        val running = ChatReducer.onSubmitAccepted(ChatReducer.onSubmitted(live, "first", "u-l1", flair), "u-l1", 1L)
+            .feed(ev("message.start", seq = 1), ev("message.delta", """{"text":"Once"}""", seq = 2))
+        val queued = ChatReducer.onSubmitAccepted(
+            ChatReducer.onSubmitted(running, "then this", "u-l2", flair, queued = true), "u-l2", null, status = "queued",
+        )
+        fun echo(s: ChatState) = s.items.first { it.id == "u-l2" } as ChatItem.UserMessage
+        assertTrue(echo(queued).queued)
+        assertEquals("a queued send leaves the live status alone", running.status, queued.status)
+
+        // The live turn goes on: its tool row lands above the queued echo, which stays at the bottom.
+        val tool = queued.feed(ev("tool.start", """{"tool_id":"t1","name":"terminal"}""", seq = 3))
+        assertEquals("u-l2", tool.items.last().id)
+        assertTrue(echo(tool).queued)
+
+        // The live turn ends: its row goes to its own message, not to the queued echo.
+        val ended = tool.feed(ev("message.complete", """{"text":"done","persisted_turn":{"user_row_id":1}}""", seq = 4))
+        assertTrue(echo(ended).queued)
+        assertNull(echo(ended).rowId)
+
+        // The queued turn starts: the echo is sent; its reply lands below it and binds its row.
+        val started = ended.feed(ev("message.start", seq = 5))
+        assertFalse(echo(started).queued)
+        assertEquals("u-l2", started.items[started.items.size - 2].id)
+        val done = started.feed(
+            ev("message.complete", """{"text":"ok","persisted_turn":{"user_row_id":7,"final_assistant_row_id":8}}""", seq = 6),
+        )
+        assertEquals(7L, echo(done).rowId)
+        assertEquals(1L, (done.items.first { it.id == "u-l1" } as ChatItem.UserMessage).rowId)
+    }
+
+    @Test
+    fun queuedEchoesFlipOneTurnAtATime() {
+        val running = live.feed(ev("message.start", seq = 1))
+        val two = listOf("u-l1", "u-l2").fold(running) { s, id ->
+            ChatReducer.onSubmitAccepted(ChatReducer.onSubmitted(s, id, id, flair, queued = true), id, null, status = "queued")
+        }
+        val next = two.feed(ev("message.complete", """{"text":"a"}""", seq = 2), ev("message.delta", """{"text":"b"}""", seq = 3))
+        val queued = next.items.filterIsInstance<ChatItem.UserMessage>().associate { it.id to it.queued }
+        assertEquals(mapOf("u-l1" to false, "u-l2" to true), queued)
+        assertEquals("the waiting echo stays below the reply that streams", "u-l2", next.items.last().id)
+        val third = next.feed(ev("message.complete", """{"text":"b"}""", seq = 4), ev("message.start", seq = 5))
+        assertTrue(third.items.filterIsInstance<ChatItem.UserMessage>().none { it.queued })
+    }
+
+    @Test
+    fun aQueuedSendThatStartedAtOnceIsNotQueued() {
+        val s = ChatReducer.onSubmitted(live.feed(ev("message.start", seq = 1)), "hi", "u-l1", flair, queued = true)
+        val accepted = ChatReducer.onSubmitAccepted(s, "u-l1", 3L, status = "streaming")
+        assertFalse((accepted.items.first { it.id == "u-l1" } as ChatItem.UserMessage).queued)
+    }
+
+    @Test
+    fun anInterruptedTurnDropsTheQueue() {
+        // Stop purges the server's queue: the message stays in the transcript but never runs.
+        val running = live.feed(ev("message.start", seq = 1))
+        val queued = ChatReducer.onSubmitAccepted(
+            ChatReducer.onSubmitted(running, "later", "u-l1", flair, queued = true), "u-l1", null, status = "queued",
+        )
+        val stopped = queued.feed(ev("message.complete", """{"text":"","status":"interrupted"}""", seq = 2))
+        assertFalse((stopped.items.first { it.id == "u-l1" } as ChatItem.UserMessage).queued)
+    }
+
+    @Test
     fun truncationDropsTheEditedRowAndEverythingAfterIt() {
         val items = listOf(
             ChatItem.UserMessage("h-1", "first", rowId = 1),

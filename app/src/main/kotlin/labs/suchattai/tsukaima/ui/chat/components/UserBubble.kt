@@ -32,7 +32,8 @@ private val BubbleShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, b
 /**
  * Right-aligned user message: pale lavender fill, 6dp tail corner, at most 82 % of the width. [attachments]
  * (names of files sent with it) are listed under the text in caption style. A [failed] send gets a
- * "Not sent" line with Retry and Dismiss under the bubble. [onLongPress] opens the message menu (copy).
+ * "Not sent" line with Retry and Dismiss under the bubble; a [queued] one (sent while a turn ran, waiting for it to
+ * end) a "Queued" caption. [onLongPress] opens the message menu (copy).
  */
 @Composable
 fun UserBubble(
@@ -40,6 +41,7 @@ fun UserBubble(
     modifier: Modifier = Modifier,
     attachments: List<String> = emptyList(),
     failed: Boolean = false,
+    queued: Boolean = false,
     onRetry: () -> Unit = {},
     onDismiss: () -> Unit = {},
     onLongPress: (() -> Unit)? = null,
@@ -67,6 +69,12 @@ fun UserBubble(
                     Text(name, style = TsukaimaType.caption, color = colors.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
+            if (queued && !failed) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp, end = 4.dp)) {
+                    TsukaimaIcon(IconName.Schedule, contentDescription = null, size = 14.dp, tint = colors.ink3)
+                    Text("Queued", style = TsukaimaType.caption, color = colors.ink3, modifier = Modifier.padding(start = 4.dp))
+                }
+            }
             if (failed) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TsukaimaIcon(IconName.Error, contentDescription = null, size = 14.dp, tint = colors.danger)
@@ -85,6 +93,7 @@ private fun UserBubblePreview(dark: Boolean) = PreviewPage(dark) {
     UserBubble("What is the first line?", attachments = listOf("notes.txt", "screenshot.png"))
     UserBubble("", attachments = listOf("photo.jpg"))
     UserBubble("Restart the gateway please.", failed = true)
+    UserBubble("Then summarize it.", queued = true)
     UserBubble("A much longer message that should wrap well before it reaches the left edge of the screen, keeping the 82 percent cap.")
 }
 
