@@ -371,4 +371,6 @@ All need the bearer header unless marked public. Management endpoints accept `?p
   `interrupt` = redirect/kill the live turn), so the app always sends `queued: true` mid-turn (voice turns excepted).
   A send that finds the session idle runs at once (`{status:"streaming", user_row_id}`). Stop (`session.interrupt`)
   purges the queue: the turn ends with `message.complete {status:"interrupted"}`, the queued rows stay in the history
-  but never run. A truncation mid-turn is still `4009`.
+  but never run (the app shows them "Not sent" with Retry; it does the same after an `error` turn end, whose effect on
+  the queue was not probed). "Mid-turn" includes a turn paused on an approval, question, masked prompt or connection.
+  A truncation mid-turn is still `4009`.

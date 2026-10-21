@@ -62,13 +62,14 @@ import labs.suchattai.tsukaima.ui.theme.tsukaima
  * What the trailing slot of the [Composer] does: one 44dp button, or for [StopAndSendWhenDone] two (Stop, then a
  * Send that queues the message behind the running turn).
  */
-enum class ComposerAction { Voice, Send, Stop, StopAndSendWhenDone }
+enum class ComposerAction { Voice, Send, Stop, StopAndSendWhenDone, SendWhenDone }
 
 /**
  * Pure choice for the trailing slot: while a turn [running] on an [enabled] composer, [ComposerAction.Stop], plus
  * Send when done ([ComposerAction.StopAndSendWhenDone]) once there is something to send (text or attachments);
- * [ComposerAction.Voice] when it is enabled, voice is [voiceAvailable] and there is nothing to send; otherwise
- * [ComposerAction.Send].
+ * while the turn is otherwise [turnLive] (paused on an approval, question or prompt) a message to send is
+ * [ComposerAction.SendWhenDone] (queued behind it); [ComposerAction.Voice] when it is enabled, voice is
+ * [voiceAvailable] and there is nothing to send; otherwise [ComposerAction.Send].
  */
 fun composerAction(
     value: String,
@@ -76,8 +77,10 @@ fun composerAction(
     enabled: Boolean,
     running: Boolean,
     voiceAvailable: Boolean,
+    turnLive: Boolean = running,
 ): ComposerAction = when {
     running && enabled -> if (value.isBlank() && !hasAttachments) ComposerAction.Stop else ComposerAction.StopAndSendWhenDone
+    turnLive && enabled && (value.isNotBlank() || hasAttachments) -> ComposerAction.SendWhenDone
     enabled && voiceAvailable && value.isBlank() && !hasAttachments -> ComposerAction.Voice
     else -> ComposerAction.Send
 }
@@ -88,7 +91,8 @@ fun composerAction(
  * gates sending (text or a ready attachment); the caller clears [value] in [onSend]. While the agent is
  * [running] a turn, send becomes a danger-filled Stop ([onStop]) in the same 44dp slot; typed text adds "Send when done"
  * beside it (a Send with a clock badge: [onSend] while running queues the message behind the turn), and Enter does
- * the same. When [onVoice] is set and there is nothing to send, send
+ * the same. While the turn is [turnLive] but not running (waiting on the user), a message to send shows "Send when
+ * done" alone. When [onVoice] is set and there is nothing to send, send
  * becomes an accent mic that calls it (see [composerAction]). [focusRequester], when set, is attached to the text
  * field (leaving voice mode for the keyboard focuses it). While a sent message is edited, [editCaption] ("Editing —
  * tap to cancel") sits above the field; a tap on it calls [onCancelEdit].
@@ -107,6 +111,7 @@ fun Composer(
     onRemoveAttachment: (String) -> Unit = {},
     onRetryAttachment: (String) -> Unit = {},
     running: Boolean = false,
+    turnLive: Boolean = running,
     onStop: () -> Unit = {},
     disabledPlaceholder: String = "Hermes is unreachable",
     onVoice: (() -> Unit)? = null,
@@ -182,13 +187,14 @@ fun Composer(
                     }
                 },
             )
-            when (composerAction(value, attachments.isNotEmpty(), enabled, running, voiceAvailable = onVoice != null)) {
+            when (composerAction(value, attachments.isNotEmpty(), enabled, running, voiceAvailable = onVoice != null, turnLive = turnLive)) {
                 ComposerAction.Stop ->
                     IconButton44(IconName.Stop, "Stop", onClick = onStop, filled = true, tone = Tone.Danger)
                 ComposerAction.StopAndSendWhenDone -> {
                     IconButton44(IconName.Stop, "Stop", onClick = onStop, filled = true, tone = Tone.Danger)
                     SendWhenDone(onClick = send, enabled = canSend)
                 }
+                ComposerAction.SendWhenDone -> SendWhenDone(onClick = send, enabled = canSend)
                 ComposerAction.Voice ->
                     IconButton44(IconName.Mic, "Voice", onClick = { onVoice?.invoke() }, filled = true)
                 ComposerAction.Send ->

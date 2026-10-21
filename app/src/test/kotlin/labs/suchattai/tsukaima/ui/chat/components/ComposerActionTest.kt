@@ -10,6 +10,10 @@ class ComposerActionTest {
     @Test fun runningIsStop() = assertEquals(ComposerAction.Stop, composerAction("", false, true, true, true))
     @Test fun runningWithTextAlsoSendsWhenDone() =
         assertEquals(ComposerAction.StopAndSendWhenDone, composerAction("hi", false, true, true, true))
+    @Test fun aWaitingTurnWithTextSendsWhenDone() =
+        assertEquals(ComposerAction.SendWhenDone, composerAction("hi", false, true, false, true, turnLive = true))
+    @Test fun aWaitingTurnWithNothingToSendOffersVoice() =
+        assertEquals(ComposerAction.Voice, composerAction("", false, true, false, true, turnLive = true))
     @Test fun runningWithAttachmentsAlsoSendsWhenDone() =
         assertEquals(ComposerAction.StopAndSendWhenDone, composerAction(" ", true, true, true, false))
     @Test fun noVoiceHandlerIsSend() = assertEquals(ComposerAction.Send, composerAction("", false, true, false, false))

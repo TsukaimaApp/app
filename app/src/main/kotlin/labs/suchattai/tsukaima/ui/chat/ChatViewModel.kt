@@ -37,7 +37,7 @@ import labs.suchattai.tsukaima.domain.chat.ConnectionAnswer
 import labs.suchattai.tsukaima.domain.chat.ConnectionAnswers
 import labs.suchattai.tsukaima.domain.chat.SideKind
 import labs.suchattai.tsukaima.domain.chat.ThinkingFlair
-import labs.suchattai.tsukaima.domain.chat.running
+import labs.suchattai.tsukaima.domain.chat.turnLive
 import labs.suchattai.tsukaima.domain.voice.VoiceLanguages
 import labs.suchattai.tsukaima.domain.voice.VoiceMode
 
@@ -82,6 +82,12 @@ class ChatViewModel(
     )
 
     private val failedSends = mutableMapOf<String, FailedSend>()
+
+    /**
+     * What each send the server queued carried, by bubble id, while it waits: a turn end that purges the queue turns
+     * its bubble failed ([ChatReducer]), and Retry / Dismiss then read it from here ([failedSend]).
+     */
+    private val queuedSends = mutableMapOf<String, FailedSend>()
     private val sync = ChatReconnector(
         session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), storedSessionId, flair, _state,
         onRebuilt = { before, liveChanged ->
@@ -275,6 +281,7 @@ class ChatViewModel(
         voice: Boolean = false, interrupted: Boolean = false,
     ) {
         val localId = "u-l${++userCounter}"
+        pruneQueuedSends()
         val queued = mustQueue(voice)
         _state.update {
             val chat = ChatReducer.onSubmitted(
@@ -297,6 +304,7 @@ class ChatViewModel(
         try {
             val accepted = session.submit(live, Attachments.promptText(text, sent), voice, interrupted, queued = queued)
             attachments.sent(sent)
+            if (queued && accepted.status == QUEUED) queuedSends[localId] = FailedSend(text, sent, voice, interrupted)
             setChat { ChatReducer.onSubmitAccepted(it, localId, accepted.userRowId, status = accepted.status) }
         } catch (c: CancellationException) {
             throw c
@@ -314,18 +322,22 @@ class ChatViewModel(
      * images show as failed there, ready for their own retry).
      */
     fun retrySend(localId: String) {
-        val failed = failedSends[localId] ?: return
+        val failed = failedSend(localId) ?: return
         if (chat.items.none { it.id == localId }) {
             failedSends.remove(localId) // the transcript was rebuilt from history meanwhile
+            queuedSends.remove(localId)
             return
         }
         if (!_state.value.writable) return backend.toast("Not connected to Hermes")
         val live = chat.liveSessionId ?: return backend.toast("Still connecting to Hermes")
-        if (failed.attachments.any { it.queued && it.liveSessionId != live }) {
+        // A purged queued send's images went with it on the server: they cannot be sent again as they were.
+        val imagesGone = localId in queuedSends && failed.attachments.any { it.queued }
+        if (imagesGone || failed.attachments.any { it.queued && it.liveSessionId != live }) {
             dismissFailed(localId)
             return backend.toast("Attach the images again, then send")
         }
         failedSends.remove(localId)
+        queuedSends.remove(localId)
         val queued = mustQueue(failed.voice)
         setChat { c ->
             val items = c.items.markFailed(localId, false, queued)
@@ -358,7 +370,7 @@ class ChatViewModel(
 
     /** Dismiss on a failed bubble: removes it; its text (if the composer is empty) and attachments go back to the composer. */
     fun dismissFailed(localId: String) {
-        val failed = failedSends.remove(localId)
+        val failed = failedSend(localId).also { failedSends.remove(localId); queuedSends.remove(localId) }
         setChat { c -> c.copy(items = c.items.filterNot { it.id == localId && it is ChatItem.UserMessage && it.failed }) }
         if (failed == null) return
         _state.update { if (it.input.isEmpty()) it.copy(input = failed.text) else it }
@@ -371,7 +383,19 @@ class ChatViewModel(
      * server may be between turns, about to run them). A voice turn never queues.
      */
     private fun mustQueue(voice: Boolean) =
-        !voice && (chat.status.running || chat.items.any { it is ChatItem.UserMessage && it.queued })
+        !voice && (chat.status.turnLive || chat.items.any { it is ChatItem.UserMessage && it.queued })
+
+    /** A failed bubble's send: one that never reached Hermes, or a queued one whose turn end purged it. */
+    private fun failedSend(localId: String): FailedSend? =
+        failedSends[localId] ?: queuedSends[localId]?.takeIf {
+            chat.items.any { item -> item.id == localId && item is ChatItem.UserMessage && item.failed }
+        }
+
+    /** Forgets queued sends that ran (their bubble is neither waiting nor failed) or left the transcript. */
+    private fun pruneQueuedSends() {
+        val items = chat.items.associateBy { it.id }
+        queuedSends.keys.retainAll { id -> (items[id] as? ChatItem.UserMessage)?.let { it.queued || it.failed } == true }
+    }
 
     /** A failed echo is never [ChatItem.UserMessage.queued]; a retry is queued again while a turn runs. */
     private fun List<ChatItem>.markFailed(localId: String, failed: Boolean, queued: Boolean = false) =
@@ -847,6 +871,9 @@ class ChatViewModel(
         }
 
     private companion object {
+        /** `prompt.submit` status of a send the server holds until the live turn ends. */
+        const val QUEUED = "queued"
+
         /** How long an attachment waits for the session to open before failing (retry is offered). */
         const val OPEN_WAIT_MS = 30_000L
 

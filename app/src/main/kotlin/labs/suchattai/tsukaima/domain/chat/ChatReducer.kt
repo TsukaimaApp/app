@@ -89,8 +89,9 @@ object ChatReducer {
      * `prompt.submit` accepted user message [localId]: stores its persisted [userRowId] (null = not proven yet, kept
      * unknown). After a truncation, [survivorUserRowIds] are the kept user turns' ids in order (the server may mint
      * new rows on a rewrite): they rebind the user messages above [localId] when the counts match, a null entry
-     * dropping a stale id. A queued echo stays queued only while the server answers [status] `queued` (a send that
-     * found the session idle ran at once); an echo that is no longer queued never turns queued again.
+     * dropping a stale id. A queued echo stops being queued when the server answers another [status] (a send that
+     * found the session idle ran at once); an unknown (null) status leaves it as it is, and an echo that is no longer
+     * queued never turns queued again.
      */
     fun onSubmitAccepted(
         state: ChatState,
@@ -103,8 +104,9 @@ object ChatReducer {
         if (index < 0) return state
         var items = state.items
         val echo = items[index] as ChatItem.UserMessage
-        if (userRowId != null || (echo.queued && status != QUEUED)) {
-            val queued = echo.queued && status == QUEUED
+        val ranAtOnce = echo.queued && status != null && status != QUEUED
+        if (userRowId != null || ranAtOnce) {
+            val queued = echo.queued && !ranAtOnce
             items = items.mapIndexed { i, item -> if (i == index) echo.copy(rowId = userRowId ?: echo.rowId, queued = queued) else item }
         }
         if (survivorUserRowIds != null) {
@@ -283,14 +285,15 @@ object ChatReducer {
 
     /**
      * Queued sends (`prompt.submit {queued: true}`) run one per turn after the live one: when a turn ends with echoes
-     * waiting, the next turn's first event ([QUEUED_TURN_STARTS]) is the oldest echo's ([startQueuedTurn]). Stop
-     * (`message.complete` status `interrupted`) purges the server's queue: the messages stay in the transcript but
-     * never run, so their echoes stop showing "Queued".
+     * waiting, the next turn's first event ([QUEUED_TURN_STARTS]) is the oldest echo's ([startQueuedTurn]). An
+     * interrupted turn (Stop, a voice barge-in: `message.complete` status `interrupted`) purges the server's queue, so
+     * the waiting messages never run: their echoes turn failed ("Not sent", Retry). A failed turn (`error`) is treated
+     * the same way, as the queue's fate is not reported.
      */
     private fun afterTurnEnd(type: String, p: JsonObject, s: ChatState): ChatState {
         if (type !in TURN_ENDS) return s
-        if (type == "message.complete" && p.string("status") == "interrupted") {
-            val items = s.items.map { if (it is ChatItem.UserMessage && it.queued) it.copy(queued = false) else it }
+        if (type != "message.complete" || p.string("status") == "interrupted") {
+            val items = s.items.map { if (it is ChatItem.UserMessage && it.queued) it.copy(queued = false, failed = true) else it }
             return s.copy(items = items, queuedTurnNext = false)
         }
         return s.copy(queuedTurnNext = s.items.any { it is ChatItem.UserMessage && it.queued })

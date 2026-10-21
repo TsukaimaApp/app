@@ -81,3 +81,11 @@ sealed interface AgentStatus {
 /** The agent is working on a turn (what Stop interrupts): thinking, running a tool or streaming a reply. */
 val AgentStatus.running: Boolean
     get() = this is AgentStatus.Thinking || this is AgentStatus.Tool || this == AgentStatus.Replying
+
+/**
+ * The server's turn is live: [running], or paused on the user (approval, question, masked prompt, connection). A send
+ * now must be queued behind it (`prompt.submit {queued: true}`); a plain one would interrupt it.
+ */
+val AgentStatus.turnLive: Boolean
+    get() = running || this == AgentStatus.Approval || this == AgentStatus.Question || this is AgentStatus.Secret ||
+        this == AgentStatus.Connection

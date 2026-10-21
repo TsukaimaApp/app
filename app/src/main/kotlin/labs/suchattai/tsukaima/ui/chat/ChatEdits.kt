@@ -164,8 +164,12 @@ internal class ChatEdits(
             return user?.takeIf { it.rowId != null && !it.failed && !it.imagesSent }
         }
 
-        /** A rewind needs Hermes reachable, a writable chat, and no turn running or waiting on the user. */
+        /**
+         * A rewind needs Hermes reachable, a writable chat, no turn running or waiting on the user, and no queued send
+         * waiting (between turns the server is about to run it).
+         */
         fun rewindable(s: ChatUiState): Boolean =
-            s.writable && !s.compacting && (s.chat.status == AgentStatus.Idle || s.chat.status == AgentStatus.Stopped)
+            s.writable && !s.compacting && (s.chat.status == AgentStatus.Idle || s.chat.status == AgentStatus.Stopped) &&
+                s.chat.items.none { it is ChatItem.UserMessage && it.queued }
     }
 }

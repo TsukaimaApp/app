@@ -380,6 +380,136 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun sendWhileAnApprovalWaitsIsQueued() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("prompt.submit", obj("""{"status":"queued"}""")) }
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.serverRequests.emit(approval("srq-1"))
+        advanceUntilIdle()
+        assertEquals(AgentStatus.Approval, vm.state.value.chat.status)
+        vm.setInput("also check the logs")
+        vm.send()
+        advanceUntilIdle()
+        assertEquals(true, b.transport.last("prompt.submit")["queued"]!!.jsonPrimitive.content.toBooleanStrict())
+        assertEquals("the approval still waits", AgentStatus.Approval, vm.state.value.chat.status)
+    }
+
+    @Test
+    fun sendWhileAQuestionWaitsIsQueued() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("prompt.submit", obj("""{"status":"queued"}""")) }
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.serverRequests.emit(clarify("srq-c"))
+        advanceUntilIdle()
+        vm.setInput("blue, by the way")
+        vm.send()
+        advanceUntilIdle()
+        assertEquals(true, b.transport.last("prompt.submit")["queued"]!!.jsonPrimitive.content.toBooleanStrict())
+    }
+
+    @Test
+    fun stopTurnsAQueuedSendIntoNotSentAndRetrySendsIt() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on(
+                "prompt.submit",
+                obj("""{"status":"streaming","user_row_id":1}"""), obj("""{"status":"queued"}"""),
+                obj("""{"status":"streaming","user_row_id":4}"""),
+            )
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("first")
+        vm.send()
+        b.events.emit(ev("message.start", 1))
+        advanceUntilIdle()
+        vm.setInput("second")
+        vm.send()
+        advanceUntilIdle()
+        fun echo() = vm.state.value.chat.items.first { it is ChatItem.UserMessage && it.text == "second" } as ChatItem.UserMessage
+
+        b.events.emit(ev("message.complete", 2, """{"text":"","status":"interrupted"}"""))
+        advanceUntilIdle()
+        assertTrue("purged by Stop: Not sent", echo().failed)
+        assertFalse(echo().queued)
+
+        vm.retrySend(echo().id)
+        advanceUntilIdle()
+        assertEquals(3, b.transport.methods().count { it == "prompt.submit" })
+        val params = b.transport.last("prompt.submit")
+        assertEquals("second", params["text"]!!.jsonPrimitive.content)
+        assertFalse("idle now: a plain send", "queued" in params)
+        assertFalse(echo().failed)
+        assertEquals(4L, echo().rowId)
+    }
+
+    @Test
+    fun retryOfAFailedSendWhileATurnRunsIsQueued() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":1}"""), obj("""{"status":"queued"}"""))
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("first")
+        vm.send()
+        b.events.emit(ev("message.start", 1))
+        advanceUntilIdle()
+        b.transport.failNext["prompt.submit"] = null
+        vm.setInput("second")
+        vm.send()
+        advanceUntilIdle()
+        val failed = vm.state.value.chat.items.last() as ChatItem.UserMessage
+        assertTrue(failed.failed)
+        assertFalse(failed.queued)
+        assertTrue("the live turn goes on", vm.state.value.chat.status is AgentStatus.Thinking)
+
+        vm.retrySend(failed.id)
+        advanceUntilIdle()
+        assertEquals(true, b.transport.last("prompt.submit")["queued"]!!.jsonPrimitive.content.toBooleanStrict())
+        assertTrue((vm.state.value.chat.items.last() as ChatItem.UserMessage).queued)
+    }
+
+    @Test
+    fun anAttachmentSentWhileATurnRunsIsQueued() = runTest(dispatcher) {
+        val b = backend().apply {
+            cannedAttach()
+            transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":1}"""), obj("""{"status":"queued"}"""))
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("first")
+        vm.send()
+        b.events.emit(ev("message.start", 1))
+        vm.attach(listOf(notes))
+        advanceUntilIdle()
+        vm.setInput("read this next")
+        vm.send()
+        advanceUntilIdle()
+        val params = b.transport.last("prompt.submit")
+        assertEquals(true, params["queued"]!!.jsonPrimitive.content.toBooleanStrict())
+        assertEquals("@file:attachments/notes.txt\n\nread this next", params["text"]!!.jsonPrimitive.content)
+        assertEquals(listOf("notes.txt"), (vm.state.value.chat.items.last() as ChatItem.UserMessage).attachments)
+    }
+
+    @Test
+    fun noRewindWhileAQueuedSendWaitsBetweenTurns() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":1}"""), obj("""{"status":"queued"}"""))
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("first")
+        vm.send()
+        b.events.emit(ev("message.start", 1))
+        advanceUntilIdle()
+        vm.setInput("second")
+        vm.send()
+        b.events.emit(ev("message.complete", 2, """{"text":"one","persisted_turn":{"user_row_id":1,"final_assistant_row_id":2}}"""))
+        advanceUntilIdle()
+        assertEquals(AgentStatus.Idle, vm.state.value.chat.status)
+        assertFalse(ChatEdits.rewindable(vm.state.value))
+    }
+
+    @Test
     fun queuedSendThatRunsAtOnceIsNotMarkedQueued() = runTest(dispatcher) {
         val b = backend().apply {
             transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":1}"""), obj("""{"status":"streaming","user_row_id":3}"""))

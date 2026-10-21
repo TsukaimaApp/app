@@ -66,6 +66,7 @@ import labs.suchattai.tsukaima.domain.chat.ClarifyQuestion
 import labs.suchattai.tsukaima.domain.chat.ConnectionAnswer
 import labs.suchattai.tsukaima.domain.chat.ToolStatus
 import labs.suchattai.tsukaima.domain.chat.running
+import labs.suchattai.tsukaima.domain.chat.turnLive
 import labs.suchattai.tsukaima.domain.voice.VoicePhase
 import labs.suchattai.tsukaima.domain.voice.VoiceState
 import labs.suchattai.tsukaima.data.gateway.ApprovalChoice
@@ -382,6 +383,7 @@ private fun ChatColumn(
             onRemoveAttachment = actions.onRemoveAttachment,
             onRetryAttachment = actions.onRetryAttachment,
             running = state.chat.status.running,
+            turnLive = state.chat.status.turnLive,
             onStop = actions.onStop,
             onVoice = actions.onVoice,
             focusRequester = composerFocus,

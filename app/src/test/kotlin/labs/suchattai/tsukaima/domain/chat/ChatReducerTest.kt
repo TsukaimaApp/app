@@ -971,7 +971,37 @@ class ChatReducerTest {
             ChatReducer.onSubmitted(running, "later", "u-l1", flair, queued = true), "u-l1", null, status = "queued",
         )
         val stopped = queued.feed(ev("message.complete", """{"text":"","status":"interrupted"}""", seq = 2))
-        assertFalse((stopped.items.first { it.id == "u-l1" } as ChatItem.UserMessage).queued)
+        val echo = stopped.items.first { it.id == "u-l1" } as ChatItem.UserMessage
+        assertFalse(echo.queued)
+        assertTrue("it never ran: Not sent", echo.failed)
+        assertFalse(stopped.queuedTurnNext)
+    }
+
+    @Test
+    fun aFailedTurnFailsTheQueuedEchoes() {
+        val queued = ChatReducer.onSubmitAccepted(
+            ChatReducer.onSubmitted(live.feed(ev("message.start", seq = 1)), "later", "u-l1", flair, queued = true),
+            "u-l1", null, status = "queued",
+        )
+        val failed = queued.feed(ev("error", """{"message":"boom"}""", seq = 2))
+        val echo = failed.items.first { it.id == "u-l1" } as ChatItem.UserMessage
+        assertTrue(echo.failed)
+        assertFalse(echo.queued)
+    }
+
+    @Test
+    fun anUnknownSubmitStatusKeepsTheEchoQueued() {
+        val s = ChatReducer.onSubmitted(live.feed(ev("message.start", seq = 1)), "hi", "u-l1", flair, queued = true)
+        assertTrue((ChatReducer.onSubmitAccepted(s, "u-l1", null, status = null).items.first { it.id == "u-l1" } as ChatItem.UserMessage).queued)
+    }
+
+    @Test
+    fun aTurnStartWithNoQueuedEchoClearsTheFlag() {
+        val s = live.copy(queuedTurnNext = true).feed(ev("message.start", seq = 1))
+        assertFalse(s.queuedTurnNext)
+        // A later send's echo is not taken for that stale turn.
+        val later = ChatReducer.onSubmitted(s, "hi", "u-l1", flair, queued = true).feed(ev("message.delta", """{"text":"x"}""", seq = 2))
+        assertTrue((later.items.first { it.id == "u-l1" } as ChatItem.UserMessage).queued)
     }
 
     @Test
