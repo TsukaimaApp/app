@@ -54,6 +54,12 @@ sealed interface AgentStatus {
         override val tone get() = StatusTone.Amber
     }
 
+    /** A connection operation (`connection.request`) waits for the user. */
+    data object Connection : AgentStatus {
+        override val label = "Waiting for a connection"
+        override val tone = StatusTone.Amber
+    }
+
     /** `session.compress` is summarizing the conversation (not a turn: Stop does not apply). */
     data object Compacting : AgentStatus {
         override val label = "Compacting context…"

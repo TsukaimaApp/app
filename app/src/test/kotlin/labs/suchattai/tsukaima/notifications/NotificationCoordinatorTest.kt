@@ -353,4 +353,29 @@ class NotificationCoordinatorTest {
             gated.onPairing(listOf(pairing("p-2")), foreground = false),
         )
     }
+
+    private fun connection(type: String, settled: Boolean = false) = event(
+        type,
+        payload = labs.suchattai.tsukaima.data.api.HermesJson.parseToJsonElement(
+            """{"op_id":"op-1","seq":1,"deadline_at":1,"settled":$settled,
+                "targets":[{"name":"linear","kind":"connector","action":"connect","state":"pending","display":"Linear"}]}""",
+        ) as JsonObject,
+    )
+
+    @Test
+    fun connectionRequestNeedsAttentionUntilSettled() {
+        // The chat on screen shows the card itself.
+        assertTrue(c.onEvent(connection("connection.request"), foreground = true, visibleSession = "live-1").isEmpty())
+
+        val posted = c.onEvent(connection("connection.request"), foreground = true, visibleSession = "other").single() as Post
+        assertEquals(ApprovalNotifier.PUBLIC_TITLE, posted.spec.title)
+        assertEquals("Hermes wants to connect Linear", posted.spec.text)
+        assertEquals(Channels.APPROVALS, posted.spec.channel)
+        assertEquals(ApprovalNotifier.SCREEN_CHAT, posted.spec.openScreen)
+        // Once per operation.
+        assertTrue(c.onEvent(connection("connection.request"), foreground = false).isEmpty())
+        // A progress frame leaves it; the settlement cancels it.
+        assertTrue(c.onEvent(connection("connection.update"), foreground = false).isEmpty())
+        assertEquals(listOf(Cancel(posted.spec.id)), c.onEvent(connection("connection.update", settled = true), foreground = false))
+    }
 }

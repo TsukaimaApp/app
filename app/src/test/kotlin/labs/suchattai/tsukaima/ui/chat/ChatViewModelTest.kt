@@ -45,6 +45,7 @@ import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.ChatReducer
 import labs.suchattai.tsukaima.domain.chat.ChatState
+import labs.suchattai.tsukaima.domain.chat.ConnectionAnswers
 import labs.suchattai.tsukaima.domain.chat.SecretKind
 import labs.suchattai.tsukaima.domain.chat.VaultAnswers
 import labs.suchattai.tsukaima.domain.chat.SideKind
@@ -185,6 +186,8 @@ class ChatViewModelTest {
         }
         val opened = mutableListOf<Pair<String, String>>()
         override fun openFile(uri: String, mime: String) = true.also { opened += uri to mime }
+        val openedUrls = mutableListOf<String>()
+        override fun openUrl(url: String) = true.also { openedUrls += url }
         var decoded = 0
         override fun decodePreview(bytes: ByteArray): ImageBitmap = FakeBitmap.also { decoded++ }
 
@@ -2888,5 +2891,140 @@ class ChatViewModelTest {
         assertEquals("what is in it?", b.transport.last("prompt.btw")["text"]!!.jsonPrimitive.content)
         assertEquals(AttachmentStatus.Ready, vm.state.value.attachments.single().status)
         assertEquals("", vm.state.value.input)
+    }
+
+    // ---- v0.9.0: connection requests ---------------------------------------------------------------------------
+
+    private val opId = "a442c3e92e99"
+
+    private fun connectionRequest(seq: Long = 5, linearUrl: String? = null) = ev(
+        "connection.request", seq,
+        """{"op_id":"$opId","seq":1,"deadline_at":${System.currentTimeMillis() / 1000 + 300},"timeout_seconds":300,
+            "targets":[{"name":"linear","kind":"connector","action":"connect","state":"${if (linearUrl != null) "initiated" else "pending"}"
+                        ${linearUrl?.let { ",\"connect_url\":\"$it\"" }.orEmpty()}},
+                       {"name":"github","kind":"connector","action":"connect","state":"pending"}]}""",
+    )
+
+    @Test
+    fun skipAllSendsSkippedForEveryTarget() = runTest(dispatcher) {
+        val b = backend()
+        b.transport.on("connection.respond", obj("""{"status":"ok","settled":true}"""))
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.events.emit(connectionRequest())
+        advanceUntilIdle()
+        assertEquals(AgentStatus.Connection, vm.state.value.status)
+
+        vm.skipConnection(opId)
+        advanceUntilIdle()
+
+        assertEquals(
+            obj(
+                """{"owner":{"type":"session","session_id":"$live"},"op_id":"$opId",
+                    "result":{"targets":[{"name":"linear","status":"skipped"},{"name":"github","status":"skipped"}]}}""",
+            ),
+            b.transport.last("connection.respond"),
+        )
+        // The server said the operation settled: the card collapses and the chat stops waiting.
+        assertTrue((vm.state.value.chat.items.last() as ChatItem.ConnectionRequest).settled)
+        assertTrue(vm.state.value.status is AgentStatus.Thinking)
+        // A settled card answers nothing more.
+        vm.continueConnection(opId)
+        advanceUntilIdle()
+        assertEquals(1, b.transport.methods().count { it == "connection.respond" })
+    }
+
+    @Test
+    fun connectionApproveSendsTheEnvAndContinueSettles() = runTest(dispatcher) {
+        val b = backend()
+        b.transport.on("connection.respond", obj("""{"status":"ok","settled":false}"""))
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.events.emit(connectionRequest())
+        advanceUntilIdle()
+
+        vm.answerConnection(opId, ConnectionAnswers.approve("github", mapOf("GITHUB_TOKEN" to "s3cr3t")))
+        vm.continueConnection(opId)
+        advanceUntilIdle()
+
+        val sent = b.transport.calls.filter { it.first == "connection.respond" }.map { it.second["result"] }
+        assertEquals(
+            listOf(
+                obj("""{"targets":[{"name":"github","status":"approved","env":{"GITHUB_TOKEN":"s3cr3t"}}]}"""),
+                obj("""{"targets":[],"settled_by":"continue"}"""),
+            ),
+            sent,
+        )
+        assertFalse((vm.state.value.chat.items.last() as ChatItem.ConnectionRequest).settled)
+        assertFalse("the value is nowhere in the UI state", vm.state.value.toString().contains("s3cr3t"))
+        assertTrue(b.toasts.none { it.contains("s3cr3t") })
+    }
+
+    @Test
+    fun connectionAnswerThatFailsToasts() = runTest(dispatcher) {
+        val b = backend()
+        b.transport.rpcErrors["connection.respond"] = RpcException(4002, "Connection answer is invalid.")
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.events.emit(connectionRequest())
+        advanceUntilIdle()
+
+        vm.skipConnection(opId)
+        advanceUntilIdle()
+
+        assertEquals(listOf("Couldn’t send the answer: Connection answer is invalid."), b.toasts)
+        assertFalse((vm.state.value.chat.items.last() as ChatItem.ConnectionRequest).settled)
+        assertEquals(AgentStatus.Connection, vm.state.value.status)
+    }
+
+    @Test
+    fun openConnectUrlThenWake() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.events.emit(connectionRequest(linearUrl = "https://auth.example.test/linear?state=1"))
+        advanceUntilIdle()
+
+        vm.openConnectUrl(opId, "linear")
+        advanceUntilIdle()
+        assertEquals(listOf("https://auth.example.test/linear?state=1"), b.openedUrls)
+        assertFalse("no wake before the browser leg came back", "connectors.operation.wake" in b.transport.methods())
+
+        // Back from the browser: the backend reads the account now, once.
+        vm.onScreenResumed()
+        vm.onScreenResumed()
+        advanceUntilIdle()
+        assertEquals(
+            listOf(obj("""{"owner":{"type":"session","session_id":"$live"},"op_id":"$opId"}""")),
+            b.transport.calls.filter { it.first == "connectors.operation.wake" }.map { it.second },
+        )
+
+        // A target without a link, or a link that is not http(s), opens nothing.
+        vm.openConnectUrl(opId, "github")
+        b.events.emit(
+            ev(
+                "connection.update", 9,
+                """{"op_id":"$opId","seq":2,"deadline_at":1,"settled":false,
+                    "targets":[{"name":"linear","kind":"connector","action":"connect","state":"initiated","connect_url":"javascript:alert(1)"}]}""",
+            ),
+        )
+        advanceUntilIdle()
+        vm.openConnectUrl(opId, "linear")
+        advanceUntilIdle()
+        assertEquals(1, b.openedUrls.size)
+    }
+
+    @Test
+    fun resumeRestoresThePendingConnection() = runTest(dispatcher) {
+        val b = backend()
+        val pending = connectionRequest().payload.toString()
+        b.transport.on("session.resume", obj(resumeJson.replace("\"running\":false", "\"running\":true,\"pending_connection\":$pending")))
+        b.transport.on("session.events.since", obj("""{"events":[],"latest_seq":0,"truncated":false,"open_requests":[]}"""))
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+
+        val card = vm.state.value.chat.items.last() as ChatItem.ConnectionRequest
+        assertEquals(opId, card.opId)
+        assertEquals(AgentStatus.Connection, vm.state.value.status)
     }
 }

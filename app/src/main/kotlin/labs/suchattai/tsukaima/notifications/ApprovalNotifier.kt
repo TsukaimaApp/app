@@ -130,6 +130,22 @@ object ApprovalNotifier {
         )
     }
 
+    fun connectionId(opId: String): Int = "conn:$opId".hashCode()
+
+    /**
+     * "Hermes needs your attention": a connection operation (`connection.request`) waits for the user, with the
+     * targets it wants (agent-reachable names, revealed and capped). No inline answers: tapping opens the chat, where
+     * the card answers it.
+     */
+    fun forConnection(opId: String, labels: List<String>, storedSessionId: String? = null): NotificationSpec {
+        val names = cap(CommandText.reveal(labels.joinToString(", ")).text, MAX_QUESTION)
+        return NotificationSpec(
+            Channels.APPROVALS, connectionId(opId), PUBLIC_TITLE,
+            if (names.isEmpty()) "Hermes wants to connect" else "Hermes wants to connect $names",
+            openScreen = SCREEN_CHAT, sessionId = storedSessionId,
+        )
+    }
+
     /**
      * Approve is offered inline only when the notification shows the whole command and it had no hidden
      * characters; otherwise the user gets Deny and "Open to review" (the full command in chat). Approve needs

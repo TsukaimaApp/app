@@ -205,7 +205,7 @@ class VoiceController(
                 present += item.id
                 speakReply(item)
             }
-            is ChatItem.Approval, is ChatItem.Clarify, is ChatItem.SecretPrompt ->
+            is ChatItem.Approval, is ChatItem.Clarify, is ChatItem.SecretPrompt, is ChatItem.ConnectionRequest ->
                 if (mode == VoiceMode.Assist && !handOff && !item.answered && handledRequests.add(item.id)) {
                     handOff = true
                     enqueue(Utterance(null, APPROVAL_LINE, 0) { onApprovalNeeded() })
@@ -221,6 +221,7 @@ class VoiceController(
             is ChatItem.Approval -> answered
             is ChatItem.Clarify -> answered
             is ChatItem.SecretPrompt -> answered
+            is ChatItem.ConnectionRequest -> settled
             else -> true
         }
 

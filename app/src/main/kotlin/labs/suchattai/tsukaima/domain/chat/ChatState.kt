@@ -122,6 +122,25 @@ sealed interface ChatItem {
         val pending: Boolean,
     ) : ChatItem
 
+    /**
+     * A connection operation (`connection.request`, `manage_connections`): the agent wants accounts connected or
+     * tools installed ([id] `conn-<op_id>`). Updated in place by `connection.update` frames of the same [opId]
+     * (each carries the full [targets] snapshot; [seq] is the operation's own write counter, so an older frame moves
+     * nothing). [owner] is the operation's owner as the server last named it (null until an update did); answers go
+     * to `connection.respond`. [deadlineAt] is epoch seconds on the server clock; [settledBy] the server's reason
+     * (`all_resolved`, `continue`, `deadline`, `interrupt`) once [settled].
+     */
+    data class ConnectionRequest(
+        override val id: String,
+        val opId: String,
+        val owner: JsonObject?,
+        val deadlineAt: Double,
+        val targets: List<ConnectionTarget>,
+        val settled: Boolean,
+        val settledBy: String?,
+        val seq: Long = -1,
+    ) : ChatItem
+
     /** Placeholder "agent is working" row; replaced by the assistant message on `message.start`. */
     data class Thinking(override val id: String) : ChatItem
 }

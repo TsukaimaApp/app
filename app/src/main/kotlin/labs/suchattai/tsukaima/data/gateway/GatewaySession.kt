@@ -1,14 +1,17 @@
 package labs.suchattai.tsukaima.data.gateway
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.put
 import labs.suchattai.tsukaima.data.api.HermesJson
 import labs.suchattai.tsukaima.data.api.ModelOptionsDto
+import labs.suchattai.tsukaima.domain.chat.ConnectionAnswer
 import java.io.IOException
 
 /**
@@ -255,6 +258,42 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
             requestId?.let { put("request_id", it) }
         })
     }
+
+    /**
+     * Answers connection operation [opId] (`connection.respond {owner, op_id, result}`); [owner] is
+     * `{type: "session", session_id}` of the live session the request arrived on. The success value is the server's
+     * `settled`: whether this answer ended the operation. Env values in [answer] go to the socket only.
+     */
+    suspend fun respondConnection(opId: String, owner: JsonObject, answer: ConnectionAnswer): Result<Boolean> = rpcResult {
+        val result = rpc("connection.respond", buildJsonObject {
+            put("owner", owner)
+            put("op_id", opId)
+            put("result", answer.toJson())
+        })
+        (result["settled"] as? JsonPrimitive)?.booleanOrNull ?: false
+    }
+
+    /**
+     * The browser leg of operation [opId] came back (`connectors.operation.wake {owner, op_id}`): the backend reads
+     * the account now instead of at its next tick. Best effort; the operation may have settled meanwhile.
+     */
+    suspend fun wakeConnection(owner: JsonObject, opId: String): Result<Unit> = rpcResult {
+        rpc("connectors.operation.wake", buildJsonObject {
+            put("owner", owner)
+            put("op_id", opId)
+        })
+        Unit
+    }
+
+    /** [block]'s value, or its failure; cancellation is never caught. */
+    private inline fun <T> rpcResult(block: () -> T): Result<T> =
+        try {
+            Result.success(block())
+        } catch (c: CancellationException) {
+            throw c
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
 
     /** Every request goes through here: adds `profile` when one other than "default" is active. */
     private suspend fun rpc(method: String, params: JsonObject, timeoutMs: Long? = null): JsonObject {

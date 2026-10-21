@@ -3,12 +3,14 @@ package labs.suchattai.tsukaima.notifications
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import labs.suchattai.tsukaima.data.RecentIds
 import labs.suchattai.tsukaima.data.api.CronJobDto
 import labs.suchattai.tsukaima.data.gateway.Frame
 import labs.suchattai.tsukaima.data.prefs.NotificationPrefs
 import labs.suchattai.tsukaima.domain.chat.AgentStatus
+import labs.suchattai.tsukaima.domain.chat.ConnectionAnswers
 
 /** What to do with the notification shade. */
 sealed interface NotificationCommand {
@@ -25,6 +27,8 @@ sealed interface NotificationCommand {
  *   and in the foreground only when the chat on screen is not the session that asked (that chat shows it).
  *   `request.cancel` / `approval.cancelled` cancel the notification. The notification carries the stored
  *   session id ([storedFor], else learned from `session.title`) so a tap opens the chat that asked.
+ * - Connection operations (`connection.request`): "Hermes needs your attention", once per op id, on the same terms
+ *   as approvals; cancelled by the `connection.update` that settles it.
  * - Task done: `message.complete` in the background, titled by the last `session.title` for that session;
  *   not for a failed turn (`status: "error"`).
  * - Gateway: posted on the transition to Stopped/Offline only (and only in the background), cancelled when
@@ -113,8 +117,9 @@ class NotificationCoordinator(
     fun onAnswered(srqId: String): NotificationCommand.Cancel =
         NotificationCommand.Cancel(ApprovalNotifier.approvalId(srqId))
 
+    /** [visibleSession] as for [onServerRequest]: the chat on screen shows its own connection card. */
     @Synchronized
-    fun onEvent(ev: Frame.Event, foreground: Boolean): List<NotificationCommand> = when (ev.type) {
+    fun onEvent(ev: Frame.Event, foreground: Boolean, visibleSession: String? = null): List<NotificationCommand> = when (ev.type) {
         "session.title" -> {
             ev.payload.str("title")?.let { titles[ev.sessionId] = it }
             ev.payload.str("session_id")?.takeIf { ev.sessionId.isNotEmpty() }?.let { storedByLive[ev.sessionId] = it }
@@ -125,12 +130,28 @@ class NotificationCoordinator(
         } else {
             listOf(NotificationCommand.Post(ApprovalNotifier.forTaskDone(titles[ev.sessionId], ev.sessionId)))
         }
+        "connection.request" -> listOfNotNull(onConnectionRequest(ev, foreground, visibleSession))
+        "connection.update" -> if ((ev.payload["settled"] as? JsonPrimitive)?.booleanOrNull == true) {
+            listOfNotNull(ev.payload.str("op_id")?.let { NotificationCommand.Cancel(ApprovalNotifier.connectionId(it)) })
+        } else {
+            emptyList()
+        }
         "request.cancel" -> listOfNotNull(ev.payload.str("id")?.let(::close))
         "approval.cancelled" -> (ev.payload["request_ids"] as? JsonArray).orEmpty()
             .mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
             .mapNotNull { srqByRequestId.remove(it) }
             .map(::close)
         else -> emptyList()
+    }
+
+    /** A connection operation waits for the user: notified once per op id, like an approval (same switch). */
+    private fun onConnectionRequest(ev: Frame.Event, foreground: Boolean, visibleSession: String?): NotificationCommand? {
+        val opId = ev.payload.str("op_id") ?: return null
+        val shownInChat = foreground && visibleSession != null && ev.sessionId == visibleSession
+        if (shownInChat || !prefs().approvals || !notified.add("conn:$opId")) return null
+        val labels = ConnectionAnswers.targets(ev.payload["targets"] as? JsonArray).map { it.label }
+        val stored = ev.sessionId.takeIf { it.isNotEmpty() }?.let { storedFor(it) ?: storedByLive[it] }
+        return NotificationCommand.Post(ApprovalNotifier.forConnection(opId, labels, stored))
     }
 
     /** The server withdrew [srqId]: never notify it again, and cancel it if it is showing. */

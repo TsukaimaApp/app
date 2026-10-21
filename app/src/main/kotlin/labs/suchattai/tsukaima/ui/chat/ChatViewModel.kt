@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import labs.suchattai.tsukaima.data.gateway.ApprovalChoice
@@ -32,6 +33,8 @@ import labs.suchattai.tsukaima.domain.chat.AgentStatus
 import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.ChatReducer
 import labs.suchattai.tsukaima.domain.chat.ChatState
+import labs.suchattai.tsukaima.domain.chat.ConnectionAnswer
+import labs.suchattai.tsukaima.domain.chat.ConnectionAnswers
 import labs.suchattai.tsukaima.domain.chat.SideKind
 import labs.suchattai.tsukaima.domain.chat.ThinkingFlair
 import labs.suchattai.tsukaima.domain.voice.VoiceLanguages
@@ -156,6 +159,7 @@ class ChatViewModel(
                     val r = session.resume(storedSessionId)
                     sync.bindResumed(r, rebuild = true)
                     sync.adoptOpen(r.openRequests, r.pendingApproval)
+                    sync.adoptConnection(r.pendingConnection)
                     sync.syncWatermark(r.sessionId)
                 }
                 opened = true
@@ -475,6 +479,70 @@ class ChatViewModel(
 
     /** Cancel on a masked prompt: answers `""` (skipped / declined). */
     fun declineSecret(id: String) = answerSecret(id, "")
+
+    // ---- connection operations --------------------------------------------------------------------
+
+    /** Operations whose browser leg was opened from this screen: the next [onScreenResumed] wakes them. */
+    private val awaitingBrowser = mutableSetOf<String>()
+
+    /**
+     * Sends [answer] for open connection operation [opId] (`connection.respond`). The card moves only with the
+     * server's `connection.update` frames, except that a `settled: true` reply settles it at once. Env values in
+     * the answer go to the socket only: never into the state, a log or a toast. A settled card answers nothing.
+     */
+    fun answerConnection(opId: String, answer: ConnectionAnswer) {
+        val card = connectionCard(opId) ?: return
+        val owner = connectionOwner(card) ?: return
+        launch {
+            session.respondConnection(opId, owner, answer)
+                .onSuccess { settled -> if (settled) setChat { ChatReducer.onConnectionSettled(it, opId, flair) } }
+                .onFailure { backend.toast("Couldn’t send the answer: ${it.message ?: "gateway error"}") }
+        }
+    }
+
+    /** "Skip all": every target of [opId] `skipped`. */
+    fun skipConnection(opId: String) {
+        val card = connectionCard(opId) ?: return
+        answerConnection(opId, ConnectionAnswers.skipAll(card.targets))
+    }
+
+    /** "Continue": ends operation [opId] now with whatever is unresolved. */
+    fun continueConnection(opId: String) = answerConnection(opId, ConnectionAnswers.continueNow())
+
+    /**
+     * "Connect" on a row with a link: opens target [name]'s `connect_url` (http(s) only: it is agent-reachable data)
+     * in the browser. The backend notices the account on its own; coming back to the chat ([onScreenResumed]) also
+     * wakes it (`connectors.operation.wake`) so it reads the account at once.
+     */
+    fun openConnectUrl(opId: String, name: String) {
+        val card = connectionCard(opId) ?: return
+        val url = card.targets.firstOrNull { it.name == name }?.connectUrl ?: return
+        val scheme = url.substringBefore(':', "").lowercase()
+        if (scheme != "https" && scheme != "http") return backend.toast("Can’t open this link")
+        if (!backend.openUrl(url)) return backend.toast("No browser to open the link")
+        awaitingBrowser += opId
+    }
+
+    /** The chat screen is in front again (ON_RESUME): wakes every open operation whose browser leg was opened. */
+    fun onScreenResumed() {
+        if (awaitingBrowser.isEmpty()) return
+        val ops = awaitingBrowser.toList()
+        awaitingBrowser.clear()
+        for (opId in ops) {
+            val card = connectionCard(opId) ?: continue
+            val owner = connectionOwner(card) ?: continue
+            // Best effort: the wake only shortens the wait, and the operation may have settled meanwhile.
+            launch { session.wakeConnection(owner, opId) }
+        }
+    }
+
+    /** The open (unsettled) card of [opId], or null. */
+    private fun connectionCard(opId: String): ChatItem.ConnectionRequest? =
+        chat.items.firstOrNull { it is ChatItem.ConnectionRequest && it.opId == opId && !it.settled } as? ChatItem.ConnectionRequest
+
+    /** The owner the server named, else this live session (the request arrived on it). */
+    private fun connectionOwner(card: ChatItem.ConnectionRequest): JsonObject? =
+        card.owner ?: chat.liveSessionId?.let(ConnectionAnswers::sessionOwner)
 
     /** Undoes an answer that was not delivered: the card is answerable again and the claim is released. */
     private fun reopenAnswer(id: String) {

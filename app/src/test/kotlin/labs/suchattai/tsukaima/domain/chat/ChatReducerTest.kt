@@ -1024,4 +1024,102 @@ class ChatReducerTest {
         assertEquals("Side answer.", (s.items[1] as ChatItem.SideNote).text)
         assertEquals(AgentStatus.Idle, s.status)
     }
+
+    // ---- v0.9.0: connection requests ---------------------------------------------------------------------------
+
+    private val connectionRequestJson = """
+        {"op_id":"a442c3e92e99","seq":1,"deadline_at":1761010838.5,"timeout_seconds":300,"tool_call_id":"call_1",
+         "targets":[{"name":"linear","kind":"connector","action":"connect","state":"pending","resolved":false},
+                    {"name":"github","kind":"connector","action":"connect","state":"pending","resolved":false}]}
+    """.trimIndent()
+
+    private fun connectionUpdate(seq: Int, settled: Boolean, linear: String, github: String, settledBy: String? = null) = """
+        {"op_id":"a442c3e92e99","seq":$seq,"deadline_at":1761010838.5,"settled":$settled,
+         ${settledBy?.let { "\"settled_by\":\"$it\"," }.orEmpty()}
+         "owner":{"type":"session","session_id":"$sid"},
+         "targets":[{"name":"linear","kind":"connector","action":"connect","state":"$linear"},
+                    {"name":"github","kind":"connector","action":"connect","state":"$github"}]}
+    """.trimIndent()
+
+    @Test
+    fun connectionRequestBecomesACard() {
+        val s = live.feed(
+            ev("tool.start", """{"tool_id":"call_1","name":"manage_connections"}""", seq = 1),
+            ev("connection.request", connectionRequestJson, seq = 2),
+        )
+
+        val card = s.items.last() as ChatItem.ConnectionRequest
+        assertEquals("conn-a442c3e92e99", card.id)
+        assertEquals("a442c3e92e99", card.opId)
+        assertNull(card.owner)
+        assertEquals(1761010838.5, card.deadlineAt, 0.0)
+        assertEquals(listOf("linear", "github"), card.targets.map { it.name })
+        assertEquals(listOf("pending", "pending"), card.targets.map { it.state })
+        assertFalse(card.settled)
+        assertNull(card.settledBy)
+        assertEquals(AgentStatus.Connection, s.status)
+        assertEquals("Waiting for a connection", s.status.label)
+        assertEquals(StatusTone.Amber, s.status.tone)
+        // The same request again (a replay) keeps one card.
+        assertEquals(1, s.feed(ev("connection.request", connectionRequestJson, session = "")).items.count { it is ChatItem.ConnectionRequest })
+        // A request without an op id is no card.
+        assertEquals(live, live.feed(ev("connection.request", """{"seq":1,"deadline_at":1,"targets":[]}""")))
+    }
+
+    @Test
+    fun connectionUpdateReplacesTargetsAndSettles() {
+        val opened = live.feed(ev("connection.request", connectionRequestJson, seq = 1))
+
+        val moved = opened.feed(ev("connection.update", connectionUpdate(2, settled = false, linear = "initiated", github = "pending"), seq = 2))
+        val card = moved.items.single() as ChatItem.ConnectionRequest
+        assertEquals(listOf("initiated", "pending"), card.targets.map { it.state })
+        assertEquals("""{"type":"session","session_id":"$sid"}""", card.owner.toString())
+        assertFalse(card.settled)
+        assertEquals(AgentStatus.Connection, moved.status)
+
+        // An older frame of the operation (by its own seq) moves nothing.
+        val stale = moved.feed(ev("connection.update", connectionUpdate(1, settled = false, linear = "pending", github = "pending"), seq = 3))
+        assertEquals(card, stale.items.single())
+
+        // An update for an operation with no card (another session's broadcast) is ignored.
+        val other = moved.feed(ev("connection.update", connectionUpdate(5, true, "skipped", "skipped").replace("a442c3e92e99", "ffff"), session = ""))
+        assertEquals(moved.items, other.items)
+
+        val settled = moved.feed(
+            ev("connection.update", connectionUpdate(4, settled = true, linear = "connected", github = "skipped", settledBy = "all_resolved"), seq = 4),
+        )
+        val done = settled.items.single() as ChatItem.ConnectionRequest
+        assertTrue(done.settled)
+        assertEquals("all_resolved", done.settledBy)
+        assertEquals(listOf("connected", "skipped"), done.targets.map { it.state })
+        assertEquals(AgentStatus.Thinking("flair-1"), settled.status)
+    }
+
+    @Test
+    fun connectionRequestSurvivesResume() {
+        val opened = live.feed(ev("connection.request", connectionRequestJson, seq = 7))
+        // A resume rebuilds the transcript from the stored history, which never holds the card ...
+        val rebuilt = ChatReducer.onSessionBound(opened, "beef0001", null).copy(items = emptyList(), status = AgentStatus.Thinking("x"))
+        // ... and its `pending_connection` snapshot brings it back, answerable, with the server's deadline.
+        val restored = ChatReducer.onConnectionRequest(rebuilt, obj(connectionRequestJson))
+        val card = restored.items.single() as ChatItem.ConnectionRequest
+        assertEquals("a442c3e92e99", card.opId)
+        assertFalse(card.settled)
+        assertEquals(AgentStatus.Connection, restored.status)
+        // The replayed event of the new live session finds the card already there.
+        val replayed = restored.copy(liveSessionId = "beef0001").feed(ev("connection.request", connectionRequestJson, seq = 3, session = "beef0001"))
+        assertEquals(1, replayed.items.size)
+        // A snapshot of a card already shown (same live session) keeps it as it is.
+        assertEquals(opened, ChatReducer.onConnectionRequest(opened, obj(connectionRequestJson)))
+    }
+
+    @Test
+    fun turnErrorSettlesAnOpenConnectionCard() {
+        val s = live.feed(
+            ev("connection.request", connectionRequestJson, seq = 1),
+            ev("error", """{"message":"boom"}""", seq = 2),
+        )
+        assertTrue((s.items.first() as ChatItem.ConnectionRequest).settled)
+        assertEquals(AgentStatus.Idle, s.status)
+    }
 }

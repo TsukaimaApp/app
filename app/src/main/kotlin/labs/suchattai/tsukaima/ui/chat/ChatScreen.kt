@@ -63,6 +63,7 @@ import labs.suchattai.tsukaima.domain.chat.ModelTree
 import labs.suchattai.tsukaima.domain.chat.ModelEntry
 import labs.suchattai.tsukaima.domain.chat.ChatState
 import labs.suchattai.tsukaima.domain.chat.ClarifyQuestion
+import labs.suchattai.tsukaima.domain.chat.ConnectionAnswer
 import labs.suchattai.tsukaima.domain.chat.ToolStatus
 import labs.suchattai.tsukaima.domain.chat.running
 import labs.suchattai.tsukaima.domain.voice.VoicePhase
@@ -78,6 +79,7 @@ import labs.suchattai.tsukaima.ui.chat.components.ClarifyCard
 import labs.suchattai.tsukaima.ui.chat.components.Composer
 import labs.suchattai.tsukaima.ui.chat.components.MediaHost
 import labs.suchattai.tsukaima.ui.chat.components.SecretCard
+import labs.suchattai.tsukaima.ui.chat.components.ConnectionCard
 import labs.suchattai.tsukaima.ui.chat.components.SideNoteCard
 import labs.suchattai.tsukaima.ui.chat.components.StatusLine
 import labs.suchattai.tsukaima.ui.chat.components.ToolRow
@@ -111,6 +113,14 @@ class ChatActions(
     val onApproveFor: (id: String, choice: ApprovalChoice) -> Unit = { _, _ -> },
     val onSecret: (id: String, value: String) -> Unit = { _, _ -> },
     val onSecretCancel: (String) -> Unit = {},
+
+    /** A connection card's answer for operation `opId`: a row's Connect / Skip. */
+    val onConnectionAnswer: (opId: String, answer: ConnectionAnswer) -> Unit = { _, _ -> },
+
+    /** "Connect" on a row with a link: open it in the browser. */
+    val onConnectionOpen: (opId: String, name: String) -> Unit = { _, _ -> },
+    val onConnectionSkipAll: (opId: String) -> Unit = {},
+    val onConnectionContinue: (opId: String) -> Unit = {},
     val onStop: () -> Unit = {},
     val onVoice: () -> Unit = {},
     val onVoiceClose: () -> Unit = {},
@@ -184,6 +194,8 @@ fun ChatScreen(
     // Voice mode ends when the chat leaves the screen (app in the background, another destination), not on rotation.
     val activity = LocalActivity.current
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { if (activity?.isChangingConfigurations != true) vm.closeVoice() }
+    // Back from a connection's browser leg: the backend reads the account now.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.onScreenResumed() }
     ChatContent(
         state = state,
         showMenu = showMenu,
@@ -205,6 +217,10 @@ fun ChatScreen(
             onApproveFor = vm::answerApproval,
             onSecret = vm::answerSecret,
             onSecretCancel = vm::declineSecret,
+            onConnectionAnswer = vm::answerConnection,
+            onConnectionOpen = vm::openConnectUrl,
+            onConnectionSkipAll = vm::skipConnection,
+            onConnectionContinue = vm::continueConnection,
             onStop = vm::interrupt,
             onVoice = {
                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
@@ -449,6 +465,13 @@ internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatAct
             item = item,
             onSend = { actions.onClarify(item.id, it) },
             onSkipAll = { actions.onClarifySkip(item.id) },
+        )
+        is ChatItem.ConnectionRequest -> ConnectionCard(
+            item = item,
+            onAnswer = { actions.onConnectionAnswer(item.opId, it) },
+            onOpen = { actions.onConnectionOpen(item.opId, it) },
+            onSkipAll = { actions.onConnectionSkipAll(item.opId) },
+            onContinue = { actions.onConnectionContinue(item.opId) },
         )
         is ChatItem.SideNote -> SideNoteCard(item, media = media)
         is ChatItem.Thinking -> Spacer(Modifier.height(0.dp))

@@ -32,6 +32,7 @@ import labs.suchattai.tsukaima.data.api.HermesJson
 import labs.suchattai.tsukaima.data.files.FileSaver
 import labs.suchattai.tsukaima.data.files.MediaStoreFileSaver
 import labs.suchattai.tsukaima.data.files.viewFile
+import labs.suchattai.tsukaima.data.files.viewUrl
 import labs.suchattai.tsukaima.data.gateway.GatewayClient
 import labs.suchattai.tsukaima.data.gateway.GatewaySession
 import labs.suchattai.tsukaima.data.prefs.CredentialStore
@@ -224,6 +225,8 @@ class AppContainer(context: Context) {
     }
 
     fun openFile(uri: String, mime: String): Boolean = viewFile(appContext, uri, mime)
+
+    fun openUrl(url: String): Boolean = viewUrl(appContext, url)
 
     /**
      * Ids of server requests (approvals) already answered from any surface: chat screens and notifications.

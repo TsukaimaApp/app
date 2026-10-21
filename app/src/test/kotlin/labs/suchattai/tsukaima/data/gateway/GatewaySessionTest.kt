@@ -7,6 +7,7 @@ import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import labs.suchattai.tsukaima.data.api.HermesJson
+import labs.suchattai.tsukaima.domain.chat.ConnectionAnswers
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -59,13 +60,15 @@ class GatewaySessionTest {
         runCatching { modelOptions("s") }
         eventsSince("s", 0)
         approvalRespond("s", "r", ApprovalChoice.once)
+        respondConnection("op", ConnectionAnswers.sessionOwner("s"), ConnectionAnswers.continueNow())
+        wakeConnection(ConnectionAnswers.sessionOwner("s"), "op")
     }
 
     @Test
     fun rpcParamsIncludeProfileWhenNotDefault() = runBlocking {
         val t = FakeTransport(obj("""{"session_id":"s1","messages":[],"sessions":[]}"""))
         GatewaySession(t) { "research" }.callEveryRpc()
-        assertEquals(14, t.calls.size)
+        assertEquals(16, t.calls.size)
         for ((method, params) in t.calls) {
             assertEquals(method, "research", params["profile"]?.jsonPrimitive?.content)
         }
@@ -76,7 +79,7 @@ class GatewaySessionTest {
         val t = FakeTransport(obj("""{"session_id":"s1","messages":[],"sessions":[]}"""))
         GatewaySession(t) { "default" }.callEveryRpc()
         GatewaySession(t).callEveryRpc()
-        assertEquals(28, t.calls.size)
+        assertEquals(32, t.calls.size)
         for ((method, params) in t.calls) assertFalse(method, params.containsKey("profile"))
     }
 
@@ -253,5 +256,28 @@ class GatewaySessionTest {
             fail("a result without task_id is malformed")
         } catch (_: IOException) {
         }
+    }
+
+    @Test
+    fun connectionRespondAndWake() = runBlocking {
+        val t = FakeTransport(obj("""{"status":"ok","settled":true}"""))
+        val session = GatewaySession(t)
+        val owner = ConnectionAnswers.sessionOwner("d4fb0dea")
+
+        assertEquals(true, session.respondConnection("op-1", owner, ConnectionAnswers.skip("linear")).getOrThrow())
+        assertEquals(
+            "connection.respond" to obj(
+                """{"owner":{"type":"session","session_id":"d4fb0dea"},"op_id":"op-1",
+                    "result":{"targets":[{"name":"linear","status":"skipped"}]}}""",
+            ),
+            t.calls.last(),
+        )
+        t.result = obj("""{"status":"ok"}""")
+        assertEquals(false, session.respondConnection("op-1", owner, ConnectionAnswers.continueNow()).getOrThrow())
+        assertTrue(session.wakeConnection(owner, "op-1").isSuccess)
+        assertEquals(
+            "connectors.operation.wake" to obj("""{"owner":{"type":"session","session_id":"d4fb0dea"},"op_id":"op-1"}"""),
+            t.calls.last(),
+        )
     }
 }

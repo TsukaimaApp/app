@@ -307,3 +307,31 @@ All need the bearer header unless marked public. Management endpoints accept `?p
 - **Reply images** (`![alt](url)`): "same origin" is scheme + host + port only, so a Hermes mounted under a path
   prefix on a shared host sends its bearer to sibling paths on that host too; a 401 on an image is final (no
   re-login, no sign-in prompt).
+
+### v0.9.0 — connection requests (2026-10-21, verified live against 0.22.2)
+
+- **Event `connection.request`** (on the session; `tui_gateway/agent_callbacks.py` `connection_callback`, payload
+  `ConnectionOperation.request_payload`): `{op_id, seq, deadline_at (epoch s, server clock), timeout_seconds,
+  tool_call_id?, display?{suggested[]}, targets[{name, kind, action, state, resolved?, detail?, instructions?,
+  connect_url?, required_env?[{name, required, secret, default, prompt?}], hint?, display?, description?}]}`. It is an
+  **event** (`method: "event"`), not a server request: the `manage_connections` tool thread blocks on the operation
+  until it settles or `deadline_at` passes (~5 min), so an unanswered card hangs the turn. The same payload is
+  `pending_connection` of a `session.resume` result while the operation is open; the app restores the card from it.
+  `kind` ∈ connector | mcp | plugin | skill, `action` ∈ authorize | connect | enable | install | reconnect, `state` ∈
+  pending | initiated | connected | skipped | failed | expired | not_connected (the app renders unknown values as
+  given). `resolved` (else `state` ∈ connected | skipped) = the row needs nothing more.
+- **Event `connection.update`** `{op_id, seq, deadline_at, settled, settled_at?, settled_by?, owner, targets[],
+  target?, from?, to?, actor?, detail?}`: one transition (`actor` user | backend_watcher | clock) or the settlement
+  (`settled_by` all_resolved | continue | deadline | interrupt), always with the full target snapshot. `seq` is the
+  operation's own write counter (an older frame moves nothing). Session operations are emitted on the session with
+  `owner {type:"session", session_id}`; account operations are broadcast globally with `owner {type:"account"}` —
+  the app ignores an `op_id` it holds no card for.
+- **RPC `connection.respond {owner: {type:"session", session_id: <live id>}, op_id, result: {targets[{name,
+  status: approved|skipped, detail?, env?{NAME: value}}], settled_by?: "continue", said?}}`** →
+  `{status:"ok", settled}`. `owner` is required (`ConnectionOperationParams`); an invalid `result` → 4002. Skip all =
+  every target `skipped` with no `settled_by` (the operation settles `all_resolved`); Continue = `{targets:[],
+  settled_by:"continue"}`; `approved` starts a pending row's backend work (an MCP install with its `env`), or retries
+  a failed/expired one.
+- **RPC `connectors.operation.wake {owner, op_id}`** → `{status:"ok"}`: the browser leg of a `connect_url` came back,
+  so the backend reads the account now instead of at its next watcher tick. The app sends it when the chat comes
+  back to the foreground after opening the link.

@@ -34,6 +34,8 @@ data class SessionResumed(
     val running: Boolean = false,
     @SerialName("pending_approval") val pendingApproval: JsonObject? = null,
     @SerialName("open_requests") val openRequests: List<JsonObject> = emptyList(),
+    /** The open connection operation (`connection.request` payload), so a client that missed the event restores its card. */
+    @SerialName("pending_connection") val pendingConnection: JsonObject? = null,
     /** The running turn's state (`InflightTurn`): `assistant` is the reply text streamed so far. */
     val inflight: JsonObject? = null,
     /** The `session.info` snapshot (model, reasoning effort, token `usage`, …). */

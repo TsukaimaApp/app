@@ -122,7 +122,7 @@ class NotificationHub(
             serverRequests.collect { req -> coordinator.onServerRequest(req, foreground(), visibleSession())?.let(poster::post) }
         }
         scope.launch {
-            events.collect { ev -> coordinator.onEvent(ev, foreground()).forEach(::apply) }
+            events.collect { ev -> coordinator.onEvent(ev, foreground(), visibleSession()).forEach(::apply) }
         }
         scope.launch {
             hermes.map { it.gatewayStatus() }.distinctUntilChanged().collect { status ->

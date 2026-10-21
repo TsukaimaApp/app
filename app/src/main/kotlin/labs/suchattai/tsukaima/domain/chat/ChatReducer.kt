@@ -252,6 +252,8 @@ object ChatReducer {
                 if (items.size == s.items.size) s
                 else s.copy(items = items, status = statusAfterApproval(s.status, items, flair))
             }
+            "connection.request" -> onConnectionRequest(s, p)
+            "connection.update" -> onConnectionUpdate(s, p, flair)
             "btw.complete" -> onSideComplete(s, SideKind.Question, p)
             "background.complete" -> onSideComplete(s, SideKind.Background, p)
             else -> if (ev.type.startsWith(SUBAGENT_PREFIX)) onSubagent(s, ev.type, p) else s
@@ -334,6 +336,61 @@ object ChatReducer {
     }
 
     private fun sideId(taskId: String) = "side-$taskId"
+
+    /**
+     * `connection.request {op_id, seq, deadline_at, targets[]}` (or a resume's `pending_connection`, the same
+     * payload): appends the operation's card and waits for the user. Unchanged when the payload has no op id or the
+     * card is already shown (a replay, or the snapshot of a card the transcript kept).
+     */
+    fun onConnectionRequest(state: ChatState, payload: JsonObject): ChatState {
+        val opId = payload.string("op_id")?.takeIf { it.isNotBlank() } ?: return state
+        val id = "conn-$opId"
+        if (state.items.any { it.id == id }) return state
+        val card = ChatItem.ConnectionRequest(
+            id = id,
+            opId = opId,
+            owner = payload["owner"] as? JsonObject,
+            deadlineAt = payload["deadline_at"]?.primitive()?.doubleOrNull ?: 0.0,
+            targets = ConnectionAnswers.targets(payload["targets"] as? JsonArray),
+            settled = false,
+            settledBy = null,
+            seq = payload["seq"]?.primitive()?.longOrNull ?: -1,
+        )
+        val items = state.items + card
+        return state.copy(items = items, status = statusFor(items) ?: AgentStatus.Connection)
+    }
+
+    /**
+     * `connection.update {op_id, seq, settled, settled_by?, owner, targets[]}`: overlays the full snapshot on the card
+     * of `op_id`. A frame for an operation with no card (another session's broadcast) or older than the card's
+     * (`seq`) changes nothing. Settlement is final, and it ends the wait.
+     */
+    private fun onConnectionUpdate(s: ChatState, p: JsonObject, flair: () -> String): ChatState {
+        val opId = p.string("op_id") ?: return s
+        val card = s.items.firstOrNull { it is ChatItem.ConnectionRequest && it.opId == opId } as? ChatItem.ConnectionRequest
+            ?: return s
+        val seq = p["seq"]?.primitive()?.longOrNull
+        if (seq != null && seq <= card.seq) return s
+        val next = card.copy(
+            owner = p["owner"] as? JsonObject ?: card.owner,
+            deadlineAt = p["deadline_at"]?.primitive()?.doubleOrNull ?: card.deadlineAt,
+            targets = (p["targets"] as? JsonArray)?.let(ConnectionAnswers::targets) ?: card.targets,
+            settled = card.settled || p.bool("settled") == true,
+            settledBy = p.string("settled_by") ?: card.settledBy,
+            seq = seq ?: card.seq,
+        )
+        val items = s.items.replace(card) { next }
+        val status = if (next.settled && !card.settled) statusAfterApproval(s.status, items, flair) else s.status
+        return s.copy(items = items, status = status)
+    }
+
+    /** `connection.respond` answered `settled: true` for [opId]: the card settles (idempotent; the update may beat it). */
+    fun onConnectionSettled(state: ChatState, opId: String, flair: () -> String = ThinkingFlair::next): ChatState {
+        val card = state.items.firstOrNull { it is ChatItem.ConnectionRequest && it.opId == opId } as? ChatItem.ConnectionRequest
+        if (card == null || card.settled) return state
+        val items = state.items.replace(card) { card.copy(settled = true) }
+        return state.copy(items = items, status = statusAfterApproval(state.status, items, flair))
+    }
 
     /** "Loading history…", "Loaded 42 messages", or the failure, from `session.resume_progress`. */
     private fun resumeProgressText(p: JsonObject): String? = when (p.string("status")) {
@@ -520,13 +577,17 @@ object ChatReducer {
     private fun isForUs(state: ChatState, sessionId: String): Boolean =
         state.liveSessionId == null || sessionId.isEmpty() || sessionId == state.liveSessionId
 
-    /** Approval while an approval waits, else Secret while a masked prompt waits, else Question for a clarify, else null. */
+    /**
+     * Approval while an approval waits, else Secret while a masked prompt waits, else Question for a clarify, else
+     * Connection for an open connection operation, else null.
+     */
     private fun statusFor(items: List<ChatItem>): AgentStatus? {
         if (items.any { it is ChatItem.Approval && !it.answered }) return AgentStatus.Approval
         items.lastOrNull { it is ChatItem.SecretPrompt && !it.answered }?.let {
             return AgentStatus.Secret((it as ChatItem.SecretPrompt).kind)
         }
         if (items.any { it is ChatItem.Clarify && !it.answered }) return AgentStatus.Question
+        if (items.any { it is ChatItem.ConnectionRequest && !it.settled }) return AgentStatus.Connection
         return null
     }
 
@@ -535,11 +596,12 @@ object ChatReducer {
         statusFor(items) ?: if (current.waiting) AgentStatus.Thinking(flair()) else current
 
     private val AgentStatus.waiting: Boolean
-        get() = this == AgentStatus.Approval || this == AgentStatus.Question || this is AgentStatus.Secret
+        get() = this == AgentStatus.Approval || this == AgentStatus.Question || this is AgentStatus.Secret ||
+            this == AgentStatus.Connection
 
-    /** A card answering a server request: approval, clarify or masked prompt. */
+    /** A card the user answers: approval, clarify, masked prompt or connection operation. */
     private fun ChatItem.isRequest(): Boolean =
-        this is ChatItem.Approval || this is ChatItem.Clarify || this is ChatItem.SecretPrompt
+        this is ChatItem.Approval || this is ChatItem.Clarify || this is ChatItem.SecretPrompt || this is ChatItem.ConnectionRequest
 
     /**
      * The streaming assistant item that new text may still flow into: the last streaming one,
@@ -582,7 +644,10 @@ object ChatReducer {
         return state.copy(reasoningOpen = state.reasoningOpen + (id to !reasoningOpen(state, item)))
     }
 
-    /** Abnormal turn end: close streams, fail running tools, drop approvals, questions and prompts nobody answered. */
+    /**
+     * Abnormal turn end: close streams, fail running tools, drop approvals, questions and prompts nobody answered, and
+     * settle open connection cards (the operation ended with the turn; the server's own frame may never come).
+     */
     private fun abortTurn(items: List<ChatItem>): List<ChatItem> =
         finalizeStreaming(items).mapNotNull { item ->
             when {
@@ -590,6 +655,7 @@ object ChatReducer {
                 item is ChatItem.Approval && !item.answered -> null
                 item is ChatItem.Clarify && !item.answered -> null
                 item is ChatItem.SecretPrompt && !item.answered -> null
+                item is ChatItem.ConnectionRequest && !item.settled -> item.copy(settled = true)
                 else -> item
             }
         }

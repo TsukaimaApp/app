@@ -82,6 +82,9 @@ interface ChatBackend {
     /** Offers the saved [uri] to a viewer app; false when none handles [mime]. */
     fun openFile(uri: String, mime: String): Boolean
 
+    /** Opens an http(s) [url] in the browser; false when no app handles it. */
+    fun openUrl(url: String): Boolean
+
     /** An image preview decoded from [bytes] (downsampled), or null if they are not a decodable image. */
     fun decodePreview(bytes: ByteArray): ImageBitmap?
     fun toast(text: String)
@@ -138,6 +141,7 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override suspend fun fetchImage(url: String) = c.repository.fetchImage(url)
     override val fileSaver get() = c.fileSaver
     override fun openFile(uri: String, mime: String) = c.openFile(uri, mime)
+    override fun openUrl(url: String) = c.openUrl(url)
     override fun decodePreview(bytes: ByteArray) = ImagePreview.decode(bytes)?.asImageBitmap()
     override fun toast(text: String) = c.toastState.show(text)
     override suspend fun transcribe(wav: ByteArray) = c.repository.transcribe(wav)

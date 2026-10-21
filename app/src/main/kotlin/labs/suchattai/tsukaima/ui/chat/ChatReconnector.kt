@@ -111,6 +111,7 @@ internal class ChatReconnector(
                 replay.events.forEach(::applyEvent)
             }
             adoptOpen(r.openRequests + replay.openRequests, r.pendingApproval)
+            adoptConnection(r.pendingConnection)
         } catch (c: CancellationException) {
             throw c
         } catch (e: Exception) {
@@ -178,6 +179,15 @@ internal class ChatReconnector(
             val shown = chat.items.any { it is ChatItem.Approval && !it.answered && rid != null && it.requestId == rid }
             if (!shown) reopen(pendingReq)
         }
+    }
+
+    /**
+     * Restores the card of the resume snapshot's open connection operation (`pending_connection`): a rebuilt
+     * transcript never holds it, and the replay may not reach back to its `connection.request`.
+     */
+    fun adoptConnection(pending: JsonObject?) {
+        if (pending == null || chat.liveSessionId == null) return
+        setChat { ChatReducer.onConnectionRequest(it, pending) }
     }
 
     private fun reopen(req: Frame.ServerRequest) {
