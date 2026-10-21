@@ -3,7 +3,7 @@
 Native Android client (Kotlin + Jetpack Compose) for a self-hosted [Hermes Agent](https://github.com/NousResearch/hermes-agent).
 Chat with your agent, browse sessions, manage cron jobs, and get actionable notifications from your phone.
 
-Version **0.9.0** (versionCode 20). Changes per release: [`CHANGELOG.md`](CHANGELOG.md).
+Version **0.9.2** (versionCode 22). Changes per release: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Features
 
@@ -154,4 +154,6 @@ e.g. Tailscale Serve's).
 
 ## License
 
-None yet; private repository.
+Apache License 2.0 — see [`LICENSE`](LICENSE). Copyright 2026 Mariusz Suchodolski.
+
+Tsukaima is an independent client for Hermes Agent and is not affiliated with Nous Research.
