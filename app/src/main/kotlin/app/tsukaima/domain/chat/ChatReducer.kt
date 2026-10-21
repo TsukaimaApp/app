@@ -214,11 +214,12 @@ object ChatReducer {
      * `session.resume`, including the resume after a reconnect. A new live id has its own seq numbering, so the
      * replay watermark (to [NO_SEQ]: nothing seen, so even a seq of 0 applies) and the local id counter reset. When the server re-attached the
      * same live session (a reconnect inside its grace window) the seq continues, so both are kept and a
-     * `session.events.since(lastSeq)` replay stays a true delta. A null [storedId] keeps the known one.
+     * `session.events.since(lastSeq)` replay stays a true delta. A null [storedId] keeps the known one. A new live id
+     * also drops a pending Stop ([ChatState.stopRequested]): the stopped turn's end will never come from it.
      */
     fun onSessionBound(state: ChatState, liveId: String, storedId: String?): ChatState {
         val ids = state.copy(liveSessionId = liveId, storedSessionId = storedId ?: state.storedSessionId)
-        return if (state.liveSessionId == liveId) ids else ids.copy(lastSeq = NO_SEQ, localCounter = 0)
+        return if (state.liveSessionId == liveId) ids else ids.copy(lastSeq = NO_SEQ, localCounter = 0, stopRequested = false)
     }
 
     fun onConnectionLost(state: ChatState): ChatState =
@@ -338,6 +339,40 @@ object ChatReducer {
             }
         }
         return s.copy(items = items, stopRequested = false, queuedTurnNext = items.any { it is ChatItem.UserMessage && it.queued })
+    }
+
+    /**
+     * A transcript rebuilt from history ([rebuilt]) keeps the "Not sent" mark of the queued sends Stop purged
+     * ([purged], in transcript order). Hermes keeps a purged message's user row in history, unanswered. Matching rule:
+     * an echo takes the last user row (not yet taken) whose text is the echo's (its shown or its submitted text) and
+     * that has no reply below it (no assistant message or tool row after it); that row becomes the failed bubble,
+     * keeping its id, with the echo's attachments. An echo with no such row is appended at the end as it was.
+     * Returns the items and, for each echo that took a history row, its old id → the row's id.
+     */
+    fun withPurged(rebuilt: List<ChatItem>, purged: List<ChatItem.UserMessage>): Pair<List<ChatItem>, Map<String, String>> {
+        if (purged.isEmpty()) return rebuilt to emptyMap()
+        val items = rebuilt.toMutableList()
+        val lastReply = items.indexOfLast { it is ChatItem.AssistantMessage || it is ChatItem.ToolCall }
+        val ids = mutableMapOf<String, String>()
+        val appended = mutableListOf<ChatItem>()
+        for (echo in purged) {
+            val index = items.indices.lastOrNull { i ->
+                val row = items[i]
+                i > lastReply && row is ChatItem.UserMessage && !row.failed && !row.queued && row.id !in ids.values &&
+                    (row.text == echo.text || row.text == echo.promptText)
+            }
+            if (index == null) {
+                if (items.none { it.id == echo.id }) appended += echo
+                continue
+            }
+            val row = items[index] as ChatItem.UserMessage
+            items[index] = row.copy(
+                text = echo.text, attachments = echo.attachments, promptText = echo.promptText, rowId = null,
+                failed = true, queued = false, imagesSent = echo.imagesSent,
+            )
+            ids[echo.id] = row.id
+        }
+        return (items + appended) to ids
     }
 
     /** The app sent Stop ([requested]), or it turned out there was nothing to stop: see [afterTurnEnd]. */
@@ -585,23 +620,28 @@ object ChatReducer {
     }
 
     /**
-     * `message.complete.persisted_turn`: the turn's committed rows. `user_row_id` goes to the last user message when
-     * it has none yet; `final_assistant_row_id` to the last assistant message only when it sits below that user
-     * message (the reply of this turn, not an older one when the turn ended without text). They let a live turn
-     * be edited or regenerated without reloading the history.
+     * `message.complete.persisted_turn`: the turn's committed rows. The turn's user message is the last sent one
+     * (neither queued nor failed) that has no row yet or already has `user_row_id` (else simply the last sent one): a
+     * later send that ran at once and bound its own row before this end arrived is not it. `user_row_id` goes to that
+     * message when it has none yet; `final_assistant_row_id` to the last assistant message between it and the next
+     * sent user message (the reply of this turn by its own position, never an older one when the turn ended without
+     * text). They let a live turn be edited or regenerated without reloading the history.
      */
     private fun withPersistedTurn(s: ChatState, turn: JsonObject?): ChatState {
         if (turn == null) return s
         fun long(key: String) = (turn[key] as? JsonPrimitive)?.longOrNull
+        fun ChatItem.sent() = this is ChatItem.UserMessage && !queued && !failed
         val items = s.items.toMutableList()
-        val userIndex = items.indexOfLast { it is ChatItem.UserMessage && !it.queued }
-        val user = items.getOrNull(userIndex) as? ChatItem.UserMessage
         val userRow = long("user_row_id")
-        if (user != null && userRow != null && user.rowId == null && !user.failed) items[userIndex] = user.copy(rowId = userRow)
-        val replyIndex = items.indexOfLast { it is ChatItem.AssistantMessage }
-        val reply = items.getOrNull(replyIndex) as? ChatItem.AssistantMessage
+        fun ChatItem.mayBe(row: Long?) = sent() && (row == null || (this as ChatItem.UserMessage).rowId.let { it == null || it == row })
+        val userIndex = items.indexOfLast { it.mayBe(userRow) }.takeIf { it >= 0 } ?: items.indexOfLast { it.sent() }
+        val user = items.getOrNull(userIndex) as? ChatItem.UserMessage
+        if (user != null && userRow != null && user.rowId == null) items[userIndex] = user.copy(rowId = userRow)
+        val nextUser = (userIndex + 1 until items.size).firstOrNull { items[it].sent() } ?: items.size
+        val replyIndex = (userIndex + 1 until nextUser).lastOrNull { items[it] is ChatItem.AssistantMessage }
+        val reply = replyIndex?.let { items[it] as ChatItem.AssistantMessage }
         val replyRow = long("final_assistant_row_id")
-        if (reply != null && replyRow != null && replyIndex > userIndex && !reply.streaming) items[replyIndex] = reply.copy(rowId = replyRow)
+        if (reply != null && replyRow != null && !reply.streaming) items[replyIndex] = reply.copy(rowId = replyRow)
         return if (items == s.items) s else s.copy(items = items)
     }
 
@@ -631,7 +671,8 @@ object ChatReducer {
     /**
      * `tool.complete`. Failed ⇔ `result.error` truthy, `result.success == false`, or a non-zero `result.exit_code`
      * (any one: tools report failure differently). A terminal command the user stopped (exit 130 whose last line is
-     * [INTERRUPT_MARKER]) is [ToolStatus.Interrupted] instead, its partial output kept without that final line.
+     * [INTERRUPT_MARKER], with no truthy `result.error`) is [ToolStatus.Interrupted] instead, its partial output kept
+     * without that final line; a truthy error wins over the marker (Failed, output kept whole).
      */
     private fun onToolComplete(s: ChatState, p: JsonObject, flair: () -> String): ChatState {
         val toolId = p.string("tool_id") ?: return s
@@ -639,8 +680,9 @@ object ChatReducer {
         val exitCode = result?.get("exit_code")?.primitive()?.intOrNull
         val rawOutput = result?.get("output")?.asText()
         val lines = rawOutput?.trimEnd()?.lines()
-        val interrupted = exitCode == INTERRUPTED_EXIT && lines?.last() == INTERRUPT_MARKER
-        val failed = result?.get("error").truthy() ||
+        val error = result?.get("error").truthy()
+        val interrupted = exitCode == INTERRUPTED_EXIT && lines?.last() == INTERRUPT_MARKER && !error
+        val failed = error ||
             (result?.get("success") as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull == false ||
             (exitCode != null && exitCode != 0)
         val output = if (interrupted) {

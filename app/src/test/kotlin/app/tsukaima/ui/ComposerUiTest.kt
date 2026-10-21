@@ -9,6 +9,12 @@ import androidx.compose.ui.test.performKeyPress
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
+import app.tsukaima.domain.chat.AgentStatus
+import app.tsukaima.domain.chat.ChatItem
+import app.tsukaima.domain.chat.ChatState
+import app.tsukaima.ui.chat.ChatActions
+import app.tsukaima.ui.chat.ChatContent
+import app.tsukaima.ui.chat.ChatUiState
 import app.tsukaima.ui.chat.components.Composer
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -92,5 +98,34 @@ class ComposerUiTest : ComposeUiTest() {
 
         compose.onNodeWithContentDescription("Stop").assertExists()
         compose.onNodeWithContentDescription("Send when done").assertDoesNotExist()
+    }
+
+    @Test
+    fun composerShowsSendWhenDoneBetweenTurns() {
+        // The live turn ended but a queued message still waits to run: a new send queues behind it.
+        val chat = ChatState(
+            items = listOf(
+                ChatItem.UserMessage("u1", "first", rowId = 1),
+                ChatItem.AssistantMessage("a1", "one", streaming = false, reasoning = null),
+                ChatItem.UserMessage("u2", "second", queued = true),
+            ),
+            status = AgentStatus.Idle,
+            liveSessionId = "d4fb0dea",
+        )
+        setThemed {
+            ChatContent(
+                state = ChatUiState(chat = chat, input = "third", isNew = false),
+                showMenu = false,
+                onDrawer = {},
+                onStatus = {},
+                actions = ChatActions(),
+            )
+        }
+
+        compose.onNodeWithContentDescription("Send when done")
+            .assertWidthIsAtLeast(44.dp)
+            .assertHeightIsAtLeast(44.dp)
+        compose.onNodeWithContentDescription("Send").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Stop").assertDoesNotExist()
     }
 }

@@ -37,6 +37,7 @@ import app.tsukaima.domain.chat.ConnectionAnswer
 import app.tsukaima.domain.chat.ConnectionAnswers
 import app.tsukaima.domain.chat.SideKind
 import app.tsukaima.domain.chat.ThinkingFlair
+import app.tsukaima.domain.chat.queuesSends
 import app.tsukaima.domain.chat.turnLive
 import app.tsukaima.domain.voice.VoiceLanguages
 import app.tsukaima.domain.voice.VoiceMode
@@ -91,6 +92,7 @@ class ChatViewModel(
     private val sync = ChatReconnector(
         session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), storedSessionId, flair, _state,
         onRebuilt = { before, liveChanged ->
+            restorePurgedSends(before)
             restoreFailedSends()
             voice.rebased(before)
             if (liveChanged) edits.onLiveChanged()
@@ -353,9 +355,25 @@ class ChatViewModel(
     private suspend fun reloadHistory(live: String) {
         attempt("Couldn’t reload the chat") {
             val messages = session.history(live)
-            setChat { if (it.liveSessionId == live) it.copy(items = ChatReducer.fromHistory(messages)) else it }
+            val before = chat.items
+            if (chat.liveSessionId != live) return@attempt
+            setChat { it.copy(items = ChatReducer.fromHistory(messages)) }
+            restorePurgedSends(before)
             restoreFailedSends()
         }
+    }
+
+    /**
+     * A rebuilt transcript shows a send Stop purged as a plain history row: it is marked Not sent again, on that row or
+     * at the end ([ChatReducer.withPurged]), and its Retry / Dismiss data follows it to the row's id. [before] is the
+     * transcript the rebuild replaced.
+     */
+    private fun restorePurgedSends(before: List<ChatItem>) {
+        val purged = before.filterIsInstance<ChatItem.UserMessage>().filter { it.failed && it.id in queuedSends }
+        if (purged.isEmpty()) return
+        val (items, ids) = ChatReducer.withPurged(chat.items, purged)
+        for ((old, new) in ids) queuedSends.remove(old)?.let { queuedSends[new] = it }
+        setChat { it.copy(items = items) }
     }
 
     /** A rebuilt transcript holds only what the server stored: the failed bubbles (never sent) are put back at the end. */
@@ -384,10 +402,10 @@ class ChatViewModel(
 
     /**
      * A typed send goes behind the running turn (`queued: true`), and behind earlier queued sends still waiting (the
-     * server may be between turns, about to run them). A voice turn never queues.
+     * server may be between turns, about to run them): [queuesSends], which the composer shows too. A voice turn never
+     * queues.
      */
-    private fun mustQueue(voice: Boolean) =
-        !voice && (chat.status.turnLive || chat.items.any { it is ChatItem.UserMessage && it.queued })
+    private fun mustQueue(voice: Boolean) = !voice && chat.queuesSends
 
     /** A failed bubble's send: one that never reached Hermes, or a queued one whose turn end purged it. */
     private fun failedSend(localId: String): FailedSend? =
@@ -440,8 +458,11 @@ class ChatViewModel(
     /**
      * Stop: interrupts the running turn (`session.interrupt`). The turn then ends with the server's own
      * `message.complete` / `error`, which returns the status line (and the send button) to idle. Stop also purges the
-     * server's queue, so that turn end fails the queued sends ([ChatReducer.onStopRequested]); with nothing to stop,
-     * or when the call fails, no turn end follows and the mark is taken back.
+     * server's queue, so that turn end fails the queued sends ([ChatReducer.onStopRequested]). The mark is set before
+     * the call (the turn end may beat its answer) and only ever taken back after it: with nothing to stop, when the
+     * call fails, or when no turn is live any more as the answer lands (that turn end already came and cleared it, or
+     * the tap raced the turn's end) — no turn end follows to clear it, and a later turn's end must not purge.
+     * While offline the mark stays: a reconnect to the same live session replays the turn end, a new one clears it.
      */
     fun interrupt() {
         _state.update { it.copy(menu = null) }
@@ -452,7 +473,10 @@ class ChatViewModel(
             attempt("Couldn’t stop the agent") {
                 if (session.interrupt(live) == NOT_INTERRUPTED) backend.toast("Nothing to stop") else stopped = true
             }
-            if (!stopped) setChat { ChatReducer.onStopRequested(it, false) }
+            setChat {
+                val pending = stopped && (it.status.turnLive || it.status == AgentStatus.Offline)
+                if (pending) it else ChatReducer.onStopRequested(it, false)
+            }
         }
     }
 

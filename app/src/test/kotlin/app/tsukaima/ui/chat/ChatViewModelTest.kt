@@ -446,6 +446,60 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun purgedEchoSurvivesARebuild() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":1}"""), obj("""{"status":"queued"}"""))
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("first")
+        vm.send()
+        b.events.emit(ev("message.start", 1))
+        advanceUntilIdle()
+        vm.setInput("second")
+        vm.send()
+        advanceUntilIdle()
+        b.transport.on("session.interrupt", obj("""{"status":"interrupted"}"""))
+        vm.interrupt()
+        advanceUntilIdle()
+        b.events.emit(ev("message.complete", 2, """{"text":"","status":"interrupted"}"""))
+        advanceUntilIdle()
+        assertTrue((vm.state.value.chat.items.last() as ChatItem.UserMessage).failed)
+
+        // The live session expired: the rebuilt history holds the purged message's row, never answered.
+        b.transport.on(
+            "session.resume",
+            obj(
+                """{"session_id":"beef0001","stored_session_id":"$stored","running":false,"messages":[
+                  {"role":"user","text":"first","row_id":1},
+                  {"role":"user","text":"second","row_id":2}
+                ]}""",
+            ),
+        )
+        b.transport.on("session.events.since", obj("""{"events":[],"latest_seq":0,"truncated":false,"open_requests":[]}"""))
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+
+        val users = vm.state.value.chat.items.filterIsInstance<ChatItem.UserMessage>()
+        assertEquals("one bubble per message", listOf("first", "second"), users.map { it.text })
+        val notSent = users.last()
+        assertTrue("still Not sent after the rebuild", notSent.failed)
+        assertFalse(users.first().failed)
+
+        b.transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":3}"""))
+        vm.retrySend(notSent.id)
+        advanceUntilIdle()
+        val submit = b.transport.last("prompt.submit")
+        assertEquals("beef0001", submit["session_id"]!!.jsonPrimitive.content)
+        assertEquals("second", submit["text"]!!.jsonPrimitive.content)
+        val retried = vm.state.value.chat.items.first { it.id == notSent.id } as ChatItem.UserMessage
+        assertFalse(retried.failed)
+        assertEquals(3L, retried.rowId)
+    }
+
+    @Test
     fun retryOfAFailedSendWhileATurnRunsIsQueued() = runTest(dispatcher) {
         val b = backend().apply {
             transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":1}"""), obj("""{"status":"queued"}"""))
@@ -2011,6 +2065,33 @@ class ChatViewModelTest {
         advanceUntilIdle()
         assertEquals(AgentStatus.Idle, vm.state.value.chat.status)
         assertEquals(ToolStatus.Failed, (vm.state.value.chat.items.first { it is ChatItem.ToolCall } as ChatItem.ToolCall).status)
+    }
+
+    @Test
+    fun lateStopAckDoesNotSetTheFlag() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("session.interrupt", obj("""{"status":"interrupted"}""")) }
+        val vm = vm(b)
+        advanceUntilIdle()
+        // The ack comes after the turn end it caused: that end clears the flag and the ack does not set it again.
+        b.events.emit(ev("message.start", 1))
+        advanceUntilIdle()
+        val ack = CompletableDeferred<Unit>()
+        b.transport.gateNext["session.interrupt"] = ack
+        vm.interrupt()
+        advanceUntilIdle()
+        assertTrue("set before the call: the turn end may beat the ack", vm.state.value.chat.stopRequested)
+        b.events.emit(ev("message.complete", 2, """{"text":"","status":"interrupted"}"""))
+        advanceUntilIdle()
+        assertFalse(vm.state.value.chat.stopRequested)
+        ack.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(vm.state.value.chat.stopRequested)
+
+        // A Stop tapped as the turn ended (the button was still on screen): the ack lands with no turn live, and
+        // no turn end will follow to clear the flag.
+        vm.interrupt()
+        advanceUntilIdle()
+        assertFalse("no turn live when the ack landed", vm.state.value.chat.stopRequested)
     }
 
     @Test

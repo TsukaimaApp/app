@@ -987,6 +987,75 @@ class ChatReducerTest {
     }
 
     @Test
+    fun stopFlagClearsOnLiveSessionChange() {
+        val stopping = ChatReducer.onStopRequested(live.feed(ev("message.start", seq = 1)), true)
+        // A re-attach of the same live session keeps it: the turn end may still be replayed.
+        assertTrue(ChatReducer.onSessionBound(stopping, sid, null).stopRequested)
+        // A new live session will never send the stopped turn's end: the flag must not leak into a later turn.
+        val rebound = ChatReducer.onSessionBound(stopping, "beef0001", null)
+        assertFalse(rebound.stopRequested)
+        val queued = ChatReducer.onSubmitAccepted(
+            ChatReducer.onSubmitted(rebound.feed(ev("message.start", seq = 1, session = "beef0001")), "later", "u-l1", flair, queued = true),
+            "u-l1", null, status = "queued",
+        )
+        val ended = queued.feed(ev("message.complete", """{"text":"ok"}""", seq = 2, session = "beef0001"))
+        val echo = ended.items.first { it.id == "u-l1" } as ChatItem.UserMessage
+        assertFalse("not purged by a stale Stop", echo.failed)
+        assertTrue(echo.queued)
+    }
+
+    @Test
+    fun previousReplyKeepsItsRowIdWhenTheNextSendRanAtOnce() {
+        // "first" streams; "second" is sent queued, but the server had just finished the turn: it ran at once and
+        // its echo bound row 9 before the first turn's message.complete was applied.
+        val running = ChatReducer.onSubmitAccepted(ChatReducer.onSubmitted(live, "first", "u-l1", flair), "u-l1", 7L)
+            .feed(ev("message.start", seq = 1), ev("message.delta", """{"text":"one"}""", seq = 2))
+        val ranAtOnce = ChatReducer.onSubmitAccepted(
+            ChatReducer.onSubmitted(running, "second", "u-l2", flair, queued = true), "u-l2", 9L, status = "streaming",
+        )
+        val ended = ranAtOnce.feed(
+            ev("message.complete", """{"text":"one","persisted_turn":{"user_row_id":7,"final_assistant_row_id":8}}""", seq = 3),
+        )
+        val reply = ended.items.single { it is ChatItem.AssistantMessage } as ChatItem.AssistantMessage
+        assertEquals("one", reply.text)
+        assertEquals("the reply of its own turn binds its row", 8L, reply.rowId)
+        assertEquals(7L, (ended.items.first { it.id == "u-l1" } as ChatItem.UserMessage).rowId)
+        assertEquals(9L, (ended.items.first { it.id == "u-l2" } as ChatItem.UserMessage).rowId)
+
+        // The second turn then streams below its echo and binds its own reply, not the first one.
+        val second = ended.feed(
+            ev("message.start", seq = 4),
+            ev("message.complete", """{"text":"two","persisted_turn":{"user_row_id":9,"final_assistant_row_id":10}}""", seq = 5),
+        )
+        val rows = second.items.filterIsInstance<ChatItem.AssistantMessage>().associate { it.text to it.rowId }
+        assertEquals(mapOf("one" to 8L, "two" to 10L), rows)
+    }
+
+    @Test
+    fun purgedEchoMarksItsUnansweredHistoryTwin() {
+        val purged = ChatItem.UserMessage("u-l3", "later", listOf("notes.txt"), promptText = "@file:notes.txt\n\nlater", failed = true)
+        val history = listOf(
+            ChatItem.UserMessage("h-1", "later", rowId = 1), // the same text, but answered: not the twin
+            ChatItem.AssistantMessage("h-2", "ok", streaming = false, reasoning = null, rowId = 2),
+            ChatItem.UserMessage("h-3", "first", rowId = 3),
+            ChatItem.UserMessage("h-4", "@file:notes.txt\n\nlater", rowId = 4),
+        )
+        val (items, ids) = ChatReducer.withPurged(history, listOf(purged))
+        assertEquals(listOf("h-1", "h-2", "h-3", "h-4"), items.map { it.id })
+        val twin = items.last() as ChatItem.UserMessage
+        assertTrue("Not sent, on the history row", twin.failed)
+        assertEquals("later", twin.text)
+        assertEquals(listOf("notes.txt"), twin.attachments)
+        assertEquals(mapOf("u-l3" to "h-4"), ids)
+
+        // No unanswered twin: the echo is carried over at the end.
+        val answered = history.dropLast(1) + ChatItem.AssistantMessage("h-5", "x", streaming = false, reasoning = null, rowId = 5)
+        val (kept, keptIds) = ChatReducer.withPurged(answered, listOf(purged))
+        assertEquals(purged, kept.last())
+        assertEquals(emptyMap<String, String>(), keptIds)
+    }
+
+    @Test
     fun anInterruptedTurnEndWithoutStopKeepsTheQueue() {
         // The server's own interrupt (a voice barge-in that could not redirect) keeps its queue, which runs next.
         val queued = ChatReducer.onSubmitAccepted(
@@ -1144,6 +1213,15 @@ class ChatReducerTest {
         // Exit 130 without the marker is an ordinary failure; the marker with another exit code too.
         assertEquals(ToolStatus.Failed, completed("""{"output":"killed","exit_code":130,"error":null}""").status)
         assertEquals(ToolStatus.Failed, completed("""{"output":"x\n[Command interrupted]","exit_code":1,"error":null}""").status)
+    }
+
+    @Test
+    fun truthyErrorBeatsTheInterruptMarker() {
+        val tool = completed("""{"output":"x\n[Command interrupted]","exit_code":130,"error":"sandbox died"}""")
+        assertEquals(ToolStatus.Failed, tool.status)
+        assertEquals("the output is kept whole", "x\n[Command interrupted]", tool.output)
+        // A falsy error still lets the marker win.
+        assertEquals(ToolStatus.Interrupted, completed("""{"output":"x\n[Command interrupted]","exit_code":130,"error":""}""").status)
     }
 
     @Test

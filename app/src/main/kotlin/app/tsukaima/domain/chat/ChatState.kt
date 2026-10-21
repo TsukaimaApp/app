@@ -296,3 +296,10 @@ data class ChatState(
 
 /** [ChatState.lastSeq] before any event of the live session was applied; `session.events.since` accepts it. */
 const val NO_SEQ = -1L
+
+/**
+ * A typed send now goes behind the live turn (`prompt.submit {queued: true}`): while a turn is live, and between turns
+ * while a queued message still waits (the server is about to run it). The composer then offers "Send when done".
+ */
+val ChatState.queuesSends: Boolean
+    get() = status.turnLive || items.any { it is ChatItem.UserMessage && it.queued }

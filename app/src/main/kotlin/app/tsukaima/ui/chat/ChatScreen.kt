@@ -66,7 +66,7 @@ import app.tsukaima.domain.chat.ClarifyQuestion
 import app.tsukaima.domain.chat.ConnectionAnswer
 import app.tsukaima.domain.chat.ToolStatus
 import app.tsukaima.domain.chat.running
-import app.tsukaima.domain.chat.turnLive
+import app.tsukaima.domain.chat.queuesSends
 import app.tsukaima.domain.voice.VoicePhase
 import app.tsukaima.domain.voice.VoiceState
 import app.tsukaima.data.gateway.ApprovalChoice
@@ -383,7 +383,7 @@ private fun ChatColumn(
             onRemoveAttachment = actions.onRemoveAttachment,
             onRetryAttachment = actions.onRetryAttachment,
             running = state.chat.status.running,
-            turnLive = state.chat.status.turnLive,
+            turnLive = state.chat.queuesSends,
             onStop = actions.onStop,
             onVoice = actions.onVoice,
             focusRequester = composerFocus,
