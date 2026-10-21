@@ -33,11 +33,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import labs.suchattai.tsukaima.domain.chat.ChatItem
+import labs.suchattai.tsukaima.ui.chat.ImageResult
 import labs.suchattai.tsukaima.ui.chat.Media
 import labs.suchattai.tsukaima.ui.chat.MediaKind
 import labs.suchattai.tsukaima.ui.chat.MediaState
 import labs.suchattai.tsukaima.ui.chat.MediaStatus
-import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.ui.components.IconName
 import labs.suchattai.tsukaima.ui.components.TsukaimaIcon
 import labs.suchattai.tsukaima.ui.components.pressWash
@@ -50,7 +51,7 @@ import labs.suchattai.tsukaima.ui.theme.tsukaima
  * What `MEDIA:` cards need from the chat: download state per path, the tap, and the image preview loader; plus,
  * for a reply's `![alt](url)` images ([ImageCard]), [previewImage] (null when one fails), [imageAllowed] (whether
  * one loads by itself: server origin or already tapped) and [allowImage] (the tap on a foreign one); and
- * [toolImage], the image a `vision_analyze` tool row looked at (null when there is none or it failed).
+ * [toolImage], the image a `vision_analyze` tool row looked at (or why there is none).
  */
 class MediaHost(
     val states: Map<String, MediaState> = emptyMap(),
@@ -59,7 +60,7 @@ class MediaHost(
     val previewImage: suspend (String) -> ImageBitmap? = { null },
     val imageAllowed: (String) -> Boolean = { false },
     val allowImage: (String) -> Unit = {},
-    val toolImage: suspend (ChatItem.ToolCall) -> ImageBitmap? = { null },
+    val toolImage: suspend (ChatItem.ToolCall) -> ImageResult = { ImageResult.Unavailable },
 )
 
 private fun iconFor(kind: MediaKind) = when (kind) {

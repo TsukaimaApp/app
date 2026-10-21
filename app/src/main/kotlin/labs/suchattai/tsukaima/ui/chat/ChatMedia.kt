@@ -20,6 +20,7 @@ import labs.suchattai.tsukaima.data.api.userMessage
 import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.voice.DataUrl
 import java.io.IOException
+import java.security.MessageDigest
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
@@ -55,6 +56,17 @@ object Media {
 
     fun basename(path: String): String = path.trimEnd('/').substringAfterLast('/')
 
+    /**
+     * Whether a `data:` URL's payload (after the first comma) is short enough to decode to at most [maxBytes]: base64
+     * is 4 chars per 3 bytes, plus 4 of slack for padding. Length only, so an oversized one is refused before it is
+     * copied or decoded; a URL without a comma passes (the decoder rejects it).
+     */
+    fun dataUrlFits(dataUrl: String, maxBytes: Long): Boolean {
+        val comma = dataUrl.indexOf(',')
+        if (comma < 0) return true
+        return dataUrl.length - comma - 1 <= (maxBytes * 4 + 2) / 3 + 4
+    }
+
     /** The parent directory, shortened to its last two segments: `…/output/session-x`, `~/out`, `/tmp`. */
     fun parentLabel(path: String): String {
         val parent = path.trimEnd('/').substringBeforeLast('/', "")
@@ -62,6 +74,13 @@ object Media {
         val segments = parent.split('/').filter { it.isNotEmpty() }
         return if (segments.size <= 2) parent else "…/" + segments.takeLast(2).joinToString("/")
     }
+}
+
+/** A decoded image, or why there is none: [Unavailable] is final (cached), [Retry] is worth another try. */
+sealed interface ImageResult {
+    data class Loaded(val bitmap: ImageBitmap) : ImageResult
+    data object Unavailable : ImageResult
+    data object Retry : ImageResult
 }
 
 /** Where a `vision_analyze` image ([ChatItem.ToolCall.imageUrl]) comes from. */
@@ -116,7 +135,7 @@ internal class ChatMedia(
     private val images = object : LinkedHashMap<String, ImageBitmap?>(IMAGE_CACHE, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageBitmap?>) = size > IMAGE_CACHE
     }
-    private val imageLoading = mutableMapOf<String, Deferred<ImageBitmap?>>()
+    private val imageLoading = mutableMapOf<String, Deferred<ImageResult>>()
 
     /** Downloads [path] into Downloads and opens it; a re-tap while it downloads or just saved is ignored, a failed one retries. */
     fun open(path: String) {
@@ -203,58 +222,72 @@ internal class ChatMedia(
      */
     suspend fun imagePreview(url: String): ImageBitmap? {
         if (!imageAllowed(url)) return null
-        return cachedImage(url) { backend.fetchImage(url).getOrThrow() }
+        return (cachedImage(url) { backend.fetchImage(url).getOrThrow() } as? ImageResult.Loaded)?.bitmap
     }
 
     /**
-     * The image a `vision_analyze` row looked at ([ChatItem.ToolCall.imageUrl]), decoded, or null when there is none
-     * or it failed. http(s) follows the reply-image rules ([imagePreview]: a foreign one waits for [allowImage]); a
-     * path on the server comes through `/api/media` and an inline `data:` URL decodes directly, either at most
-     * [HermesApi.MEDIA_MAX_IMAGE_BYTES]; any other scheme has no image. Shares [imagePreview]'s cache (`media:<path>`
-     * for a server path) and its failure rules: the server's refusal (403/404/413/415), a malformed or oversized
-     * image are final, a dropped connection is retried by a later call. Never touches [tool].
+     * The image a `vision_analyze` row looked at ([ChatItem.ToolCall.imageUrl]), decoded. http(s) follows the
+     * reply-image rules ([imagePreview]: a foreign one waits for [allowImage]); a path on the server comes through
+     * `/api/media` and an inline `data:` URL decodes directly, either at most [HermesApi.MEDIA_MAX_IMAGE_BYTES]; any
+     * other scheme has no image. Shares [imagePreview]'s cache (`media:<path>` for a server path, `media:sha256:<hex>`
+     * for an inline one) and its failure rules: the server's refusal (403/404/413/415), a malformed or oversized image
+     * are [ImageResult.Unavailable] (cached), a dropped connection is [ImageResult.Retry] (not cached). Never touches
+     * [tool].
      */
-    suspend fun toolImage(tool: ChatItem.ToolCall): ImageBitmap? =
+    suspend fun toolImage(tool: ChatItem.ToolCall): ImageResult =
         when (val source = tool.imageUrl?.let(ToolImageSource::of)) {
-            null -> null
-            is ToolImageSource.Web -> imagePreview(source.url)
+            null -> ImageResult.Unavailable
+            is ToolImageSource.Web ->
+                if (!imageAllowed(source.url)) ImageResult.Unavailable
+                else cachedImage(source.url) { backend.fetchImage(source.url).getOrThrow() }
             is ToolImageSource.Local -> cachedImage(MEDIA_KEY + source.path) {
                 val dataUrl = backend.media(source.path).getOrThrow()
                 withContext(io) { dataUrlBytes(dataUrl) }
             }
-            // Keyed by length and hash: the URL itself may be megabytes (String caches its hash).
             is ToolImageSource.Inline ->
-                cachedImage("$MEDIA_KEY${source.dataUrl.length}:${source.dataUrl.hashCode()}") { withContext(io) { dataUrlBytes(source.dataUrl) } }
+                // Over the cap by its length alone (O(1), the same verdict every time): neither hashed nor decoded.
+                if (!Media.dataUrlFits(source.dataUrl, HermesApi.MEDIA_MAX_IMAGE_BYTES)) ImageResult.Unavailable
+                else {
+                    // The URL itself may be megabytes: keyed by its digest, computed off the caller's thread.
+                    val key = withContext(io) { MEDIA_KEY + "sha256:" + sha256(source.dataUrl) }
+                    cachedImage(key) { withContext(io) { dataUrlBytes(source.dataUrl) } }
+                }
         }
 
-    /** The image bytes of a `data:` URL: not an image or not base64 → [IllegalArgumentException]; over the cap → too large. */
+    /**
+     * The image bytes of a `data:` URL: a payload too long for [HermesApi.MEDIA_MAX_IMAGE_BYTES] → too large, before
+     * anything is copied or decoded; not an image or not base64 → [IllegalArgumentException]; decoded over the cap →
+     * too large.
+     */
     private fun dataUrlBytes(dataUrl: String): ByteArray {
+        if (!Media.dataUrlFits(dataUrl, HermesApi.MEDIA_MAX_IMAGE_BYTES)) throw ImageTooLargeException(TOO_LARGE)
         val (mime, bytes) = DataUrl.decode(dataUrl)
         require(mime.startsWith("image/")) { "not an image" }
-        if (bytes.size > HermesApi.MEDIA_MAX_IMAGE_BYTES) throw ImageTooLargeException("Image over 25 MiB")
+        if (bytes.size > HermesApi.MEDIA_MAX_IMAGE_BYTES) throw ImageTooLargeException(TOO_LARGE)
         return bytes
     }
 
     /** The image under [key] from the LRU, else [load]ed and decoded once (concurrent callers share it). */
-    private suspend fun cachedImage(key: String, load: suspend () -> ByteArray): ImageBitmap? {
-        if (images.containsKey(key)) return images[key]
+    private suspend fun cachedImage(key: String, load: suspend () -> ByteArray): ImageResult {
+        if (images.containsKey(key)) return images[key]?.let { ImageResult.Loaded(it) } ?: ImageResult.Unavailable
         return imageLoading.getOrPut(key) { scope.async { fetchImage(key, load) } }.await()
     }
 
-    private suspend fun fetchImage(key: String, load: suspend () -> ByteArray): ImageBitmap? {
+    private suspend fun fetchImage(key: String, load: suspend () -> ByteArray): ImageResult {
         try {
             val bytes = load()
             val bitmap = withContext(io) { backend.decodePreview(bytes) }
             images[key] = bitmap
-            return bitmap
+            return bitmap?.let { ImageResult.Loaded(it) } ?: ImageResult.Unavailable
         } catch (c: CancellationException) {
             throw c
         } catch (e: OutOfMemoryError) {
             images[key] = null
-            return null
+            return ImageResult.Unavailable
         } catch (e: Exception) {
-            if (!transientImageFailure(e)) images[key] = null
-            return null
+            if (transientImageFailure(e)) return ImageResult.Retry
+            images[key] = null
+            return ImageResult.Unavailable
         } finally {
             imageLoading.remove(key)
         }
@@ -280,6 +313,21 @@ internal class ChatMedia(
 
         /** Cache-key prefix of a [toolImage] that is not an http(s) URL. */
         const val MEDIA_KEY = "media:"
+        const val TOO_LARGE = "Image over 25 MiB"
+
+        /** Hex SHA-256 of an ASCII (base64 `data:`) [text], fed in slices rather than one full copy. */
+        fun sha256(text: String): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+            var i = 0
+            while (i < text.length) {
+                val end = minOf(text.length, i + DIGEST_SLICE)
+                digest.update(text.substring(i, end).toByteArray(Charsets.ISO_8859_1))
+                i = end
+            }
+            return digest.digest().joinToString("") { "%02x".format(it) }
+        }
+
+        const val DIGEST_SLICE = 64 * 1024
 
         /** How long a card shows "Saved" before it is back to idle. */
         const val SAVED_MS = 3_000L

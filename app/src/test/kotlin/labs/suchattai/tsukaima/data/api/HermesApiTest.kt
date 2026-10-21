@@ -663,4 +663,26 @@ class HermesApiTest {
         json("""{"ok":true}""")
         assertThrows(ApiException::class.java) { runBlocking { api.fetchMediaDataUrl("~/.hermes/images/a.png") } }
     }
+
+    @Test
+    fun mediaOverTheBodyCapByContentLengthIsTooLarge() {
+        // Refused on the header alone, before any of the body is read.
+        server.enqueue(
+            MockResponse.Builder()
+                .addHeader("Content-Type", "application/json")
+                .body("{}")
+                .removeHeader("Content-Length")
+                .addHeader("Content-Length", (HermesApi.MEDIA_MAX_BODY_BYTES + 1).toString())
+                .build(),
+        )
+        assertThrows(ImageTooLargeException::class.java) { runBlocking { authedApi().fetchMediaDataUrl("~/.hermes/images/a.png") } }
+    }
+
+    @Test
+    fun mediaOverTheBodyCapWhileStreamingIsTooLarge() {
+        // Chunked: no Content-Length, so the cap is enforced as the body arrives.
+        val body = "{\"data_url\":\"data:image/png;base64," + "A".repeat(HermesApi.MEDIA_MAX_BODY_BYTES.toInt()) + "\"}"
+        server.enqueue(MockResponse.Builder().addHeader("Content-Type", "application/json").chunkedBody(body, 1 shl 20).build())
+        assertThrows(ImageTooLargeException::class.java) { runBlocking { authedApi().fetchMediaDataUrl("~/.hermes/images/a.png") } }
+    }
 }

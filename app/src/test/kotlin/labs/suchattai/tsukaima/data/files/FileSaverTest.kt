@@ -23,5 +23,10 @@ class FileSaverTest {
         assertEquals(4, ImagePreview.sampleSize(4032, 3024))
         assertEquals(8, ImagePreview.sampleSize(8000, 6000))
         assertEquals(1, ImagePreview.sampleSize(1, 1))
+        // A long strip is under the pixel budget but over the 2048 px side: halved until the long side fits.
+        assertEquals(8, ImagePreview.sampleSize(16000, 120))
+        assertEquals(8, ImagePreview.sampleSize(120, 16000))
+        assertEquals(1, ImagePreview.sampleSize(2048, 100))
+        assertEquals(2, ImagePreview.sampleSize(2049, 100))
     }
 }

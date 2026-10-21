@@ -20,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberUpdatedState
@@ -43,6 +44,7 @@ import labs.suchattai.tsukaima.data.api.ImageOrigin
 import labs.suchattai.tsukaima.domain.chat.ChatItem
 import labs.suchattai.tsukaima.domain.chat.ToolRisk
 import labs.suchattai.tsukaima.domain.chat.ToolStatus
+import labs.suchattai.tsukaima.ui.chat.ImageResult
 import labs.suchattai.tsukaima.ui.chat.ToolImageSource
 import labs.suchattai.tsukaima.ui.components.IconName
 import labs.suchattai.tsukaima.ui.components.SkeletonBlock
@@ -139,13 +141,14 @@ private sealed interface ThumbLoad {
     data object Loading : ThumbLoad
     data class Loaded(val bitmap: ImageBitmap) : ThumbLoad
     data object Failed : ThumbLoad
+    data object Retry : ThumbLoad
 }
 
 /**
  * The image a `vision_analyze` call looked at ([raw], its [ChatItem.ToolCall.imageUrl]), loaded through
  * [MediaHost.toolImage]: a [THUMB] thumbnail, a tap shows it full-width (and back). A foreign http(s) image waits for
- * a tap like a reply's ([MediaHost.imageAllowed]); a scheme it cannot fetch shows nothing; a failure shows only
- * "image unavailable".
+ * a tap like a reply's ([MediaHost.imageAllowed]); a scheme it cannot fetch shows nothing; a final failure shows only
+ * "image unavailable", a transient one (connection dropped) offers a tap to retry.
  */
 @Composable
 private fun ToolImage(item: ChatItem.ToolCall, raw: String, host: MediaHost) {
@@ -153,40 +156,29 @@ private fun ToolImage(item: ChatItem.ToolCall, raw: String, host: MediaHost) {
     val web = (source as? ToolImageSource.Web)?.url
     val colors = MaterialTheme.tsukaima
     var allowed by remember(raw) { mutableStateOf(web == null || host.imageAllowed(web)) }
+    var attempt by remember(raw) { mutableIntStateOf(0) }
     var full by rememberSaveable(item.id) { mutableStateOf(false) }
     val tool by rememberUpdatedState(item)
-    val load by produceState<ThumbLoad>(if (allowed) ThumbLoad.Loading else ThumbLoad.Blocked, raw, allowed) {
+    val load by produceState<ThumbLoad>(if (allowed) ThumbLoad.Loading else ThumbLoad.Blocked, raw, allowed, attempt) {
         if (!allowed) {
             value = ThumbLoad.Blocked
             return@produceState
         }
         value = ThumbLoad.Loading
-        value = host.toolImage(tool)?.let { ThumbLoad.Loaded(it) } ?: ThumbLoad.Failed
+        value = when (val result = host.toolImage(tool)) {
+            is ImageResult.Loaded -> ThumbLoad.Loaded(result.bitmap)
+            ImageResult.Unavailable -> ThumbLoad.Failed
+            ImageResult.Retry -> ThumbLoad.Retry
+        }
     }
     val shape = TsukaimaShapes.code
     val pad = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)
     when (val l = load) {
-        ThumbLoad.Blocked -> Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .defaultMinSize(minHeight = Dimens.hit)
-                .clickable(role = Role.Button, onClickLabel = "Load image") {
-                    web?.let(host.allowImage)
-                    allowed = true
-                }
-                .then(pad),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            TsukaimaIcon(IconName.Image, contentDescription = null, size = 18.dp, tint = colors.ink3)
-            Text(
-                text = "From ${web?.let(ImageOrigin::host) ?: "another site"} — tap to load",
-                style = TsukaimaType.caption,
-                color = colors.ink3,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+        ThumbLoad.Blocked -> TapCaption("From ${web?.let(ImageOrigin::host) ?: "another site"} — tap to load", "Load image") {
+            web?.let(host.allowImage)
+            allowed = true
         }
+        ThumbLoad.Retry -> TapCaption("image didn’t load — tap to retry", "Retry image") { attempt++ }
         ThumbLoad.Loading -> SkeletonBlock(pad.size(THUMB), radius = 10.dp)
         is ThumbLoad.Loaded -> Image(
             bitmap = l.bitmap,
@@ -199,6 +191,24 @@ private fun ToolImage(item: ChatItem.ToolCall, raw: String, host: MediaHost) {
                 .clickable(role = Role.Button, onClickLabel = if (full) "Show thumbnail" else "Show full image") { full = !full },
         )
         ThumbLoad.Failed -> Text("image unavailable", style = TsukaimaType.caption, color = colors.ink3, modifier = pad)
+    }
+}
+
+/** A one-line ink3 caption with an image icon that is a 44dp tap target ([ToolImage]'s tap to load / retry). */
+@Composable
+private fun TapCaption(text: String, clickLabel: String, onClick: () -> Unit) {
+    val colors = MaterialTheme.tsukaima
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = Dimens.hit)
+            .clickable(role = Role.Button, onClickLabel = clickLabel, onClick = onClick)
+            .padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        TsukaimaIcon(IconName.Image, contentDescription = null, size = 18.dp, tint = colors.ink3)
+        Text(text, style = TsukaimaType.caption, color = colors.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

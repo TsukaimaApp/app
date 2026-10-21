@@ -109,7 +109,7 @@ class ChatActions(
     val previewImage: suspend (String) -> ImageBitmap? = { null },
     val imageAllowed: (String) -> Boolean = { false },
     val onAllowImage: (String) -> Unit = {},
-    val previewToolImage: suspend (ChatItem.ToolCall) -> ImageBitmap? = { null },
+    val previewToolImage: suspend (ChatItem.ToolCall) -> ImageResult = { ImageResult.Unavailable },
     val onApprove: (String) -> Unit = {},
     val onDeny: (String) -> Unit = {},
     val onApproveFor: (id: String, choice: ApprovalChoice) -> Unit = { _, _ -> },
