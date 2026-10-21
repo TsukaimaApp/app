@@ -115,6 +115,10 @@ fun ToolRow(
             )
             when (item.status) {
                 ToolStatus.Running -> Unit
+                ToolStatus.Interrupted -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    StatusDot(StatusVisual(colors.warn, pulsing = false))
+                    Text("Interrupted", style = TsukaimaType.caption, color = colors.warn, maxLines = 1)
+                }
                 ToolStatus.Failed -> TsukaimaIcon(IconName.Error, size = 16.dp, tint = colors.danger, contentDescription = "Failed")
                 ToolStatus.Done -> TsukaimaIcon(IconName.Check, size = 16.dp, tint = colors.ink3, contentDescription = "Done")
             }
@@ -132,7 +136,15 @@ fun ToolRow(
                     .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
             )
         }
+        // Always visible, like the risk note: a stopped tool's effect is something to check before retrying.
+        item.orphanNote?.let { WarnLine(it) }
     }
+}
+
+/** A Hermes orphan-recovery notice with no tool row to sit under: a small amber system line. */
+@Composable
+fun ToolNoticeLine(item: ChatItem.ToolNotice) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = Dimens.gutter, vertical = 4.dp)) { WarnLine(item.text) }
 }
 
 /** Where a [ToolImage] is: waiting for a tap (a foreign http(s) origin), loading, shown, or unavailable. */
@@ -216,7 +228,11 @@ private val THUMB = 96.dp
 
 /** `tool.output_risk` under the header: a small amber line, always visible (not only when expanded). */
 @Composable
-private fun RiskNote(risk: ToolRisk) {
+private fun RiskNote(risk: ToolRisk) = WarnLine(riskText(risk))
+
+/** A small amber warning line (icon + caption) inside a tool row: the risk note, an orphan-recovery note. */
+@Composable
+private fun WarnLine(text: String) {
     val colors = MaterialTheme.tsukaima
     Row(
         modifier = Modifier
@@ -226,7 +242,7 @@ private fun RiskNote(risk: ToolRisk) {
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         TsukaimaIcon(IconName.Warning, contentDescription = null, size = 14.dp, tint = colors.warn)
-        Text(riskText(risk), style = TsukaimaType.caption, color = colors.warn, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(text, style = TsukaimaType.caption, color = colors.warn, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -245,6 +261,7 @@ private fun ToolRowPreview(dark: Boolean) = PreviewPage(dark) {
     ToolRow(sample(ToolStatus.Done))
     ToolRow(sample(ToolStatus.Running))
     ToolRow(sample(ToolStatus.Failed, null))
+    ToolRow(sample(ToolStatus.Interrupted, "partial").copy(id = "t-orphan", orphanNote = "May have partially run — check before retrying"))
     ToolRow(sample(ToolStatus.Done).copy(id = "t-risk", risk = ToolRisk("high", listOf("prompt_injection"), redacted = true)))
 }
 

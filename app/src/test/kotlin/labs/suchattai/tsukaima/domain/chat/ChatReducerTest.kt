@@ -1088,6 +1088,142 @@ class ChatReducerTest {
         assertEquals("@file:notes.txt\n\nhi", (withRef.items.single() as ChatItem.UserMessage).promptText)
     }
 
+    // ---- interrupted tools, the failure predicate and orphan notices ----------------------------
+
+    private fun completed(result: String, name: String = "terminal"): ChatItem.ToolCall =
+        live.feed(
+            ev("tool.start", """{"tool_id":"t1","name":"$name"}""", 1),
+            ev("tool.complete", """{"tool_id":"t1","name":"$name","result":$result}""", 2),
+        ).items.single() as ChatItem.ToolCall
+
+    @Test
+    fun interruptedTerminalToolIsInterruptedNotFailed() {
+        val tool = completed("""{"output":"partial line 1\npartial line 2\n[Command interrupted]","exit_code":130,"error":null}""")
+        assertEquals(ToolStatus.Interrupted, tool.status)
+        // The marker line is replaced by the row's label: only the partial output is kept.
+        assertEquals("partial line 1\npartial line 2", tool.output)
+        assertEquals(130, tool.exitCode)
+        // Trailing whitespace after the marker is allowed.
+        assertEquals(ToolStatus.Interrupted, completed("""{"output":"x\n[Command interrupted]  \n","exit_code":130,"error":null}""").status)
+        // Exit 130 without the marker is an ordinary failure; the marker with another exit code too.
+        assertEquals(ToolStatus.Failed, completed("""{"output":"killed","exit_code":130,"error":null}""").status)
+        assertEquals(ToolStatus.Failed, completed("""{"output":"x\n[Command interrupted]","exit_code":1,"error":null}""").status)
+    }
+
+    @Test
+    fun successFalseIsAFailure() {
+        val tool = completed("""{"error": "Text is required", "success": false}""", name = "text_to_speech")
+        assertEquals(ToolStatus.Failed, tool.status)
+        // success == false alone (no error, no exit code) is still a failure.
+        assertEquals(ToolStatus.Failed, completed("""{"success": false}""", name = "text_to_speech").status)
+    }
+
+    @Test
+    fun exitCodeOnlyIsAFailure() {
+        val tool = completed("""{"output": "ls: cannot access 'nope': No such file or directory", "exit_code": 2, "error": null}""")
+        assertEquals(ToolStatus.Failed, tool.status)
+        assertEquals(2, tool.exitCode)
+    }
+
+    @Test
+    fun errorStringIsAFailureAndFalsyErrorsAreNot() {
+        val notFound = completed(
+            """{"content": "", "total_lines": 0, "error": "File not found: /tmp/nope.txt", "not_found": true}""",
+            name = "read_file",
+        )
+        assertEquals(ToolStatus.Failed, notFound.status)
+        // Python truthiness: an empty string or false error is no error.
+        assertEquals(ToolStatus.Done, completed("""{"output":"ok","exit_code":0,"error":""}""").status)
+        assertEquals(ToolStatus.Done, completed("""{"output":"ok","error":false}""").status)
+    }
+
+    @Test
+    fun emptyFileReadIsASuccess() {
+        val tool = completed("""{"content": "", "total_lines": 0, "file_size": 0, "not_found": false}""", name = "read_file")
+        assertEquals(ToolStatus.Done, tool.status)
+    }
+
+    private fun history(vararg rows: String): List<ChatItem> = ChatReducer.fromHistory(
+        HermesJson.decodeFromString(HistoryResult.serializer(), """{"messages":[${rows.joinToString(",")}]}""").messages,
+    )
+
+    @Test
+    fun orphanNoticeAttachesToTheTool() {
+        // replay_cleanup rewrites an interrupted side-effecting result as the notice; the history projection forwards
+        // the result `content` of write_file / patch / skill_manage rows.
+        val unknown = history(
+            """{"role":"user","text":"write it","row_id":1}""",
+            """{"role":"tool","name":"write_file","context":"notes.md","tool_call_id":"c1","row_id":2,
+               "content":"[Orphan recovery: interrupted side-effecting tool may have executed; its effect is UNKNOWN. Inspect state before retrying.]"}""",
+        )
+        assertEquals(2, unknown.size)
+        val written = unknown[1] as ChatItem.ToolCall
+        assertEquals(ToolStatus.Interrupted, written.status)
+        assertEquals("May have partially run — check before retrying", written.orphanNote)
+
+        // The dangling-tail UNKNOWN wording maps the same way.
+        val dangling = history(
+            """{"role":"tool","name":"patch","tool_call_id":"c2",
+               "content":"[Orphan recovery: this tool may have executed before Hermes stopped; its effect is UNKNOWN. Inspect current state before retrying.]"}""",
+        ).single() as ChatItem.ToolCall
+        assertEquals("May have partially run — check before retrying", dangling.orphanNote)
+
+        // A notice that arrives as a message of its own attaches to the tool above it and is not a bubble.
+        val readOnly = history(
+            """{"role":"user","text":"look","row_id":1}""",
+            """{"role":"tool","name":"read_file","context":"a.txt","tool_call_id":"c3","row_id":2}""",
+            """{"role":"system","text":"[Orphan recovery: this read-only tool did not complete and had no effect.]","row_id":3}""",
+            """{"role":"assistant","text":"Stopped.","row_id":4}""",
+        )
+        assertEquals(listOf("h-1", "h-2", "h-4"), readOnly.map { it.id })
+        val read = readOnly[1] as ChatItem.ToolCall
+        assertEquals(ToolStatus.Interrupted, read.status)
+        assertEquals("Did not complete", read.orphanNote)
+        val shortWording = history(
+            """{"role":"tool","name":"web_search","tool_call_id":"c4"}""",
+            """{"role":"assistant","text":"[Orphan recovery: interrupted read-only tool did not complete.]"}""",
+        ).single() as ChatItem.ToolCall
+        assertEquals("Did not complete", shortWording.orphanNote)
+
+        // Ordinary tool rows are unchanged.
+        val plain = history("""{"role":"tool","name":"write_file","tool_call_id":"c5","content":"Wrote 12 bytes"}""").single() as ChatItem.ToolCall
+        assertEquals(ToolStatus.Done, plain.status)
+        assertNull(plain.orphanNote)
+    }
+
+    @Test
+    fun orphanNoticeWithNoToolAboveIsASystemLine() {
+        // No tool in its turn (a user message stops the search): kept as a small line, never dropped.
+        val items = history(
+            """{"role":"tool","name":"terminal","tool_call_id":"c0","row_id":1}""",
+            """{"role":"user","text":"next","row_id":2}""",
+            """{"role":"system","text":"[Orphan recovery: interrupted side-effecting tool may have executed; its effect is UNKNOWN. Inspect state before retrying.]","row_id":3}""",
+        )
+        assertEquals(3, items.size)
+        assertNull((items[0] as ChatItem.ToolCall).orphanNote)
+        assertEquals(ChatItem.ToolNotice("h-3", "May have partially run — check before retrying"), items[2])
+    }
+
+    @Test
+    fun stopMarksRunningToolsInterruptedAtTurnEnd() {
+        val running = live.feed(
+            ev("message.start", seq = 1),
+            ev("tool.start", """{"tool_id":"t1","name":"terminal","context":"sleep 60"}""", 2),
+            ev("tool.start", """{"tool_id":"t2","name":"read_file"}""", 3),
+            ev("tool.complete", """{"tool_id":"t2","name":"read_file","result":{"content":"x"}}""", 4),
+        )
+        val stopped = running.feed(ev("message.complete", """{"text":"","status":"interrupted"}""", 5))
+        val tools = stopped.items.filterIsInstance<ChatItem.ToolCall>()
+        assertEquals(listOf(ToolStatus.Interrupted, ToolStatus.Done), tools.map { it.status })
+        assertNull(tools[0].output)
+
+        // A normal completion leaves a (stray) running tool alone; an error turn end still fails it.
+        val normal = running.feed(ev("message.complete", """{"text":"done","status":"complete"}""", 5))
+        assertEquals(ToolStatus.Running, normal.items.filterIsInstance<ChatItem.ToolCall>()[0].status)
+        val failed = running.feed(ev("error", """{"message":"boom"}""", 5))
+        assertEquals(ToolStatus.Failed, failed.items.filterIsInstance<ChatItem.ToolCall>()[0].status)
+    }
+
     // ---- side questions and background tasks ----------------------------------------------------
 
     @Test

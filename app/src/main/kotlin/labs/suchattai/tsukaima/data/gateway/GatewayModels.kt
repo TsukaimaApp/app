@@ -2,6 +2,7 @@ package labs.suchattai.tsukaima.data.gateway
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 /** One row of a session transcript (`session.create`/`resume`/`history`). */
@@ -16,6 +17,8 @@ data class TranscriptMessage(
     @SerialName("tool_call_id") val toolCallId: String? = null,
     val timestamp: Double? = null,
     @SerialName("row_id") val rowId: Long? = null,
+    /** A tool row's result, forwarded only for `write_file` / `patch` / `skill_manage` (where an orphan notice shows). */
+    val content: JsonElement? = null,
 )
 
 @Serializable

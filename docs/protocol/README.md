@@ -374,3 +374,21 @@ All need the bearer header unless marked public. Management endpoints accept `?p
   but never run (the app shows them "Not sent" with Retry; it does the same after an `error` turn end, whose effect on
   the queue was not probed). "Mid-turn" includes a turn paused on an approval, question, masked prompt or connection.
   A truncation mid-turn is still `4009`.
+
+### v0.9.0 — interrupted tools and orphan notices (2026-10-21, from the 0.22.2 source)
+
+- **A killed terminal command** completes normally: `tool.complete.result = {output: "<partial>\n[Command interrupted]",
+  exit_code: 130, error: null}`. The app shows it **Interrupted** (amber), not failed, with the partial output minus the
+  marker line; exit 130 without the marker stays a failure. A tool still running when the turn ends with
+  `message.complete {status:"interrupted"}` (no `tool.complete` came) is Interrupted with no output. The turn-end
+  reasons (`interrupted_by_user`, `interrupted_during_api_call`) are not on the wire.
+- **Failure predicate** (unchanged, the union): failed ⇔ `result.error` truthy **or** `result.success == false` **or**
+  `result.exit_code` non-zero — except the interrupted shape above.
+- **Orphan-recovery notices** (`agent/replay_cleanup.py`): on resume Hermes rewrites an interrupted side-effecting
+  block's tool results (and answers a dangling side-effecting tail) with `[Orphan recovery: … its effect is UNKNOWN …]`
+  or, for a read-only call in that block, `[Orphan recovery: … read-only tool did not complete …]`. They are tool-row
+  results, and the history projection (`tui_gateway/session_history.py` `_history_to_messages`) forwards a tool row's
+  `content` only for `write_file`, `patch` and `skill_manage` — so for other tools (`terminal`…) the notice never
+  reaches a client. The app marks the tool row Interrupted with "May have partially run — check before retrying"
+  (UNKNOWN) or "Did not complete" (read-only); a notice arriving as a message of its own attaches to the last tool
+  of its turn, or shows as a small line when there is none.

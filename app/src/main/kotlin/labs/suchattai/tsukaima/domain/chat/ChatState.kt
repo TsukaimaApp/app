@@ -2,7 +2,11 @@ package labs.suchattai.tsukaima.domain.chat
 
 import kotlinx.serialization.json.JsonObject
 
-enum class ToolStatus { Running, Done, Failed }
+/**
+ * A tool row's state. [Interrupted] is distinct from [Failed]: the tool was stopped (Stop, a killed terminal command:
+ * exit 130 with `[Command interrupted]`) or Hermes recovered it as an orphan; it may have partially run.
+ */
+enum class ToolStatus { Running, Done, Failed, Interrupted }
 
 /** One row of the chat transcript. */
 sealed interface ChatItem {
@@ -56,7 +60,15 @@ sealed interface ChatItem {
          * server). Null for every other tool.
          */
         val imageUrl: String? = null,
+        /**
+         * Hermes' orphan-recovery notice for this call, as the app words it ("May have partially run — check before
+         * retrying" or "Did not complete"); null for every other row. Set from the history only.
+         */
+        val orphanNote: String? = null,
     ) : ChatItem
+
+    /** An orphan-recovery notice from the history with no tool above it in its turn: a small system line ([text]). */
+    data class ToolNotice(override val id: String, val text: String) : ChatItem
 
     /**
      * A delegated child agent (`subagent.*` events), one row per child ([id] `sub-<subagent_id>`). [detail] is its

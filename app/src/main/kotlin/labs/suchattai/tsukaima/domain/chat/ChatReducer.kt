@@ -34,6 +34,15 @@ object ChatReducer {
     /** Events that end a turn ([afterTurnEnd]). */
     private val TURN_ENDS = setOf("message.complete", "error", "turn.error")
 
+    /** Hermes' orphan-recovery notices start with this (`agent/replay_cleanup.py`). */
+    private const val ORPHAN_PREFIX = "[Orphan recovery:"
+    private const val ORPHAN_PARTIAL = "May have partially run — check before retrying"
+    private const val ORPHAN_INCOMPLETE = "Did not complete"
+
+    /** The line every terminal executor appends to a command it killed (exit [INTERRUPTED_EXIT]). */
+    private const val INTERRUPT_MARKER = "[Command interrupted]"
+    private const val INTERRUPTED_EXIT = 130
+
     /** The first event of a turn (observed: `message.start` right after the previous `message.complete`). */
     private val QUEUED_TURN_STARTS = setOf("message.start", "message.delta", "reasoning.delta", "tool.start", "message.complete")
 
@@ -44,28 +53,57 @@ object ChatReducer {
             is Frame.Response, is Frame.Unknown -> state
         }
 
-    fun fromHistory(messages: List<TranscriptMessage>): List<ChatItem> =
-        messages.mapIndexedNotNull { index, m ->
+    /**
+     * History rows to items. An orphan-recovery notice ([orphanNote]) is not a bubble: a tool row's own result notice
+     * marks it [ToolStatus.Interrupted]; a notice row of its own attaches to the nearest tool above it in its turn, or
+     * becomes a [ChatItem.ToolNotice] line when there is none.
+     */
+    fun fromHistory(messages: List<TranscriptMessage>): List<ChatItem> {
+        val items = mutableListOf<ChatItem>()
+        messages.forEachIndexed { index, m ->
             val id = "h-${m.rowId ?: index}"
-            when (m.role) {
-                "user" -> ChatItem.UserMessage(id, m.text, rowId = m.rowId)
-                "assistant" ->
-                    if (m.text.isBlank()) null
-                    else ChatItem.AssistantMessage(id, m.text, streaming = false, reasoning = m.reasoning, rowId = m.rowId)
-                "tool" -> ChatItem.ToolCall(
+            if (m.role == "tool") {
+                val note = orphanNote((m.content as? JsonPrimitive)?.takeIf { it.isString }?.content ?: m.text)
+                items += ChatItem.ToolCall(
                     id = id,
                     name = m.name ?: "tool",
                     context = m.context,
                     args = m.args,
-                    status = ToolStatus.Done,
+                    status = if (note != null) ToolStatus.Interrupted else ToolStatus.Done,
                     output = null,
                     exitCode = null,
                     durationS = null,
                     imageUrl = visionImageUrl(m.name.orEmpty(), m.args),
+                    orphanNote = note,
                 )
-                else -> null
+                return@forEachIndexed
+            }
+            val note = orphanNote(m.text)
+            if (note != null) {
+                val turnStart = items.indexOfLast { it is ChatItem.UserMessage } + 1
+                val at = items.indexOfLast { it is ChatItem.ToolCall }.takeIf { it >= turnStart }
+                if (at != null) items[at] = (items[at] as ChatItem.ToolCall).copy(status = ToolStatus.Interrupted, orphanNote = note)
+                else items += ChatItem.ToolNotice(id, note)
+                return@forEachIndexed
+            }
+            when (m.role) {
+                "user" -> items += ChatItem.UserMessage(id, m.text, rowId = m.rowId)
+                "assistant" ->
+                    if (m.text.isNotBlank()) items += ChatItem.AssistantMessage(id, m.text, streaming = false, reasoning = m.reasoning, rowId = m.rowId)
             }
         }
+        return items
+    }
+
+    /**
+     * The app's wording of a Hermes orphan-recovery notice (`agent/replay_cleanup.py`): an effect it calls UNKNOWN
+     * (a side-effecting tool) → [ORPHAN_PARTIAL], a read-only tool's → [ORPHAN_INCOMPLETE]; null for any other text.
+     */
+    private fun orphanNote(text: String): String? {
+        val notice = text.trimStart()
+        if (!notice.startsWith(ORPHAN_PREFIX)) return null
+        return if ("UNKNOWN" in notice) ORPHAN_PARTIAL else ORPHAN_INCOMPLETE
+    }
 
     fun onSubmitted(
         state: ChatState,
@@ -288,12 +326,19 @@ object ChatReducer {
      * waiting, the next turn's first event ([QUEUED_TURN_STARTS]) is the oldest echo's ([startQueuedTurn]). An
      * interrupted turn (Stop, a voice barge-in: `message.complete` status `interrupted`) purges the server's queue, so
      * the waiting messages never run: their echoes turn failed ("Not sent", Retry). A failed turn (`error`) is treated
-     * the same way, as the queue's fate is not reported.
+     * the same way, as the queue's fate is not reported. A tool still running when the turn is interrupted (its
+     * `tool.complete` never came) is [ToolStatus.Interrupted]; an error turn end has already failed it ([abortTurn]).
      */
     private fun afterTurnEnd(type: String, p: JsonObject, s: ChatState): ChatState {
         if (type !in TURN_ENDS) return s
         if (type != "message.complete" || p.string("status") == "interrupted") {
-            val items = s.items.map { if (it is ChatItem.UserMessage && it.queued) it.copy(queued = false, failed = true) else it }
+            val items = s.items.map {
+                when {
+                    it is ChatItem.UserMessage && it.queued -> it.copy(queued = false, failed = true)
+                    it is ChatItem.ToolCall && it.status == ToolStatus.Running -> it.copy(status = ToolStatus.Interrupted)
+                    else -> it
+                }
+            }
             return s.copy(items = items, queuedTurnNext = false)
         }
         return s.copy(queuedTurnNext = s.items.any { it is ChatItem.UserMessage && it.queued })
@@ -584,12 +629,25 @@ object ChatReducer {
         return s.copy(items = items, status = AgentStatus.Tool(humanName(name)))
     }
 
+    /**
+     * `tool.complete`. Failed ⇔ `result.error` truthy, `result.success == false`, or a non-zero `result.exit_code`
+     * (any one: tools report failure differently). A terminal command the user stopped (exit 130 ending in the
+     * [INTERRUPT_MARKER] line) is [ToolStatus.Interrupted] instead, its partial output kept without the marker.
+     */
     private fun onToolComplete(s: ChatState, p: JsonObject, flair: () -> String): ChatState {
         val toolId = p.string("tool_id") ?: return s
         val result = p["result"] as? JsonObject
         val exitCode = result?.get("exit_code")?.primitive()?.intOrNull
-        val error = result?.get("error")?.takeIf { it !is JsonNull }
-        val failed = (exitCode != null && exitCode != 0) || error != null
+        val rawOutput = result?.get("output")?.asText()
+        val interrupted = exitCode == INTERRUPTED_EXIT && rawOutput != null && rawOutput.lines().any { it.trimEnd() == INTERRUPT_MARKER }
+        val failed = result?.get("error").truthy() ||
+            (result?.get("success") as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull == false ||
+            (exitCode != null && exitCode != 0)
+        val output = if (interrupted) {
+            rawOutput!!.lines().filterNot { it.trimEnd() == INTERRUPT_MARKER }.joinToString("\n").trimEnd()
+        } else {
+            rawOutput
+        }
         val existing = s.items.firstOrNull { it.id == toolId } as? ChatItem.ToolCall
         val base = existing ?: ChatItem.ToolCall(
             id = toolId,
@@ -603,8 +661,12 @@ object ChatReducer {
         )
         val done = base.copy(
             imageUrl = base.imageUrl ?: visionImageUrl(base.name, p["args"] as? JsonObject),
-            status = if (failed) ToolStatus.Failed else ToolStatus.Done,
-            output = result?.get("output")?.asText(),
+            status = when {
+                interrupted -> ToolStatus.Interrupted
+                failed -> ToolStatus.Failed
+                else -> ToolStatus.Done
+            },
+            output = output,
             exitCode = exitCode,
             durationS = p["duration_s"]?.primitive()?.doubleOrNull,
         )
@@ -781,6 +843,18 @@ object ChatReducer {
         (this[key] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull
 
     private fun JsonObject.bool(key: String): Boolean? = (this[key] as? JsonPrimitive)?.booleanOrNull
+
+    /** Python truthiness of a result field: null, false, 0, "" and empty containers are false. */
+    private fun JsonElement?.truthy(): Boolean = when (this) {
+        null, is JsonNull -> false
+        is JsonObject -> isNotEmpty()
+        is JsonArray -> isNotEmpty()
+        is JsonPrimitive -> when {
+            isString -> content.isNotEmpty()
+            booleanOrNull != null -> booleanOrNull!!
+            else -> doubleOrNull?.let { it != 0.0 } ?: true
+        }
+    }
 
     private fun JsonElement.asText(): String? = when (this) {
         is JsonNull -> null
