@@ -127,7 +127,8 @@ function checkCopy(file, html) {
     for (const m of text.matchAll(re)) fail(file, `forbidden term "${term}"`, around(m.index, m[0].length));
   }
   for (const m of text.matchAll(/!/g)) fail(file, 'exclamation mark in text', around(m.index, 1));
-  for (const m of text.matchAll(/\p{Extended_Pictographic}/gu)) {
+  // Extended_Pictographic includes ©, ® and ™, which are ordinary typography, not emoji.
+  for (const m of text.matchAll(/(?![\u00A9\u00AE\u2122])\p{Extended_Pictographic}/gu)) {
     fail(file, 'emoji in text', `U+${m[0].codePointAt(0).toString(16).toUpperCase().padStart(4, '0')} ${around(m.index, m[0].length)}`);
   }
 }
@@ -137,9 +138,10 @@ function checkCopy(file, html) {
 function checkStructure(file, html) {
   const markup = html.replace(/<!--[\s\S]*?-->/g, ' ').replace(/<(script|style)\b[\s\S]*?<\/\1\s*>/gi, ' ');
   const h1s = [...markup.matchAll(/<h1\b/gi)].length;
-  if (h1s > 1) fail(file, 'more than one <h1>', `${h1s} found`);
+  if (h1s !== 1) fail(file, 'exactly one <h1> required', `${h1s} found`);
 
-  // Every <section> needs a heading of its own (nested sections are tracked separately).
+  // Every <section> needs an h2 or h3 of its own (nested sections are tracked separately); a section that
+  // contains the page's h1 is headed by it.
   const open = [];
   for (const m of markup.matchAll(/<(\/?)(section|h[1-3])\b([^>]*)>/gi)) {
     const closing = m[1] === '/';
@@ -148,16 +150,28 @@ function checkStructure(file, html) {
       if (!closing) {
         const id = /\bid\s*=\s*["']?([^"'\s>]+)/i.exec(m[3])?.[1];
         const cls = /\bclass\s*=\s*["']([^"']*)["']/i.exec(m[3])?.[1];
-        open.push({ desc: id ? `#${id}` : cls ? `.${cls.trim().split(/\s+/).join('.')}` : `<section> #${open.length + 1}`, heading: false });
+        open.push({ desc: id ? `#${id}` : cls ? `.${cls.trim().split(/\s+/).join('.')}` : `<section> #${open.length + 1}`, heading: false, h1: false });
       } else {
         const s = open.pop();
-        if (s && !s.heading) fail(file, 'section without a heading (h1-h3)', s.desc);
+        if (s && !s.heading && !s.h1) fail(file, 'section without an h2/h3 heading', s.desc);
       }
+    } else if (!closing && name === 'h1') {
+      for (const s of open) s.h1 = true;
     } else if (!closing && open.length) {
       open[open.length - 1].heading = true;
     }
   }
   for (const s of open) fail(file, 'unclosed <section>', s.desc);
+
+  // Every in-page link (href="#id") must land on an element with that id. A bare "#" is the top of the page.
+  const ids = new Set([...markup.matchAll(/\sid\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)].map((m) => m[1] ?? m[2] ?? m[3]));
+  for (const m of markup.matchAll(/\shref\s*=\s*(?:"#([^"]*)"|'#([^']*)'|#([^\s>]+))/gi)) {
+    const raw = m[1] ?? m[2] ?? m[3];
+    if (raw === '') continue;
+    let id = raw;
+    try { id = decodeURIComponent(raw); } catch { /* keep the raw fragment */ }
+    if (!ids.has(id)) fail(file, 'in-page link without a target id', `#${raw}`);
+  }
 }
 
 // ---- stylesheets ----------------------------------------------------------------------------------------------

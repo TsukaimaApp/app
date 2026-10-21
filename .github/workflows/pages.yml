@@ -1,9 +1,11 @@
 name: Site
 
+# Checks run on every branch and pull request that touches the site or its tooling; only main deploys.
 on:
   push:
-    branches: [main]
-    paths: ['site/**']
+    paths: ['site/**', 'scripts/site/**']
+  pull_request:
+    paths: ['site/**', 'scripts/site/**']
   workflow_dispatch:
 
 permissions:
@@ -31,6 +33,8 @@ jobs:
 
   deploy:
     needs: check
+    # Only main deploys: a push, or a manual run on main. Other branches and pull requests stop after the checks.
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

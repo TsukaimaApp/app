@@ -8,7 +8,7 @@ page; fonts are subset once by `scripts/site/build-fonts.sh` and committed. Deve
 |------|------|
 | `index.html` | The page. |
 | `site.css` | Tokens (light values from `design/tokens/`), `@font-face`, type roles, base styles, then page styles. |
-| `fonts/` | WOFF2 subsets of Source Serif 4, Instrument Sans, IBM Plex Mono and Noto Serif JP, with `OFL.txt`. |
+| `fonts/` | WOFF2 subsets of Source Serif 4, Instrument Sans, IBM Plex Mono and Noto Serif JP, renamed Tsukaima Serif / Sans / Mono / Kanji (OFL reserved names), with `OFL.txt`. |
 | `img/` | The mark and other images. |
 | `CNAME` | `tsukaima.app`, for the Pages custom domain. |
 
@@ -22,8 +22,9 @@ Each release carries the signed APK as an asset; "Download APK" and Obtainium bo
 
 ## Publishing
 
-`.github/workflows/pages.yml` runs the checks and deploys this directory on every push to `main` that touches
-`site/**`, and on manual dispatch. Until Pages is enabled the deploy job fails; that is expected. When the repo goes
+`.github/workflows/pages.yml` runs the checks on every push and pull request that touches `site/**` or
+`scripts/site/**`, on any branch, and deploys this directory only from `main` (a push, or a manual run on `main`).
+Until Pages is enabled the deploy job fails; that is expected. When the repo goes
 public:
 
 1. Repo Settings → Pages → Build and deployment → Source: **GitHub Actions**.
@@ -43,10 +44,11 @@ bash scripts/site/build-fonts.sh    # rebuild fonts/ from app/src/main/res/font/
 ```
 
 `check-page.mjs` fails on any `http(s)://` host other than github.com (TsukaimaApp/app, ImranR98/Obtainium,
-NousResearch/hermes-agent) and tsukaima.app, local references that do not exist under `site/`, forbidden copy
-(see the plan's Global Constraints), exclamation marks, emoji, more than one `h1`, a `section` without a heading,
-`@font-face` without `font-display: swap`, font stacks without a generic fallback, and the size budgets
-(`fonts/` ≤ 500 kB, `site.js` ≤ 3 kB, `img/og.png` ≤ 200 kB, no file over 1 MB).
+NousResearch/hermes-agent) and tsukaima.app, local references that do not exist under `site/`, forbidden copy (see
+the plan's Global Constraints), exclamation marks, emoji, anything but exactly one `h1`, a `section` without an
+`h2`/`h3` (unless it holds the `h1`), an in-page `#id` link with no target, `@font-face` without `font-display:
+swap`, font stacks without a generic fallback, and the size budgets (`fonts/` ≤ 500 kB, `site.js` ≤ 3 kB,
+`img/og.png` ≤ 200 kB, no file over 1 MB).
 
 ## Attribution
 

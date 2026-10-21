@@ -1,10 +1,31 @@
-The fonts in this directory are subsets of the following families, converted to WOFF2.
-Each is licensed under the SIL Open Font License, Version 1.1, reproduced below.
+The fonts in this directory are modified versions (subsets, converted to WOFF2 and renamed) of the
+fonts below. Each is licensed under the SIL Open Font License, Version 1.1, reproduced below.
 
-Source Serif 4: © 2014 - 2021 Adobe Systems Incorporated (http://www.adobe.com/), with Reserved Font Name ‘Source’.
-Instrument Sans: Copyright 2022 The Instrument Sans Project Authors (https://github.com/Instrument/instrument-sans)
-IBM Plex Mono: Copyright 2017 IBM Corp. All rights reserved.
-Noto Serif JP: (c) 2017-2024 Adobe (http://www.adobe.com/).
+source-serif-4.woff2
+  Original font: Source Serif 4 (Regular)
+  © 2014 - 2021 Adobe Systems Incorporated (http://www.adobe.com/), with Reserved Font Name ‘Source’.
+  Subset and renamed to Tsukaima Serif for tsukaima.app; not the original font.
+
+source-serif-4-italic.woff2
+  Original font: Source Serif 4 (Italic)
+  © 2014 - 2021 Adobe Systems Incorporated (http://www.adobe.com/), with Reserved Font Name ‘Source’.
+  Subset and renamed to Tsukaima Serif for tsukaima.app; not the original font.
+
+instrument-sans.woff2
+  Original font: Instrument Sans
+  Copyright 2022 The Instrument Sans Project Authors (https://github.com/Instrument/instrument-sans)
+  Subset and renamed to Tsukaima Sans for tsukaima.app; not the original font.
+
+ibm-plex-mono.woff2
+  Original font: IBM Plex Mono
+  Copyright 2017 IBM Corp. All rights reserved.
+  Subset and renamed to Tsukaima Mono for tsukaima.app; not the original font.
+
+noto-serif-jp-subset.woff2
+  Original font: Noto Serif JP
+  (c) 2017-2024 Adobe (http://www.adobe.com/).
+  Subset and renamed to Tsukaima Kanji for tsukaima.app; not the original font.
+
 
 -----------------------------------------------------------
 SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007

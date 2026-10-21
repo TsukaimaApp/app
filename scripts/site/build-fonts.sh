@@ -21,19 +21,60 @@ kanji='U+4F7F,U+3044,U+9B54'
 
 mkdir -p "$out"
 
-subset() { # <source ttf> <output woff2> <unicodes>
+# Renames a built woff2 (OFL section 3: a subset is a Modified Version and must not use a Reserved Font Name).
+# Family, full, unique and PostScript names (IDs 1, 3, 4, 6, 16, and 17 if it carries the family) plus the
+# per-instance PostScript names get the new family; copyright, licence and designer records are untouched.
+rename() { # <woff2> <new family>
+  python3 -c '
+import re, sys
+from fontTools.ttLib import TTFont
+path, family = sys.argv[1], sys.argv[2]
+ps_family = family.replace(" ", "")
+font = TTFont(path, recalcTimestamp=False)  # keep head.modified from the subset, so reruns are byte-identical
+name = font["name"]
+old_ps_family = (name.getDebugName(6) or "").split("-")[0]
+# Instance names keep a style suffix the original prefix had (SourceSerif4Italic-Light -> TsukaimaSerifItalic-Light).
+instance_ps_family = ps_family + ("Italic" if old_ps_family.endswith("Italic") else "")
+old_family = name.getDebugName(16) or name.getDebugName(1)
+sub = name.getDebugName(2) or "Regular"
+full = family if sub == "Regular" else f"{family} {sub}"
+ps = f"{ps_family}-{sub.replace(" ", "")}"
+for rec in name.names:
+    text = rec.toUnicode()
+    if rec.nameID in (1, 16):
+        new = family
+    elif rec.nameID == 4:
+        new = full
+    elif rec.nameID == 6:
+        new = ps
+    elif rec.nameID == 3:
+        new = f"{ps};tsukaima.app"
+    elif rec.nameID == 17 and old_family and old_family in text:
+        new = text.replace(old_family, family)
+    elif rec.nameID >= 256 and old_ps_family and text.startswith(old_ps_family + "-"):
+        new = instance_ps_family + text[len(old_ps_family):]
+    else:
+        continue
+    rec.string = new
+font.flavor = "woff2"
+font.save(path)
+' "$1" "$2"
+}
+
+subset() { # <source ttf> <output woff2> <unicodes> <new family>
   local in="$src/$1" dest="$out/$2"
   [[ -f "$in" ]] || { echo "build-fonts: missing $in" >&2; exit 1; }
   # Variation axes are kept (no --instance), so one file per style covers every weight.
   pyftsubset "$in" --flavor=woff2 --layout-features='*' --unicodes="$3" --output-file="$dest"
-  printf '%-34s %8d bytes\n' "$2" "$(stat -c %s "$dest")"
+  rename "$dest" "$4"
+  printf '%-34s %8d bytes  (%s)\n' "$2" "$(stat -c %s "$dest")" "$4"
 }
 
-subset source_serif_4.ttf         source-serif-4.woff2         "$latin"
-subset source_serif_4_italic.ttf  source-serif-4-italic.woff2  "$latin"
-subset instrument_sans.ttf        instrument-sans.woff2        "$latin"
-subset ibm_plex_mono.ttf          ibm-plex-mono.woff2          "$latin"
-subset noto_serif_jp_subset.ttf   noto-serif-jp-subset.woff2   "$kanji"
+subset source_serif_4.ttf         source-serif-4.woff2         "$latin" 'Tsukaima Serif'
+subset source_serif_4_italic.ttf  source-serif-4-italic.woff2  "$latin" 'Tsukaima Serif'
+subset instrument_sans.ttf        instrument-sans.woff2        "$latin" 'Tsukaima Sans'
+subset ibm_plex_mono.ttf          ibm-plex-mono.woff2          "$latin" 'Tsukaima Mono'
+subset noto_serif_jp_subset.ttf   noto-serif-jp-subset.woff2   "$kanji" 'Tsukaima Kanji'
 
 # Licence: one copyright line per family, read from each font's name table (ID 0), then the OFL 1.1 text.
 python3 - "$src" "$out/OFL.txt" <<'PY'
@@ -43,18 +84,20 @@ from fontTools.ttLib import TTFont
 
 src, dest = Path(sys.argv[1]), Path(sys.argv[2])
 fonts = [
-    ('Source Serif 4', 'source_serif_4.ttf'),
-    ('Instrument Sans', 'instrument_sans.ttf'),
-    ('IBM Plex Mono', 'ibm_plex_mono.ttf'),
-    ('Noto Serif JP', 'noto_serif_jp_subset.ttf'),
+    ('source-serif-4.woff2', 'Source Serif 4 (Regular)', 'source_serif_4.ttf', 'Tsukaima Serif'),
+    ('source-serif-4-italic.woff2', 'Source Serif 4 (Italic)', 'source_serif_4_italic.ttf', 'Tsukaima Serif'),
+    ('instrument-sans.woff2', 'Instrument Sans', 'instrument_sans.ttf', 'Tsukaima Sans'),
+    ('ibm-plex-mono.woff2', 'IBM Plex Mono', 'ibm_plex_mono.ttf', 'Tsukaima Mono'),
+    ('noto-serif-jp-subset.woff2', 'Noto Serif JP', 'noto_serif_jp_subset.ttf', 'Tsukaima Kanji'),
 ]
-header = ['The fonts in this directory are subsets of the following families, converted to WOFF2.',
-          'Each is licensed under the SIL Open Font License, Version 1.1, reproduced below.', '']
-for family, file in fonts:
+header = ['The fonts in this directory are modified versions (subsets, converted to WOFF2 and renamed) of the',
+          'fonts below. Each is licensed under the SIL Open Font License, Version 1.1, reproduced below.', '']
+for out_file, original, file, renamed in fonts:
     copyright = TTFont(src / file)['name'].getDebugName(0)
     if not copyright:
         sys.exit(f'build-fonts: {file} has no copyright string (name ID 0)')
-    header.append(f'{family}: {copyright}')
+    header += [f'{out_file}', f'  Original font: {original}', f'  {copyright}',
+               f'  Subset and renamed to {renamed} for tsukaima.app; not the original font.', '']
 
 OFL = """
 -----------------------------------------------------------
@@ -149,3 +192,34 @@ print(f'{dest.name:<34} {dest.stat().st_size:8d} bytes')
 PY
 
 printf '%-34s %8d bytes\n' 'total woff2' "$(cat "$out"/*.woff2 | wc -c)"
+
+# Final assertion: every required glyph is in each subset's cmap, and no original family name survived.
+python3 - "$out" <<'PY'
+import sys
+from pathlib import Path
+from fontTools.ttLib import TTFont
+
+out = Path(sys.argv[1])
+latin = '…—·→“”‘’–•'
+need = {
+    'source-serif-4.woff2': latin, 'source-serif-4-italic.woff2': latin, 'instrument-sans.woff2': latin,
+    'ibm-plex-mono.woff2': latin, 'noto-serif-jp-subset.woff2': '使い魔',
+}
+old_names = ('Source', 'Instrument', 'Plex', 'Noto')
+bad = []
+for file, chars in need.items():
+    font = TTFont(out / file)
+    cmap = font.getBestCmap()
+    missing = [f'U+{ord(c):04X}' for c in chars if ord(c) not in cmap]
+    if missing:
+        bad.append(f'{file}: missing glyphs {" ".join(missing)}')
+    for rec in font['name'].names:
+        if rec.nameID in (1, 3, 4, 6, 16, 17) or rec.nameID >= 256:
+            if any(o in rec.toUnicode() for o in old_names):
+                bad.append(f'{file}: name ID {rec.nameID} still reads {rec.toUnicode()!r}')
+for b in bad:
+    print(f'build-fonts: {b}', file=sys.stderr)
+if bad:
+    sys.exit(1)
+print('cmap and names: ok')
+PY
