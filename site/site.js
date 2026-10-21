@@ -15,8 +15,10 @@
   const d = document.getElementById('d-approval');
   if (!d) return;
   const card = d.querySelector('.approval'), done = d.querySelector('.approval-done');
-  const msg = done.querySelector('.msg p'), ok = msg.textContent;
-  const approve = card.querySelector('.approve'), reset = done.querySelector('.reset');
+  const msg = done && done.querySelector('.msg p'), reset = done && done.querySelector('.reset');
+  const approve = card && card.querySelector('.approve'), deny = card && card.querySelector('.deny');
+  if (!msg || !reset || !approve || !deny) return;
+  const ok = msg.textContent;
   const answer = (denied) => {
     card.hidden = true;
     done.hidden = false;
@@ -25,7 +27,7 @@
     reset.focus();
   };
   approve.onclick = () => answer(false);
-  card.querySelector('.deny').onclick = () => answer(true);
+  deny.onclick = () => answer(true);
   reset.onclick = () => {
     done.hidden = true;
     card.hidden = false;
