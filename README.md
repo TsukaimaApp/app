@@ -3,21 +3,26 @@
 Native Android client (Kotlin + Jetpack Compose) for a self-hosted [Hermes Agent](https://github.com/NousResearch/hermes-agent).
 Chat with your agent, browse sessions, manage cron jobs, and get actionable notifications from your phone.
 
-Version **0.8.0** (versionCode 18). Changes per release: [`CHANGELOG.md`](CHANGELOG.md).
+Version **0.9.0** (versionCode 20). Changes per release: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Features
 
 - Streaming chat over the Hermes JSON-RPC WebSocket: replies, reasoning, tool calls, mid-turn commentary
-- **Stop** a running turn from the composer (or the chat's overflow menu)
+- **Stop** a running turn from the composer (or the chat's overflow menu); a message sent while a turn runs is
+  **queued** for after it ("Queued"; Stop leaves it "Not sent" with Retry)
 - **Live model switch** for the open chat (session-scoped; mid-turn picks apply at the next turn), **reasoning
   effort**, a context meter in the status line ("42% ctx · 12.3k tok") and **Compact context**
 - **Retry** a failed send from its bubble; long-press a message to **copy** its text or reasoning
 - **Edit** a sent message or **Regenerate** a reply (long-press): Hermes rewinds the chat to that point and runs
   the turn again
 - **Side questions** and **background tasks** from the composer's overflow menu; answers arrive as cards in the chat
-- Subagent (delegation) rows, a risk note on flagged tool output, archived chats read-only with **Unarchive**
+- Subagent (delegation) rows, a risk note on flagged tool output, archived chats read-only with **Unarchive**;
+  stopped tools show **Interrupted**, and the image `vision_analyze` looked at shows on its tool row
+- Replies render markdown with tables, task-list checkboxes and **math** (LaTeX; never spoken)
+- The agent's **todo list** as a live "Tasks" checklist card
 - Tool approvals in chat: Deny / Approve, plus "Approve for…" this session or always when the server allows it
 - Answer the agent's **clarify** questions (choices, multi-select, free text) in chat
+- **Connection requests** in chat: Connect (browser sign-in or settings fields) / Skip, Skip all, Continue
 - **Masked prompts**: a `sudo` password, a skill's secret or a password-manager unlock, typed into a hidden
   field and never stored or logged; password-manager **one-time codes** and **save-login** offers answered in chat
 - **Attachments**: send files and images with a message (up to 12 MB each); a **PDF** goes as page images (first

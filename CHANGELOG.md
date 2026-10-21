@@ -3,6 +3,45 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.9.0 — 2026-10-21 (versionCode 20)
+
+### Added
+- Connection requests: when Hermes needs a connector, MCP server, plugin or skill connected, a "Hermes wants to
+  connect" card shows each target with Connect / Skip, plus Skip all and Continue and the time left. Connect opens
+  the sign-in link in the browser (Hermes is told to check again when you come back) or asks for the target's
+  settings (secret fields masked). A notification asks for attention when the chat is not on screen, and a pending
+  request comes back after a reconnect.
+- Task checklists: the agent's todo list shows as a "Tasks" card that updates in place (pending, in progress, done,
+  cancelled; subtasks indented; done items fold away in long lists) and is restored when you reopen the chat.
+- Math in replies: `$…$`, `$$…$$`, `\(…\)` and `\[…\]` render as formulas; a formula that cannot be drawn
+  shows as code. Math is never read aloud.
+- Task lists in replies: `- [ ]` and `- [x]` items show as checkboxes.
+- The image `vision_analyze` looked at shows on its tool row (tap to enlarge); images from another host load on tap,
+  and a load that dropped can be retried with a tap.
+- Send while a turn runs: the message is queued and runs after the current turn ("Queued" under the bubble; the
+  composer shows Stop and "Send when done"). This also applies while a turn waits on an approval, question,
+  password or connection.
+
+### Changed
+- Hardware Enter while a turn runs now queues the message instead of doing nothing.
+
+### Fixed
+- Backslash escapes in replies (`\*`, `\_`, `\[`, `\$`, …) show the character instead of the backslash or
+  formatting.
+- A command you stopped shows "Interrupted" (amber) with its partial output instead of "Failed"; a tool still running
+  when you press Stop ends Interrupted too. In a reopened chat, a file edit or skill change Hermes reports as
+  interrupted is marked "May have partially run — check before retrying" or "Did not complete".
+- Stop (or interrupting a spoken reply, or a failed turn) no longer leaves queued messages looking sent: they show
+  "Not sent" with Retry.
+
+### Security
+- TeX that loads files, defines macros or changes global renderer state (`\includegraphics`, `\input`,
+  `\newcommand`, `\def`, `\DeclareMathOperator`, …) or runs over 2000 characters is shown as code, never rendered.
+- Inline (`data:`) images over 25 MiB are refused before decoding; image previews decode at most 2048 px on the
+  long side.
+- Tool images are fetched with your token only from the Hermes origin (no redirects); images from any other host load
+  only when tapped.
+
 ## 0.8.1 — 2026-10-21 (versionCode 19)
 
 ### Fixed

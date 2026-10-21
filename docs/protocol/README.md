@@ -308,87 +308,131 @@ All need the bearer header unless marked public. Management endpoints accept `?p
   prefix on a shared host sends its bearer to sibling paths on that host too; a 401 on an image is final (no
   re-login, no sign-in prompt).
 
-### v0.9.0 — connection requests (2026-10-21, verified live against 0.22.2)
+### v0.9.0 — connections, todos, media, queue, interrupted tools (2026-10-21, verified live against 0.22.2)
 
-- **Event `connection.request`** (on the session; `tui_gateway/agent_callbacks.py` `connection_callback`, payload
-  `ConnectionOperation.request_payload`): `{op_id, seq, deadline_at (epoch s, server clock), timeout_seconds,
-  tool_call_id?, display?{suggested[]}, targets[{name, kind, action, state, resolved?, detail?, instructions?,
-  connect_url?, required_env?[{name, required, secret, default, prompt?}], hint?, display?, description?}]}`. It is an
-  **event** (`method: "event"`), not a server request: the `manage_connections` tool thread blocks on the operation
-  until it settles or `deadline_at` passes (~5 min), so an unanswered card hangs the turn. The same payload is
-  `pending_connection` of a `session.resume` result while the operation is open; the app restores the card from it.
-  `kind` ∈ connector | mcp | plugin | skill, `action` ∈ authorize | connect | enable | install | reconnect, `state` ∈
-  pending | initiated | connected | skipped | failed | expired | not_connected (the app renders unknown values as
-  given). `resolved` (else `state` ∈ connected | skipped) = the row needs nothing more.
-- **Event `connection.update`** `{op_id, seq, deadline_at, settled, settled_at?, settled_by?, owner, targets[],
-  target?, from?, to?, actor?, detail?}`: one transition (`actor` user | backend_watcher | clock) or the settlement
-  (`settled_by` all_resolved | continue | deadline | interrupt), always with the full target snapshot. `seq` is the
-  operation's own write counter (an older frame moves nothing). Session operations are emitted on the session with
-  `owner {type:"session", session_id}`; account operations are broadcast globally with `owner {type:"account"}` —
-  the app ignores an `op_id` it holds no card for.
-- **RPC `connection.respond {owner: {type:"session", session_id: <live id>}, op_id, result: {targets[{name,
-  status: approved|skipped, detail?, env?{NAME: value}}], settled_by?: "continue", said?}}`** →
-  `{status:"ok", settled}`. `owner` is required (`ConnectionOperationParams`); an invalid `result` → 4002. Skip all =
-  every target `skipped` with no `settled_by` (the operation settles `all_resolved`); Continue = `{targets:[],
-  settled_by:"continue"}`; `approved` starts a pending row's backend work (an MCP install with its `env`), or retries
-  a failed/expired one.
-- **RPC `connectors.operation.wake {owner, op_id}`** → `{status:"ok"}`: the browser leg of a `connect_url` came back,
-  so the backend reads the account now instead of at its next watcher tick. The app sends it when the chat comes
-  back to the foreground after opening the link.
+Each item says how it was established: **[live]** = probed against the test instance (0.22.2) during this release,
+**[source]** = read from the 0.22.2 source only.
 
-### v0.9.0 — todo checklists (2026-10-21, from the 0.22.2 source)
+**Connection requests**
 
-- **Event `todo.updated`** `{todos[{id, content, status, parent?}], revision}` (`tui_gateway/tool_progress.py`): the
-  full snapshot after every `todo_list` (alias `todo`) call, sent regardless of `display.tool_progress`. `status` ∈
-  pending | in_progress | completed | cancelled (the app reads anything else as pending); `parent` names another
-  entry's `id`; `revision` is monotonic (the app replaces its one "Tasks" card at an equal or higher revision and
-  ignores a lower one; `todos: []` at revision ≥ 1 clears the list). The todo tool's `tool.complete` carries the same
-  `todos` + `revision` at the payload's top level; the `summary` rollup exists only in `tool.complete.result.summary`.
-- **`todo_state {todos, revision}`** is on every `session.resume` result (and `session.activate`) when the session has
-  a list (`_attach_todo_state`; omitted when it never had one — an empty list at revision 0 is not sent). There is no
-  replay event: the app seeds the card from it (authoritative), and keeps its own card through a transcript rebuild
-  when a resume carries none.
+- **Event `connection.request`** [source + live] (on the session; `tui_gateway/agent_callbacks.py`
+  `connection_callback`, payload `ConnectionOperation.request_payload`): `{op_id, seq, deadline_at (epoch s, server
+  clock), timeout_seconds, tool_call_id?, display?{suggested[]}, targets[{name, kind, action, state, resolved?,
+  detail?, instructions?, connect_url?, required_env?[{name, required, secret, default, prompt?}], hint?, display?,
+  description?}]}`. It is an **event** (`method: "event"`), not a server request: the `manage_connections` tool
+  thread blocks on the operation until it settles or `deadline_at` passes (~5 min), so an unanswered card hangs the
+  turn. `kind` ∈ connector | mcp | plugin | skill, `action` ∈ authorize | connect | enable | install | reconnect,
+  `state` ∈ pending | initiated | connected | skipped | failed | expired | not_connected (the app renders unknown
+  values as given). `resolved` (else `state` ∈ connected | skipped) = the row needs nothing more.
+  - [live] With `client.capabilities {server_requests: true}`, "connect linear" arrived after `tool.start
+    manage_connections` with keys `deadline_at, op_id, seq, targets, timeout_seconds, tool_call_id` — **no `owner`,
+    no `display`** — and the connector row already `state: "initiated"` with a `connect_url` (`seq: 1`, deadline
+    ~298 s ahead).
+  - [source] The same payload is `pending_connection` of a `session.resume` result while the operation is open; the
+    app restores the card from it. A card that settled while the app was away does not come back (only open
+    operations do); the tool row stays in history.
+- **Event `connection.update`** [source + live] `{op_id, seq, deadline_at, settled, settled_at?, settled_by?, owner,
+  targets[], target?, from?, to?, actor?, detail?}`: one transition (`actor` user | backend_watcher | clock) or the
+  settlement (`settled_by` all_resolved | continue | deadline | interrupt), always with the full target snapshot.
+  `seq` is the operation's own write counter; a frame with `seq <=` the card's moves nothing (the desktop's rule).
+  Session operations are emitted on the session with `owner {type:"session", session_id}`; account operations are
+  broadcast globally with `owner {type:"account"}` — the app ignores an `op_id` it holds no card for.
+  - [live] After a Skip all: seq 1 (backend_watcher, initiated→initiated, `settled:false` — a no-op with the
+    request's own seq, dropped), seq 2 (actor user, to skipped), seq 3 (`settled:true, settled_by:"all_resolved"`).
+    The first frame can arrive **before** the RPC reply; the app also settles the card from the reply's `settled`.
+- **RPC `connection.respond`** [live] params `{owner: {type:"session", session_id: <live sid>}, op_id, result:
+  {targets[{name, status: approved|skipped, detail?, env?{NAME: value}}], settled_by?: "continue", said?}}` →
+  `{status:"ok", settled}`. `owner` is required (`ConnectionOperationParams`; the desktop builds it from the session
+  id, `apps/desktop/src/store/connection-request.ts:494`) — the request event carries none, so the app uses the
+  card's update-borne owner, else `{type:"session", session_id: <live id>}`. Skip all = every target `skipped` with
+  no `settled_by` (settles `all_resolved`); Continue = `{targets:[], settled_by:"continue"}`; `approved` starts a
+  pending row's backend work (an MCP install with its `env`) or retries a failed/expired one. Errors [source]: an
+  invalid `result` → 4002 `invalid_answer`; no open operation for that owner + `op_id` → 4004 (the app toasts it —
+  after a reconnect to a new live session the turn that owned the operation has ended).
+  - [live] Skip all settled in 0.01 s; `tool.complete manage_connections` followed 0.58 s later with
+    `result {op_id, seq:3, settled_by:"all_resolved", targets[…state:"skipped"], status:"settled", note}`, then the
+    turn completed.
+- **RPC `connectors.operation.wake {owner, op_id}`** → `{status:"ok"}` [source]: the browser leg of a `connect_url`
+  came back, so the backend reads the account now instead of at its next watcher tick. The app sends it once per
+  opened link when the chat returns to the foreground (as the desktop does on `hermes://connections/done`), not
+  when the browser opens. [live] The same owner envelope is accepted; a wake after the operation settled →
+  `4004 {"reason":"UNKNOWN_OPERATION"}`, which the app ignores.
 
-### v0.9.0 — vision_analyze images (2026-10-21, from the 0.22.2 source)
+**Todo checklists**
 
-- **`vision_analyze` args carry `image_url`** (`tools/vision_tools.py`): an http(s) URL, a `data:` URL, or a path on
-  the server (absolute, `~/…`, or `file://…`). The tool result is text only (the image is not in it), so the app shows
-  the image from that arg on the tool row: http(s) by the reply-image rules (same origin loads, foreign waits for a
-  tap), `data:` decoded in place, a path through **`GET /api/media?path=<path>`** (bearer; not profile-scoped;
-  `hermes_cli/web_routers/files.py`) → `{"data_url": "data:image/<type>;base64,…"}`. Errors: `403` outside
-  `~/.hermes/{images,screenshots,cache}`, `404` missing, `413` over 25 MiB, `415` a suffix other than
+- **Event `todo.updated`** [source + live] `{todos[{id, content, status, parent?}], revision}`
+  (`tui_gateway/tool_progress.py`): the full snapshot after every `todo_list` (alias `todo`) call, sent regardless
+  of `display.tool_progress`. `status` ∈ pending | in_progress | completed | cancelled (the app reads anything else
+  as pending); `parent` names another entry's `id`; `revision` is monotonic (the app replaces its one "Tasks" card at
+  an equal or higher revision and ignores a lower one; `todos: []` at revision ≥ 1 clears the list). The todo tool's
+  `tool.complete` carries the same `todos` + `revision` at the payload's top level (it is emitted first); the
+  `summary` rollup exists only in `tool.complete.result.summary`.
+  - [live] `scripts/e2e_smoke.py` `todo_part`: "Create a two-item todo list with todo_list" → one `todo.updated`
+    with 2 entries (each with `id` and `status`) at `revision: 1` before `message.complete`.
+- **`todo_state {todos, revision}`** [source] is on every `session.resume` result (and `session.activate`) when the
+  session has a list (`_attach_todo_state`; omitted when it never had one — an empty list at revision 0 is not
+  sent; `session.create` carries none). There is no replay event: the app seeds the card from it (authoritative)
+  and keeps its own card through a transcript rebuild when a resume carries none. `TodoStore.restore` keeps the
+  revision, so revisions stay comparable across rebuilds.
+
+**vision_analyze images**
+
+- **`vision_analyze` args carry `image_url`** [source] (`tools/vision_tools.py`): an http(s) URL, a `data:` URL, or
+  a path on the server (absolute, `~/…`, or `file://…`). The tool result is text only, so the app shows the image
+  from that arg on the tool row (also for rows rebuilt from history, which carry `args`): http(s) by the
+  reply-image rules (same origin loads with the bearer and no redirects; a foreign host waits for a tap), `data:`
+  decoded in place (refused unread above 25 MiB), a path through **`GET /api/media?path=<path>`** (bearer; not
+  profile-scoped; `hermes_cli/web_routers/files.py`) → `{"data_url": "data:image/<type>;base64,…"}`. Errors: `403`
+  outside `~/.hermes/{images,screenshots,cache}`, `404` missing, `413` over 25 MiB, `415` a suffix other than
   png/jpg/jpeg/gif/webp/svg/bmp/ico, `400` an unresolvable path. The app treats every non-2xx (401 included, never a
-  re-login) as final for that path ("image unavailable"); a dropped connection is retried.
+  re-login) as final for that path ("image unavailable"); a dropped connection or 5xx offers tap to retry. A
+  relative path gets no thumbnail (the server would resolve it against its own cwd).
 
-### v0.9.0 — sends while a turn runs (2026-10-21, verified live against 0.22.2)
+**Sends while a turn runs**
 
-- **`prompt.submit {…, queued: true}`** while the session runs → `{status:"queued"}` with **no `user_row_id`**
-  (`tui_gateway/session_auto_continue.py` `_handle_busy_submit`). The server persists the user row at accept, holds
-  the prompt (with any images attached meanwhile) and runs it as its own turn after the live one
-  (`_drain_queued_prompt`): the live turn's `message.complete`, `session.info`, then **`message.start`** of the queued
-  turn, whose `message.complete.persisted_turn.user_row_id` is a fresh row (re-placed at the transcript end). Several
-  queued prompts run one per turn, in order. Without `queued` the server applies `display.busy_input_mode` (default
-  `interrupt` = redirect/kill the live turn), so the app always sends `queued: true` mid-turn (voice turns excepted).
-  A send that finds the session idle runs at once (`{status:"streaming", user_row_id}`). Stop (`session.interrupt`)
-  purges the queue: the turn ends with `message.complete {status:"interrupted"}`, the queued rows stay in the history
-  but never run (the app shows them "Not sent" with Retry; it does the same after an `error` turn end, whose effect on
-  the queue was not probed). "Mid-turn" includes a turn paused on an approval, question, masked prompt or connection.
-  A truncation mid-turn is still `4009`.
+- **`prompt.submit {…, queued: true}`** [live] while the session runs → `{status:"queued"}` with **no
+  `user_row_id`** (`tui_gateway/session_auto_continue.py` `_handle_busy_submit`). The server persists the user row at
+  accept, holds the prompt (with any images attached meanwhile) and runs it as its own turn after the live one
+  (`_drain_queued_prompt`): the live turn's `message.complete`, `session.info`, then **`message.start`** of the
+  queued turn, whose `message.complete.persisted_turn.user_row_id` is a fresh row (the accept-time row is re-placed
+  at the transcript end, `_replace_queued_user_row_for_turn`). Several queued prompts run one per turn, in order
+  [source]. Without `queued` the server applies `display.busy_input_mode` (default `interrupt` = redirect/kill the
+  live turn), so the app always sends `queued: true` mid-turn (voice turns excepted). "Mid-turn" includes a turn
+  paused on an approval, question, masked prompt or connection, and the gap between the live `message.complete` and
+  the queued turn's `message.start`. A send that finds the session idle runs at once (`{status:"streaming",
+  user_row_id}`).
+- **Stop purges the queue** [live]: `session.interrupt` → `{status:"interrupted"}`, the turn ends with
+  `message.complete {status:"interrupted"}`, and the queued prompt never runs — but its accept-time row **stays in
+  `session.history`** (user, user (queued), assistant). The app shows such sends "Not sent" with Retry. It does the
+  same after an `error` / `turn.error` turn end, whose effect on the server queue was **not probed**. A truncation
+  mid-turn is still `4009`.
 
-### v0.9.0 — interrupted tools and orphan notices (2026-10-21, from the 0.22.2 source)
+**Interrupted tools and orphan notices**
 
-- **A killed terminal command** completes normally: `tool.complete.result = {output: "<partial>\n[Command interrupted]",
-  exit_code: 130, error: null}`. The app shows it **Interrupted** (amber), not failed, with the partial output minus the
-  marker line; exit 130 without the marker stays a failure. A tool still running when the turn ends with
+- **A killed terminal command** [source] completes normally: `tool.complete.result = {output: "<partial>\n[Command
+  interrupted]", exit_code: 130, error: null}`. The app shows it **Interrupted** (amber), not failed, with the partial
+  output minus that final marker line; exit 130 without the marker as the last line (and the `[execution
+  interrupted]` / exit -1 variants) stays a failure. A tool of the live turn still running when it ends with
   `message.complete {status:"interrupted"}` (no `tool.complete` came) is Interrupted with no output. The turn-end
-  reasons (`interrupted_by_user`, `interrupted_during_api_call`) are not on the wire.
-- **Failure predicate** (unchanged, the union): failed ⇔ `result.error` truthy **or** `result.success == false` **or**
-  `result.exit_code` non-zero — except the interrupted shape above.
-- **Orphan-recovery notices** (`agent/replay_cleanup.py`): on resume Hermes rewrites an interrupted side-effecting
-  block's tool results (and answers a dangling side-effecting tail) with `[Orphan recovery: … its effect is UNKNOWN …]`
-  or, for a read-only call in that block, `[Orphan recovery: … read-only tool did not complete …]`. They are tool-row
-  results, and the history projection (`tui_gateway/session_history.py` `_history_to_messages`) forwards a tool row's
-  `content` only for `write_file`, `patch` and `skill_manage` — so for other tools (`terminal`…) the notice never
-  reaches a client. The app marks the tool row Interrupted with "May have partially run — check before retrying"
-  (UNKNOWN) or "Did not complete" (read-only); a notice arriving as a message of its own attaches to the last tool
-  of its turn, or shows as a small line when there is none.
+  reasons (`interrupted_by_user`, `interrupted_during_api_call`) are **not** on the wire.
+- **Failure predicate** (unchanged, the union): failed ⇔ `result.error` truthy (Python truthiness) **or**
+  `result.success == false` **or** `result.exit_code` non-zero — except the interrupted shape above.
+- **Orphan-recovery notices** [source] (`agent/replay_cleanup.py`): on resume Hermes rewrites an interrupted
+  side-effecting block's tool results (and answers a dangling side-effecting tail) with one of
+  `[Orphan recovery: interrupted side-effecting tool may have executed; its effect is UNKNOWN. Inspect state before
+  retrying.]`, `[Orphan recovery: interrupted read-only tool did not complete.]`, `[Orphan recovery: this tool may
+  have executed before Hermes stopped; …]`, `[Orphan recovery: this read-only tool did not complete and had no
+  effect.]`. Read-only-only blocks are dropped. They are tool-row results, and the history projection
+  (`tui_gateway/session_history.py` `_history_to_messages`) forwards a tool row's `content` only for `write_file`,
+  `patch` and `skill_manage` — so for other tools (`terminal`…) the notice never reaches a client (Hermes side). The
+  app marks such a tool row Interrupted with "May have partially run — check before retrying" (UNKNOWN wording) or
+  "Did not complete" (read-only). Only a tool row's `content` counts: a user or assistant message starting with
+  `[Orphan recovery:` is an ordinary bubble (Hermes writes the notices nowhere else).
+
+**Client-side only (no wire change)**
+
+- **Math in replies**: `$…$`, `$$…$$`, `\(…\)` and display `\[…\]` render through
+  `ru.noties:jlatexmath-android:0.2.0`. TeX is agent-controlled, so `MathSafety` refuses formulas over 2000 chars or
+  with commands that load files, define macros or change global library state (`\includegraphics`, `\input`,
+  `\newcommand`, `\def`, `\DeclareMathOperator`, `\definecolor`, …); those, and any formula that fails to parse,
+  show as inline code with the raw TeX (never a crash). Math is never spoken (`SpeechText` drops it).

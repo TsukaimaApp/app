@@ -150,3 +150,51 @@ bitmaps (refetch churn on image-heavy replies); an edit/regenerate failure resto
 drop an event that landed during the request; a problem report requested just before leaving Settings can open the
 share sheet on the next visit; server speech has no sentence prefetch (one round trip per sentence).
 
+
+## v0.9.0 (2026-10-21)
+
+From the user's session-testing report (`docs/superpowers/2026-10-21-e2e-gaps-report.md`), all eight closed:
+
+1. **`connection.request` not implemented** (connector tools hung ~5 min) — "Hermes wants to connect" card with
+   Connect (browser link + wake on return, or env fields) / Skip / Skip all / Continue, countdown, notification,
+   restored from `pending_connection`. Live probe: Skip all settled in 0.01 s, tool completed 0.58 s later.
+2. **`todo.updated` ignored** — "Tasks" checklist card, updated in place by revision, seeded from `todo_state` on
+   resume; the smoke's `todo_part` checks the event live.
+3. **LaTeX shown raw** — JLaTeXMath rendering (inline, display, table cells), safety gate, code fallback, never
+   spoken.
+4. **Task-list checkboxes** — `[ ]` / `[x]` items render as ☐ / ☑ with a state description.
+5. **Backslash escapes shown literally** — CommonMark escapes for ASCII punctuation.
+6. **`vision_analyze` image never shown** — thumbnail on the tool row via `/api/media` (paths), inline `data:` or
+   http(s) by the reply-image rules; tap to enlarge / load / retry.
+7. **No queueing while a turn runs** — sends mid-turn are `queued: true` ("Queued", "Send when done"); Stop and
+   error turn ends turn them into "Not sent" with Retry.
+8. **Interrupted tool looks like an error** — amber "Interrupted" with partial output; orphan-recovery notices
+   in a tool row's history result become a warning line on that tool.
+
+### Still open
+
+Device checks (only a phone can verify these):
+
+1. Connection card: a real connector (e.g. linear) — Connect opens the browser, coming back wakes the operation and
+   the row turns connected; an MCP target with required env fields (secret masked) approves; Skip all and Continue
+   settle; the notification appears with the chat off screen and clears on settle.
+2. Todo card: a multi-step task builds the checklist, statuses update in place, more than 6 rows fold done items,
+   the card survives a kill-and-reopen.
+3. LaTeX in the **release** APK (R8 keep rules were added on mapping evidence only): `$$\frac{1}{2}$$` and an inline
+   `$x^2$` render; `\input{/etc/passwd}` shows as code.
+4. vision_analyze thumbnails: a screenshot under `~/.hermes/screenshots` loads through `/api/media`; a foreign
+   http(s) image waits for a tap; tap to enlarge; airplane mode → "tap to retry" works.
+5. Queued send + Stop: a send mid-turn shows "Queued" and runs after the turn; Stop turns it "Not sent" and Retry
+   sends it; a send while an approval waits does not kill the turn.
+6. Interrupted rows: Stop during a long `terminal` command shows amber "Interrupted" with the partial output.
+
+Known gaps:
+
+- `display.suggested` (directory) connection cards render without rows; Continue settles them.
+- Orphan-recovery notices reach the client only for `write_file`, `patch` and `skill_manage` rows in history — the
+  Hermes history projection drops other tools' content (Hermes side; source reading, unprobed).
+- Error-turn queue behaviour is unprobed: the app marks queued sends "Not sent" after an `error` turn end without
+  knowing whether the server kept its queue (a Retry could then send twice).
+- `$HOME/$USER` in prose (outside backticks) reads as math.
+- TalkBack reads raw TeX (the formula image's description is its source).
+- No Robolectric UI test for the connection card (reducer, VM and RPC paths are unit-tested).

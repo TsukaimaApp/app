@@ -1,7 +1,7 @@
 """Tsukaima e2e smoke: login, REST contract (the app's exact GETs), WS session, one prompt,
 config.set model round trip (same model, session scope), session detail `archived` flag,
 file.attach + /api/files/download round trip, cron create/list/delete, session cleanup, STT and TTS relays,
-pdf.attach."""
+pdf.attach, todo.updated from the todo_list tool."""
 import asyncio, base64, contextlib, http.cookiejar, json, os, sys, time, urllib.error, urllib.parse, urllib.request
 
 BASE = os.environ["HERMES_TEST_URL"].rstrip("/")
@@ -252,8 +252,9 @@ def minimal_pdf():
 
 
 @contextlib.asynccontextmanager
-async def ws_rpc(token):
-    """A WS connection with a reader task; yields `rpc(method, params)`. Server requests are denied like ws_part."""
+async def ws_rpc(token, on_event=None):
+    """A WS connection with a reader task; yields `rpc(method, params)`. Server requests are denied like ws_part;
+    each `event` frame's params (`{type, session_id, payload}`) go to `on_event` when given."""
     import websockets
     ticket = http_json("POST", "/api/auth/ws-ticket", token=token)["ticket"]
     url = BASE.replace("http", "ws", 1) + "/api/ws?ticket=" + ticket
@@ -267,7 +268,10 @@ async def ws_rpc(token):
                     m = json.loads(line)
                     if "id" in m and m["id"] in pending and "method" not in m:
                         pending.pop(m["id"]).set_result(m)
-                    elif "method" in m and "id" in m and m["method"] != "event":
+                    elif m.get("method") == "event":
+                        if on_event:
+                            on_event(m.get("params") or {})
+                    elif "method" in m and "id" in m:
                         await ws.send(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": {"choice": "deny"}}))
 
         async def rpc(method, params=None, check=True):
@@ -322,6 +326,56 @@ async def pdf_attach_part(token):
                 print(f"warn: session cleanup failed: {e!r}", file=sys.stderr)
 
 
+async def todo_part(token):
+    """Todo checklists: ask the agent to call todo_list and expect a `todo.updated` full snapshot (`todos` list,
+    integer `revision >= 1`) before the turn completes. The model may not call the tool, so no event within the
+    turn prints a skip line instead of failing."""
+    loop = asyncio.get_running_loop()
+    updates, complete = [], loop.create_future()
+    sid = None
+
+    def on_event(p):
+        if p.get("session_id") != sid:
+            return
+        if p.get("type") == "todo.updated":
+            updates.append(p.get("payload") or {})
+        elif p.get("type") == "message.complete" and not complete.done():
+            complete.set_result(p.get("payload") or {})
+
+    async with ws_rpc(token, on_event) as rpc:
+        await rpc("client.capabilities", {"server_requests": True})
+        r = await rpc("session.create", {"source": "tsukaima-smoke"})
+        sid, stored = r["session_id"], r["stored_session_id"]
+        try:
+            await rpc("prompt.submit", {"session_id": sid, "text": "Create a two-item todo list with todo_list "
+                                        "(items: 'smoke one', 'smoke two'), then reply with exactly: done"})
+            await asyncio.wait_for(complete, TIMEOUT)
+            if not updates:
+                print("skip todo.updated (no todo_list call within the turn)", flush=True)
+                return
+            last = updates[-1]
+            todos, rev = last.get("todos"), last.get("revision")
+            if not isinstance(todos, list) or not isinstance(rev, int) or isinstance(rev, bool) or rev < 1:
+                fail(f"todo.updated: unexpected shape keys={sorted(last)} revision={rev!r} "
+                     f"todos={type(todos).__name__}")
+            if not all(isinstance(t, dict) and t.get("id") and t.get("status") for t in todos):
+                fail(f"todo.updated: entries lack id/status ({len(todos)} entries)")
+            step(f"todo.updated ({len(todos)} items, revision={rev}, {len(updates)} event(s))")
+        finally:
+            try:
+                await rpc("session.close", {"session_id": sid})
+                d = await rpc("session.delete", {"session_id": stored}, check=False)
+                err = d.get("error")
+                if err is None:
+                    step("session.delete (todo)")
+                elif err.get("code") == 4007:
+                    step("session cleanup (todo; never stored)")
+                else:
+                    print(f"warn: session.delete failed: {err!r}", file=sys.stderr)
+            except Exception as e:  # noqa: BLE001
+                print(f"warn: session cleanup failed: {e!r}", file=sys.stderr)
+
+
 def cron_part(token):
     name = f"tsukaima-smoke-{int(time.time())}"
     job = http_json("POST", "/api/cron/jobs", {"name": name, "schedule": "0 4 * * *",
@@ -348,6 +402,7 @@ def main():
     transcribe_part(token)
     speak_part(token)
     asyncio.run(pdf_attach_part(token))
+    asyncio.run(todo_part(token))
     print("PASS")
 
 
