@@ -38,7 +38,6 @@ import app.tsukaima.domain.chat.ConnectionAnswers
 import app.tsukaima.domain.chat.SideKind
 import app.tsukaima.domain.chat.ThinkingFlair
 import app.tsukaima.domain.chat.queuesSends
-import app.tsukaima.domain.chat.turnLive
 import app.tsukaima.domain.voice.VoiceLanguages
 import app.tsukaima.domain.voice.VoiceMode
 
@@ -92,7 +91,7 @@ class ChatViewModel(
     private val sync = ChatReconnector(
         session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), storedSessionId, flair, _state,
         onRebuilt = { before, liveChanged ->
-            restorePurgedSends(before)
+            restorePurgedSends(before, rowsKept = false) // a resume retires never-drained queue rows
             restoreFailedSends()
             voice.rebased(before)
             if (liveChanged) edits.onLiveChanged()
@@ -358,20 +357,19 @@ class ChatViewModel(
             val before = chat.items
             if (chat.liveSessionId != live) return@attempt
             setChat { it.copy(items = ChatReducer.fromHistory(messages)) }
-            restorePurgedSends(before)
+            restorePurgedSends(before, rowsKept = true)
             restoreFailedSends()
         }
     }
 
     /**
-     * A rebuilt transcript shows a send Stop purged as a plain history row: it is marked Not sent again, on that row or
-     * at the end ([ChatReducer.withPurged]), and its Retry / Dismiss data follows it to the row's id. [before] is the
-     * transcript the rebuild replaced.
+     * A rebuilt transcript keeps the sends Stop purged as Not sent ([ChatReducer.withPurged]): on their own history
+     * row when the history read keeps it ([rowsKept]: a same-live reload; a resume retires it), else at the end. Retry /
+     * Dismiss data follows an echo to the row's id. [before] is the transcript the rebuild replaced.
      */
-    private fun restorePurgedSends(before: List<ChatItem>) {
-        val purged = before.filterIsInstance<ChatItem.UserMessage>().filter { it.failed && it.id in queuedSends }
-        if (purged.isEmpty()) return
-        val (items, ids) = ChatReducer.withPurged(chat.items, purged)
+    private fun restorePurgedSends(before: List<ChatItem>, rowsKept: Boolean) {
+        if (before.none { it is ChatItem.UserMessage && it.failed && it.id in queuedSends }) return
+        val (items, ids) = ChatReducer.withPurged(chat.items, before, queuedSends.keys, rowsKept)
         for ((old, new) in ids) queuedSends.remove(old)?.let { queuedSends[new] = it }
         setChat { it.copy(items = items) }
     }
@@ -459,10 +457,7 @@ class ChatViewModel(
      * Stop: interrupts the running turn (`session.interrupt`). The turn then ends with the server's own
      * `message.complete` / `error`, which returns the status line (and the send button) to idle. Stop also purges the
      * server's queue, so that turn end fails the queued sends ([ChatReducer.onStopRequested]). The mark is set before
-     * the call (the turn end may beat its answer) and only ever taken back after it: with nothing to stop, when the
-     * call fails, or when no turn is live any more as the answer lands (that turn end already came and cleared it, or
-     * the tap raced the turn's end) — no turn end follows to clear it, and a later turn's end must not purge.
-     * While offline the mark stays: a reconnect to the same live session replays the turn end, a new one clears it.
+     * the call (the turn end may beat its answer); the answer only ever takes it back ([ChatReducer.onStopAck]).
      */
     fun interrupt() {
         _state.update { it.copy(menu = null) }
@@ -473,10 +468,7 @@ class ChatViewModel(
             attempt("Couldn’t stop the agent") {
                 if (session.interrupt(live) == NOT_INTERRUPTED) backend.toast("Nothing to stop") else stopped = true
             }
-            setChat {
-                val pending = stopped && (it.status.turnLive || it.status == AgentStatus.Offline)
-                if (pending) it else ChatReducer.onStopRequested(it, false)
-            }
+            setChat { ChatReducer.onStopAck(it, stopped, live) }
         }
     }
 

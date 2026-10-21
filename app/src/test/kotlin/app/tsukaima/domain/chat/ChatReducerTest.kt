@@ -1032,27 +1032,78 @@ class ChatReducerTest {
     }
 
     @Test
-    fun purgedEchoMarksItsUnansweredHistoryTwin() {
+    fun purgedEchoMatchesItsAcceptRowOnASameLiveReload() {
+        // Before: the stopped turn ("first", row 3) streamed output; "later" was queued and purged by Stop.
         val purged = ChatItem.UserMessage("u-l3", "later", listOf("notes.txt"), promptText = "@file:notes.txt\n\nlater", failed = true)
+        val before = listOf(
+            ChatItem.UserMessage("h-1", "later", rowId = 1),
+            ChatItem.AssistantMessage("h-2", "ok", streaming = false, reasoning = null, rowId = 2),
+            ChatItem.UserMessage("u-l2", "first", rowId = 3),
+            ChatItem.AssistantMessage("a-5", "partial", streaming = false, reasoning = null),
+            purged,
+        )
+        // Hermes wrote the queued row at accept time, before the stopped turn's assistant rows.
         val history = listOf(
-            ChatItem.UserMessage("h-1", "later", rowId = 1), // the same text, but answered: not the twin
+            ChatItem.UserMessage("h-1", "later", rowId = 1), // the same text, before the anchor: not the twin
             ChatItem.AssistantMessage("h-2", "ok", streaming = false, reasoning = null, rowId = 2),
             ChatItem.UserMessage("h-3", "first", rowId = 3),
             ChatItem.UserMessage("h-4", "@file:notes.txt\n\nlater", rowId = 4),
+            ChatItem.AssistantMessage("h-5", "partial", streaming = false, reasoning = null, rowId = 5),
         )
-        val (items, ids) = ChatReducer.withPurged(history, listOf(purged))
-        assertEquals(listOf("h-1", "h-2", "h-3", "h-4"), items.map { it.id })
-        val twin = items.last() as ChatItem.UserMessage
-        assertTrue("Not sent, on the history row", twin.failed)
+        val (items, ids) = ChatReducer.withPurged(history, before, setOf("u-l3"), rowsKept = true)
+        assertEquals(listOf("h-1", "h-2", "h-3", "h-4", "h-5"), items.map { it.id })
+        val twin = items[3] as ChatItem.UserMessage
+        assertTrue("Not sent, on its own history row", twin.failed)
         assertEquals("later", twin.text)
         assertEquals(listOf("notes.txt"), twin.attachments)
+        assertFalse((items[0] as ChatItem.UserMessage).failed)
         assertEquals(mapOf("u-l3" to "h-4"), ids)
 
-        // No unanswered twin: the echo is carried over at the end.
-        val answered = history.dropLast(1) + ChatItem.AssistantMessage("h-5", "x", streaming = false, reasoning = null, rowId = 5)
-        val (kept, keptIds) = ChatReducer.withPurged(answered, listOf(purged))
-        assertEquals(purged, kept.last())
-        assertEquals(emptyMap<String, String>(), keptIds)
+        // No twin after the anchor, or no anchor row in the history: the echo is carried over at the end.
+        val noTwin = history.filterNot { it.id == "h-4" }
+        assertEquals(purged, ChatReducer.withPurged(noTwin, before, setOf("u-l3"), rowsKept = true).first.last())
+        val noAnchor = history.filterNot { it.id == "h-3" }
+        val (carried, none) = ChatReducer.withPurged(noAnchor, before, setOf("u-l3"), rowsKept = true)
+        assertEquals(purged, carried.last())
+        assertEquals(emptyMap<String, String>(), none)
+    }
+
+    @Test
+    fun purgedEchoNeverMatchesAfterAResume() {
+        // A resume retired the never-drained row: a same-text row is another, real message ("continue" sent again).
+        val purged = ChatItem.UserMessage("u-l2", "continue", failed = true)
+        val before = listOf(ChatItem.UserMessage("u-l1", "continue", rowId = 1), purged)
+        val history = listOf(ChatItem.UserMessage("h-1", "continue", rowId = 1), ChatItem.UserMessage("h-2", "continue", rowId = 2))
+        val (items, ids) = ChatReducer.withPurged(history, before, setOf("u-l2"), rowsKept = false)
+        assertEquals(listOf("h-1", "h-2", "u-l2"), items.map { it.id })
+        assertTrue(items.take(2).none { (it as ChatItem.UserMessage).failed })
+        assertEquals(emptyMap<String, String>(), ids)
+    }
+
+    @Test
+    fun stopAckKeepsTheFlagOnlyWhileATurnEndIsToCome() {
+        val stopping = live.copy(stopRequested = true)
+        fun ack(s: ChatState, stopped: Boolean = true, id: String = sid) = ChatReducer.onStopAck(s, stopped, id).stopRequested
+        assertTrue("a turn is live", ack(stopping.copy(status = AgentStatus.Replying)))
+        assertTrue("offline: a same-live reconnect replays the end", ack(stopping.copy(status = AgentStatus.Offline)))
+        assertTrue("a queued turn is next", ack(stopping.copy(queuedTurnNext = true)))
+        assertTrue("a queued echo waits", ack(stopping.copy(items = listOf(ChatItem.UserMessage("u-l1", "x", queued = true)))))
+        assertFalse("the turn already ended", ack(stopping))
+        assertFalse("the call failed", ack(stopping.copy(status = AgentStatus.Replying), stopped = false))
+        assertTrue("an answer for another live session is ignored", ack(stopping, id = "beef0001"))
+        assertFalse(ChatReducer.onStopAck(live, true, sid).stopRequested)
+    }
+
+    @Test
+    fun aTurnEndWithNoMatchingUserRowBindsNothing() {
+        val s = live.copy(
+            items = listOf(
+                ChatItem.UserMessage("u-l1", "first", rowId = 3),
+                ChatItem.AssistantMessage("a-1", "one", streaming = false, reasoning = null),
+            ),
+        ).feed(ev("message.complete", """{"text":"","persisted_turn":{"user_row_id":9,"final_assistant_row_id":10}}""", seq = 1))
+        assertEquals(3L, (s.items[0] as ChatItem.UserMessage).rowId)
+        assertNull((s.items[1] as ChatItem.AssistantMessage).rowId)
     }
 
     @Test

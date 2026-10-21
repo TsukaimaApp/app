@@ -342,28 +342,34 @@ object ChatReducer {
     }
 
     /**
-     * A transcript rebuilt from history ([rebuilt]) keeps the "Not sent" mark of the queued sends Stop purged
-     * ([purged], in transcript order). Hermes keeps a purged message's user row in history, unanswered. Matching rule:
-     * an echo takes the last user row (not yet taken) whose text is the echo's (its shown or its submitted text) and
-     * that has no reply below it (no assistant message or tool row after it); that row becomes the failed bubble,
-     * keeping its id, with the echo's attachments. An echo with no such row is appended at the end as it was.
+     * A transcript rebuilt from history ([rebuilt]) keeps the "Not sent" mark of the queued sends Stop purged: the
+     * failed echoes of [before] (the transcript it replaced) whose ids are in [purgedIds], in transcript order.
+     *
+     * Only a history read that keeps the purged row ([rowsKept]: a same-live `session.history`) may match one. A resume
+     * retires never-drained queue rows (Hermes `retire_undrained_queue_rows`), so after it a same-text row is another,
+     * real message: every echo is appended at the end as it was. Matching rule when rows are kept: Hermes writes a
+     * queued message's row at accept time, before the stopped turn's assistant rows, so the anchor is the stopped
+     * turn's user row — the last sent user message above the echo in [before] that has a row id. The echo takes the
+     * first user row after that anchor (not yet taken) whose text is the echo's shown or submitted text; that row
+     * becomes the failed bubble, keeping its id, with the echo's attachments. No anchor or no such row: appended.
      * Returns the items and, for each echo that took a history row, its old id → the row's id.
      */
-    fun withPurged(rebuilt: List<ChatItem>, purged: List<ChatItem.UserMessage>): Pair<List<ChatItem>, Map<String, String>> {
-        if (purged.isEmpty()) return rebuilt to emptyMap()
+    fun withPurged(
+        rebuilt: List<ChatItem>,
+        before: List<ChatItem>,
+        purgedIds: Set<String>,
+        rowsKept: Boolean,
+    ): Pair<List<ChatItem>, Map<String, String>> {
         val items = rebuilt.toMutableList()
-        val lastReply = items.indexOfLast { it is ChatItem.AssistantMessage || it is ChatItem.ToolCall }
         val ids = mutableMapOf<String, String>()
         val appended = mutableListOf<ChatItem>()
-        for (echo in purged) {
-            val index = items.indices.lastOrNull { i ->
-                val row = items[i]
-                i > lastReply && row is ChatItem.UserMessage && !row.failed && !row.queued && row.id !in ids.values &&
-                    (row.text == echo.text || row.text == echo.promptText)
-            }
+        before.forEachIndexed { at, item ->
+            val echo = item as? ChatItem.UserMessage ?: return@forEachIndexed
+            if (!echo.failed || echo.id !in purgedIds) return@forEachIndexed
+            val index = if (rowsKept) purgedTwin(items, echo, stoppedTurnRow(before, at), ids.values) else null
             if (index == null) {
                 if (items.none { it.id == echo.id }) appended += echo
-                continue
+                return@forEachIndexed
             }
             val row = items[index] as ChatItem.UserMessage
             items[index] = row.copy(
@@ -373,6 +379,39 @@ object ChatReducer {
             ids[echo.id] = row.id
         }
         return (items + appended) to ids
+    }
+
+    /** The row id of the last sent user message above [before]`[at]`: the turn Stop ended. */
+    private fun stoppedTurnRow(before: List<ChatItem>, at: Int): Long? =
+        before.subList(0, at).lastOrNull { it.isSent() && (it as ChatItem.UserMessage).rowId != null }
+            ?.let { (it as ChatItem.UserMessage).rowId }
+
+    /** Index in [items] of the first untaken user row after the [anchor] row with [echo]'s text; see [withPurged]. */
+    private fun purgedTwin(items: List<ChatItem>, echo: ChatItem.UserMessage, anchor: Long?, taken: Collection<String>): Int? {
+        if (anchor == null) return null
+        val from = items.indexOfFirst { it is ChatItem.UserMessage && it.rowId == anchor }
+        if (from < 0) return null
+        return (from + 1 until items.size).firstOrNull { i ->
+            val row = items[i]
+            row.isSent() && row.id !in taken && (row as ChatItem.UserMessage).let { it.text == echo.text || it.text == echo.promptText }
+        }
+    }
+
+    /** A user message that went to the server: neither waiting in the queue nor failed. */
+    private fun ChatItem.isSent(): Boolean = this is ChatItem.UserMessage && !queued && !failed
+
+    /**
+     * The answer to the app's Stop ([stopped]: the server took it) for live session [liveId]. The mark stays only while
+     * a turn end is still to come: a turn is live, a queued message waits to run (its turn's end consumes it), or the
+     * chat is offline (a same-live reconnect replays the end; a new live id clears it in [onSessionBound]). Otherwise
+     * (nothing to stop, the call failed, or the turn already ended) it is cleared: no later turn's end may purge. An
+     * answer for another live session than the bound one changes nothing.
+     */
+    fun onStopAck(state: ChatState, stopped: Boolean, liveId: String): ChatState {
+        if (state.liveSessionId != liveId) return state
+        val endToCome = state.status.turnLive || state.status == AgentStatus.Offline || state.queuedTurnNext ||
+            state.items.any { it is ChatItem.UserMessage && it.queued }
+        return if (stopped && endToCome) state else onStopRequested(state, false)
     }
 
     /** The app sent Stop ([requested]), or it turned out there was nothing to stop: see [afterTurnEnd]. */
@@ -620,29 +659,34 @@ object ChatReducer {
     }
 
     /**
-     * `message.complete.persisted_turn`: the turn's committed rows. The turn's user message is the last sent one
-     * (neither queued nor failed) that has no row yet or already has `user_row_id` (else simply the last sent one): a
-     * later send that ran at once and bound its own row before this end arrived is not it. `user_row_id` goes to that
-     * message when it has none yet; `final_assistant_row_id` to the last assistant message between it and the next
-     * sent user message (the reply of this turn by its own position, never an older one when the turn ended without
-     * text). They let a live turn be edited or regenerated without reloading the history.
+     * `message.complete.persisted_turn`: the turn's committed rows. The turn's user message is the sent one (neither
+     * queued nor failed) that already has `user_row_id`, else the last sent one with no row yet; with neither nothing
+     * is bound (a later send that ran at once and bound its own row before this end arrived is never taken for it).
+     * `user_row_id` goes to that message when it has none yet; `final_assistant_row_id` to the last assistant message
+     * between it and the next sent user message (the reply of this turn by its own position, never an older one when
+     * the turn ended without text). They let a live turn be edited or regenerated without reloading the history.
      */
     private fun withPersistedTurn(s: ChatState, turn: JsonObject?): ChatState {
         if (turn == null) return s
         fun long(key: String) = (turn[key] as? JsonPrimitive)?.longOrNull
-        fun ChatItem.sent() = this is ChatItem.UserMessage && !queued && !failed
         val items = s.items.toMutableList()
         val userRow = long("user_row_id")
-        fun ChatItem.mayBe(row: Long?) = sent() && (row == null || (this as ChatItem.UserMessage).rowId.let { it == null || it == row })
-        val userIndex = items.indexOfLast { it.mayBe(userRow) }.takeIf { it >= 0 } ?: items.indexOfLast { it.sent() }
-        val user = items.getOrNull(userIndex) as? ChatItem.UserMessage
-        if (user != null && userRow != null && user.rowId == null) items[userIndex] = user.copy(rowId = userRow)
-        val nextUser = (userIndex + 1 until items.size).firstOrNull { items[it].sent() } ?: items.size
+        val userIndex = turnUserIndex(items, userRow) ?: return s
+        val user = items[userIndex] as ChatItem.UserMessage
+        if (userRow != null && user.rowId == null) items[userIndex] = user.copy(rowId = userRow)
+        val nextUser = (userIndex + 1 until items.size).firstOrNull { items[it].isSent() } ?: items.size
         val replyIndex = (userIndex + 1 until nextUser).lastOrNull { items[it] is ChatItem.AssistantMessage }
         val reply = replyIndex?.let { items[it] as ChatItem.AssistantMessage }
         val replyRow = long("final_assistant_row_id")
         if (reply != null && replyRow != null && !reply.streaming) items[replyIndex] = reply.copy(rowId = replyRow)
         return if (items == s.items) s else s.copy(items = items)
+    }
+
+    /** The index of the turn's user message for [withPersistedTurn]: the sent one with [userRow], else the last unbound one. */
+    private fun turnUserIndex(items: List<ChatItem>, userRow: Long?): Int? {
+        fun rowOf(i: Int) = (items[i] as ChatItem.UserMessage).rowId
+        val sent = items.indices.filter { items[it].isSent() }
+        return (if (userRow != null) sent.lastOrNull { rowOf(it) == userRow } else null) ?: sent.lastOrNull { rowOf(it) == null }
     }
 
     /** `args.image_url` of a `vision_analyze` call (the image it looked at), kept as sent; null for any other tool. */

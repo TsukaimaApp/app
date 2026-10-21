@@ -466,13 +466,12 @@ class ChatViewModelTest {
         advanceUntilIdle()
         assertTrue((vm.state.value.chat.items.last() as ChatItem.UserMessage).failed)
 
-        // The live session expired: the rebuilt history holds the purged message's row, never answered.
+        // The live session expired: the resume retired the never-drained row, so the history lacks it.
         b.transport.on(
             "session.resume",
             obj(
                 """{"session_id":"beef0001","stored_session_id":"$stored","running":false,"messages":[
-                  {"role":"user","text":"first","row_id":1},
-                  {"role":"user","text":"second","row_id":2}
+                  {"role":"user","text":"first","row_id":1}
                 ]}""",
             ),
         )
@@ -497,6 +496,108 @@ class ChatViewModelTest {
         val retried = vm.state.value.chat.items.first { it.id == notSent.id } as ChatItem.UserMessage
         assertFalse(retried.failed)
         assertEquals(3L, retried.rowId)
+    }
+
+    @Test
+    fun aRunningSameTextMessageStaysSentAfterARebuild() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":1}"""), obj("""{"status":"queued"}"""))
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("continue")
+        vm.send()
+        b.events.emit(ev("message.start", 1))
+        advanceUntilIdle()
+        vm.setInput("continue") // the same text, queued behind it
+        vm.send()
+        advanceUntilIdle()
+        b.transport.on("session.interrupt", obj("""{"status":"interrupted"}"""))
+        vm.interrupt()
+        advanceUntilIdle()
+        b.events.emit(ev("message.complete", 2, """{"text":"","status":"interrupted"}"""))
+        advanceUntilIdle()
+        val notSent = vm.state.value.chat.items.last() as ChatItem.UserMessage
+        assertTrue(notSent.failed)
+
+        // Another "continue" was sent from elsewhere and runs; the purged row was retired by the resume.
+        b.transport.on(
+            "session.resume",
+            obj(
+                """{"session_id":"beef0001","stored_session_id":"$stored","running":true,"messages":[
+                  {"role":"user","text":"continue","row_id":1},
+                  {"role":"user","text":"continue","row_id":5}
+                ]}""",
+            ),
+        )
+        b.transport.on("session.events.since", obj("""{"events":[],"latest_seq":0,"truncated":false,"open_requests":[]}"""))
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+
+        val users = vm.state.value.chat.items.filterIsInstance<ChatItem.UserMessage>()
+        assertEquals(listOf("h-1", "h-5", notSent.id), users.map { it.id })
+        assertEquals("the running row stays sent", listOf(false, false, true), users.map { it.failed })
+    }
+
+    @Test
+    fun aStaleStopAckKeepsTheFlagWhileAQueuedTurnIsNext() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":1}"""), obj("""{"status":"queued"}"""))
+            transport.on("session.interrupt", obj("""{"status":"interrupted"}"""))
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("first")
+        vm.send()
+        b.events.emit(ev("message.start", 1))
+        advanceUntilIdle()
+        for (text in listOf("b", "c")) {
+            vm.setInput(text)
+            vm.send()
+            advanceUntilIdle()
+        }
+        // The live turn ends on its own; Stop is tapped (and answered) before B's turn starts.
+        b.events.emit(ev("message.complete", 2, """{"text":"one"}"""))
+        advanceUntilIdle()
+        vm.interrupt()
+        advanceUntilIdle()
+        assertTrue("B's turn end is still to come", vm.state.value.chat.stopRequested)
+        b.events.emit(ev("message.start", 3))
+        b.events.emit(ev("message.complete", 4, """{"text":"","status":"interrupted"}"""))
+        advanceUntilIdle()
+        fun echo(text: String) = vm.state.value.chat.items.first { it is ChatItem.UserMessage && it.text == text } as ChatItem.UserMessage
+        assertFalse("B ran", echo("b").failed)
+        assertTrue("C was purged", echo("c").failed)
+        assertFalse(vm.state.value.chat.stopRequested)
+    }
+
+    @Test
+    fun aStopAckForAnOldLiveSessionIsIgnored() = runTest(dispatcher) {
+        val b = backend()
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.events.emit(ev("message.start", 1))
+        advanceUntilIdle()
+        val ack = CompletableDeferred<Unit>()
+        b.transport.gateNext["session.interrupt"] = ack
+        // The gated (first) call reads its answer last: the second Stop's call, not gated, takes "interrupted" first.
+        b.transport.on("session.interrupt", obj("""{"status":"interrupted"}"""), obj("""{"status":"not_interrupted"}"""))
+        vm.interrupt()
+        advanceUntilIdle()
+        // The session is replaced meanwhile and a new Stop is pending there.
+        b.transport.on("session.resume", obj(resumeJson.replace(live, "beef0001").replace("\"running\":false", "\"running\":true")))
+        b.transport.on("session.events.since", obj("""{"events":[],"latest_seq":0,"truncated":false,"open_requests":[]}"""))
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+        assertEquals("beef0001", vm.state.value.chat.liveSessionId)
+        vm.interrupt()
+        ack.complete(Unit)
+        advanceUntilIdle()
+        assertTrue("the old session's answer leaves the new Stop alone", vm.state.value.chat.stopRequested)
     }
 
     @Test
