@@ -91,7 +91,7 @@
 <dl>
 <div class="sm-row"><dt>Server URL</dt><dd>https://hermes.your-tailnet.ts.net</dd></div>
 <div class="sm-row"><dt>Username</dt><dd>you</dd></div>
-<div class="sm-row"><dt>Password</dt><dd>••••••••</dd></div>
+<div class="sm-row"><dt>Password</dt><dd><span aria-hidden="true">••••••••</span><span class="vh">hidden password</span></dd></div>
 </dl>
 <p class="sm-result"><span class="sm-dot"></span>Connected · Hermes 0.22.2</p>
 </div>
@@ -110,7 +110,7 @@
 <h2>Questions people ask.</h2>
 <div class="faq">
 <details><summary>Does it work without a Hermes instance?</summary><p>No. Tsukaima is a client, not an agent. It needs a running Hermes Agent to connect to — on a home server, a VPS, or your laptop.</p></details>
-<details><summary>Can I reach it from outside my network?</summary><p>Yes, however you'd reach Hermes itself: Tailscale, WireGuard, a reverse proxy with TLS. Plain http is only allowed for LAN and tailnet addresses; anything else needs https.</p></details>
+<details><summary>Can I reach it from outside my network?</summary><p>Yes, however you'd reach Hermes itself: Tailscale, WireGuard, a reverse proxy with TLS. Plain http is allowed only for local and private hosts — loopback, LAN, tailnet and single-label names; anything else needs https.</p></details>
 <details><summary>Is anything sent to Nous or to the Tsukaima author?</summary><p>No. Tsukaima has no telemetry and no service of its own; the app talks to your Hermes. Images from other hosts load only when you tap them, and voice on the phone uses Android's own speech services.</p></details>
 <details><summary>Which tool calls need approval?</summary><p>Whichever ones your Hermes asks about; its own settings decide. Tsukaima surfaces every one of those as an approval card; it doesn't decide for you.</p></details>
 <details><summary>Will there be an iOS version?</summary><p>Not planned. Tsukaima is Android-first and leans on Material 3.</p></details>

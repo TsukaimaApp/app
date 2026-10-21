@@ -58,9 +58,12 @@ function decodeEntities(s) {
 // ---- external hosts -------------------------------------------------------------------------------------------
 
 function checkUrls(file, text, isHtml = false) {
+  // For the exemption below, script/style/template bodies and comments are blanked (same length, so indexes hold):
+  // a placeholder host there is never element text.
+  const textOnly = isHtml ? blankNonText(text) : null;
   // Absolute http(s) URLs anywhere in the file, including ones nested in another scheme (obtainium://add/https://…).
   for (const m of text.matchAll(/https?:\/\/[^\s"'<>()`\\]+/gi)) {
-    if (isHtml && isExampleText(text, m.index, m[0])) continue;
+    if (isHtml && isExampleText(textOnly, m.index, m[0])) continue;
     checkHttpUrl(file, m[0]);
   }
   // Scheme-relative URLs in attributes and CSS url().
@@ -69,15 +72,22 @@ function checkUrls(file, text, isHtml = false) {
   }
 }
 
-// True when the URL's host is a listed placeholder and the match sits in element text, outside any tag or comment.
-function isExampleText(html, index, raw) {
+// Blanks comments and <script>/<style>/<template> bodies with spaces of the same length (the same elements
+// checkRequired strips), keeping every other character at its index.
+function blankNonText(html) {
+  const blank = (m) => m.replace(/[^\n]/g, ' ');
+  return html.replace(/<!--[\s\S]*?-->/g, blank).replace(/<(script|style|template)\b[\s\S]*?<\/\1\s*>/gi, blank);
+}
+
+// True when the URL's host is a listed placeholder and the match sits in element text: not blanked away by
+// blankNonText (comment, script, style, template) and not inside a tag.
+function isExampleText(textOnly, index, raw) {
   let host;
   try { host = new URL(raw.replace(/[.,;:]+$/, '')).hostname.toLowerCase(); } catch { return false; }
   if (!EXAMPLE_TEXT_HOSTS.has(host)) return false;
-  const before = html.slice(0, index);
-  const inTag = before.lastIndexOf('<') > before.lastIndexOf('>');
-  const inComment = before.lastIndexOf('<!--') > before.lastIndexOf('-->');
-  return !inTag && !inComment;
+  if (textOnly.slice(index, index + raw.length) !== raw) return false;
+  const before = textOnly.slice(0, index);
+  return before.lastIndexOf('<') <= before.lastIndexOf('>');
 }
 
 function checkHttpUrl(file, raw) {

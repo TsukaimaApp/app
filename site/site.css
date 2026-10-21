@@ -82,7 +82,7 @@ h2{font:var(--type-title);font-size:30px;margin:0 0 14px;text-wrap:pretty}
 .label{font:var(--type-label);letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:12px}
 section{padding:72px 0}
 footer{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;padding:28px 0 40px;font:var(--type-caption);color:var(--text-tertiary)}
-@media (max-width:860px){.hero{grid-template-columns:1fr}h1{font-size:40px}.links{display:none}section{padding:56px 0}}
+@media (max-width:860px){.hero{grid-template-columns:1fr}h1{font-size:40px}.links a:not(:last-child){display:none}section{padding:56px 0}}
 @media (prefers-reduced-motion:reduce){.dot{animation:none}}
 
 /* ---- page ---- */
@@ -129,6 +129,7 @@ footer{display:flex;justify-content:space-between;align-items:center;gap:16px;fl
 .sm-row{background:var(--surface-sunken);border-radius:var(--radius-input);padding:10px 14px}
 .sm-row dt{font:var(--type-caption);color:var(--text-secondary);margin-bottom:2px}
 .sm-row dd{margin:0;font:var(--type-code);color:var(--text-body);overflow-wrap:anywhere}
+.vh{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 .sm-result{display:flex;align-items:center;gap:8px;margin:16px 0 0;font:var(--type-status);color:var(--text-secondary)}
 .sm-dot{flex-shrink:0;width:7px;height:7px;border-radius:99px;background:var(--status-ok)}
 
@@ -152,7 +153,6 @@ details p{margin:10px 0 0;color:var(--text-secondary);text-wrap:pretty}
 .final .fine{align-items:center}
 
 @media (max-width:860px){
-  .links{display:flex}.links a:not(:last-child){display:none}
   .self,.feat,.feat.r{grid-template-columns:1fr}.feat{gap:32px}.feat.r .copy{order:0}
   .phone{width:min(300px,100%)}
   .quiet{flex-direction:column;align-items:flex-start}
