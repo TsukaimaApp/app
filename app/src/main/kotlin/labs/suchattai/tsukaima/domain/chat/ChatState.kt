@@ -287,6 +287,11 @@ data class ChatState(
     val reasoningOpen: Map<String, Boolean> = emptyMap(),
     /** A turn ended while a [ChatItem.UserMessage.queued] echo waited: the next turn to start is that echo's. */
     val queuedTurnNext: Boolean = false,
+    /**
+     * The app sent Stop (`session.interrupt`, which purges the server's queue): the next turn end, of any kind, fails
+     * the queued echoes.
+     */
+    val stopRequested: Boolean = false,
 )
 
 /** [ChatState.lastSeq] before any event of the live session was applied; `session.events.since` accepts it. */

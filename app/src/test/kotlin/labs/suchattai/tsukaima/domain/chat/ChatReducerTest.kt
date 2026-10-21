@@ -964,17 +964,43 @@ class ChatReducerTest {
     }
 
     @Test
-    fun anInterruptedTurnDropsTheQueue() {
-        // Stop purges the server's queue: the message stays in the transcript but never runs.
+    fun anAppStopDropsTheQueueOnWhateverTurnEndFollows() {
+        // The app's Stop (`session.interrupt`) purges the server's queue: the message stays in the transcript but
+        // never runs. The turn then ends interrupted, or — still waiting for the agent build — with a bare `error`.
         val running = live.feed(ev("message.start", seq = 1))
-        val queued = ChatReducer.onSubmitAccepted(
-            ChatReducer.onSubmitted(running, "later", "u-l1", flair, queued = true), "u-l1", null, status = "queued",
+        val queued = ChatReducer.onStopRequested(
+            ChatReducer.onSubmitAccepted(ChatReducer.onSubmitted(running, "later", "u-l1", flair, queued = true), "u-l1", null, status = "queued"),
+            true,
         )
-        val stopped = queued.feed(ev("message.complete", """{"text":"","status":"interrupted"}""", seq = 2))
-        val echo = stopped.items.first { it.id == "u-l1" } as ChatItem.UserMessage
-        assertFalse(echo.queued)
-        assertTrue("it never ran: Not sent", echo.failed)
-        assertFalse(stopped.queuedTurnNext)
+        assertTrue(queued.stopRequested)
+        for (end in listOf(
+            ev("message.complete", """{"text":"","status":"interrupted"}""", seq = 2),
+            ev("error", """{"message":"Turn cancelled before the agent was ready"}""", seq = 2),
+        )) {
+            val stopped = queued.feed(end)
+            val echo = stopped.items.first { it.id == "u-l1" } as ChatItem.UserMessage
+            assertFalse(end.type, echo.queued)
+            assertTrue("it never ran: Not sent (${end.type})", echo.failed)
+            assertFalse(stopped.queuedTurnNext)
+            assertFalse("cleared by the turn end", stopped.stopRequested)
+        }
+    }
+
+    @Test
+    fun anInterruptedTurnEndWithoutStopKeepsTheQueue() {
+        // The server's own interrupt (a voice barge-in that could not redirect) keeps its queue, which runs next.
+        val queued = ChatReducer.onSubmitAccepted(
+            ChatReducer.onSubmitted(live.feed(ev("message.start", seq = 1)), "later", "u-l1", flair, queued = true),
+            "u-l1", null, status = "queued",
+        )
+        fun echo(s: ChatState) = s.items.first { it.id == "u-l1" } as ChatItem.UserMessage
+        val ended = queued.feed(ev("message.complete", """{"text":"","status":"interrupted"}""", seq = 2))
+        assertTrue(echo(ended).queued)
+        assertFalse(echo(ended).failed)
+        assertTrue(ended.queuedTurnNext)
+        val started = ended.feed(ev("message.start", seq = 3))
+        assertFalse(echo(started).queued)
+        assertFalse(echo(started).failed)
     }
 
     @Test

@@ -401,14 +401,17 @@ Each item says how it was established: **[live]** = probed against the test inst
   paused on an approval, question, masked prompt or connection, and the gap between the live `message.complete` and
   the queued turn's `message.start`. A send that finds the session idle runs at once (`{status:"streaming",
   user_row_id}`).
-- **Stop purges the queue** [live]: `session.interrupt` → `{status:"interrupted"}`, the turn ends with
-  `message.complete {status:"interrupted"}`, and the queued prompt never runs — but its accept-time row **stays in
-  `session.history`** (user, user (queued), assistant). The app shows such sends "Not sent" with Retry. Only Stop
-  purges the queue: a failed turn ends with `message.complete {status:"error"}`, and a bare `error` / `turn.error`
-  (model switch, compression, agent build, a queued prompt that failed) leaves the queue, which drains next
-  (`_drain_queued_prompt`; source reading) — the app keeps those sends "Queued". A voice barge-in (a non-queued
-  submit mid-turn) redirects the turn or queues itself behind the waiting sends without purging them. A truncation
-  mid-turn is still `4009`.
+- **Stop purges the queue** [live]: `session.interrupt` → `{status:"interrupted"}` purges the queue at once
+  (`_interrupt_session_turn`) and emits no turn end itself; the turn then ends with `message.complete
+  {status:"interrupted"}` — or, when it was still waiting for its agent build, with a bare `error` ("Turn cancelled
+  before the agent was ready") — and the queued prompt never runs, but its accept-time row **stays in
+  `session.history`** (user, user (queued), assistant). Only the app's Stop purges: the app marks it and shows the
+  queued sends "Not sent" with Retry on the first turn end of any kind that follows. Every other turn end leaves the
+  queue, which drains next (`_drain_queued_prompt`; source reading): a failed turn (`message.complete
+  {status:"error"}`, a failed agent build included), a bare `error` / `turn.error` (model switch, compression, a
+  queued prompt that failed), and the server's own interrupt — a voice barge-in (a non-queued submit mid-turn)
+  redirects the turn, or queues itself behind the waiting sends and interrupts the turn without purging them — so the
+  app keeps those sends "Queued". A truncation mid-turn is still `4009`.
 
 **Interrupted tools and orphan notices**
 

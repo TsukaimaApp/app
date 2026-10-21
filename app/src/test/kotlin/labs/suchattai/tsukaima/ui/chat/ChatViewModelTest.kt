@@ -427,6 +427,9 @@ class ChatViewModelTest {
         advanceUntilIdle()
         fun echo() = vm.state.value.chat.items.first { it is ChatItem.UserMessage && it.text == "second" } as ChatItem.UserMessage
 
+        b.transport.on("session.interrupt", obj("""{"status":"interrupted"}"""))
+        vm.interrupt()
+        advanceUntilIdle()
         b.events.emit(ev("message.complete", 2, """{"text":"","status":"interrupted"}"""))
         advanceUntilIdle()
         assertTrue("purged by Stop: Not sent", echo().failed)
@@ -502,6 +505,9 @@ class ChatViewModelTest {
         vm.send()
         advanceUntilIdle()
         assertTrue(vm.state.value.attachments.isEmpty())
+        b.transport.on("session.interrupt", obj("""{"status":"interrupted"}"""))
+        vm.interrupt()
+        advanceUntilIdle()
         b.events.emit(ev("message.complete", 2, """{"text":"","status":"interrupted"}"""))
         advanceUntilIdle()
         val failed = vm.state.value.chat.items.last() as ChatItem.UserMessage
@@ -2017,6 +2023,7 @@ class ChatViewModelTest {
         advanceUntilIdle()
         assertEquals(listOf("Nothing to stop"), b.toasts)
         assertNull("the overflow sheet closes", vm.state.value.menu)
+        assertFalse("no turn end will clear it", vm.state.value.chat.stopRequested)
     }
 
     @Test

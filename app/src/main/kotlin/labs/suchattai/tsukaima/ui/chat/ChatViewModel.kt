@@ -439,15 +439,20 @@ class ChatViewModel(
 
     /**
      * Stop: interrupts the running turn (`session.interrupt`). The turn then ends with the server's own
-     * `message.complete` / `error`, which returns the status line (and the send button) to idle.
+     * `message.complete` / `error`, which returns the status line (and the send button) to idle. Stop also purges the
+     * server's queue, so that turn end fails the queued sends ([ChatReducer.onStopRequested]); with nothing to stop,
+     * or when the call fails, no turn end follows and the mark is taken back.
      */
     fun interrupt() {
         _state.update { it.copy(menu = null) }
         val live = chat.liveSessionId ?: return
+        setChat { ChatReducer.onStopRequested(it, true) }
         launch {
+            var stopped = false
             attempt("Couldn’t stop the agent") {
-                if (session.interrupt(live) == NOT_INTERRUPTED) backend.toast("Nothing to stop")
+                if (session.interrupt(live) == NOT_INTERRUPTED) backend.toast("Nothing to stop") else stopped = true
             }
+            if (!stopped) setChat { ChatReducer.onStopRequested(it, false) }
         }
     }
 
