@@ -3,9 +3,10 @@ package app.tsukaima.domain.markdown
 /**
  * A best-effort spoken reading of a TeX formula, for accessibility labels: `\frac{a}{b}` is "a over b", `^{n}` "to
  * the power n", `_{i}` "sub i", `\sqrt{x}` "square root of x", Greek letters their name, `\cdot` and `\times`
- * "times", any other command its name without the backslash; braces are dropped and whitespace collapsed, and the
- * result is at most [MAX_LENGTH] characters. Pure; never throws, whatever the input (unbalanced groups read as far as
- * they go). `SpeechText` still drops math from spoken replies; this is what it would use if it spoke it.
+ * "times", any other command its name without the backslash, `\\` a space; other control symbols (`\%`, `\{`) and
+ * braces are dropped, whitespace collapsed, and the result is at most [MAX_LENGTH] characters. Pure; never throws,
+ * whatever the input (unbalanced groups read as far as they go; nesting is bounded). `SpeechText` still drops math
+ * from spoken replies; this is what it would use if it spoke it.
  */
 object TexSpeech {
     const val MAX_LENGTH = 300
@@ -13,7 +14,10 @@ object TexSpeech {
     /** Input read past this much output is not needed (the result is capped), so reading stops there. */
     private const val READ_LIMIT = MAX_LENGTH * 2
 
-    /** Groups nested deeper than this read their contents flat rather than recursing further. */
+    /**
+     * Nesting (groups, script and command arguments) deeper than this reads flat, one character at a time, so no input
+     * (`\frac\frac\frac…`, `^^^…`) can recurse past it.
+     */
     private const val MAX_DEPTH = 32
 
     /** Variant spellings read as the base letter; every other Greek command already reads as its own name. */
@@ -22,8 +26,8 @@ object TexSpeech {
         "varphi" to "phi", "varkappa" to "kappa",
     )
 
-    /** Control symbols (`\,` and kin) that are only spacing. */
-    private const val SPACING = ",;:! >"
+    /** Control symbols (`\,` and kin) that are only spacing, and `\\` (a line break); any other is dropped. */
+    private const val SPACING = ",;:! >\\"
 
     fun readable(tex: String): String {
         val reader = Reader(tex)
@@ -53,14 +57,22 @@ object TexSpeech {
             }
         }
 
-        /** Reads one atom: a group, a command with its arguments, a script, or a single character. */
+        /**
+         * Reads one atom: a group, a command with its arguments, a script, or a single character. At [MAX_DEPTH] it
+         * consumes one character flat (TeX syntax characters say nothing).
+         */
         fun atom(depth: Int) {
             if (done) return
             val c = s[i]
+            if (depth >= MAX_DEPTH) {
+                i++
+                if (c !in "{}^_\\") out.append(c)
+                return
+            }
             when {
                 c == '{' -> {
                     i++
-                    if (depth < MAX_DEPTH) sequence(depth + 1, untilClose = true)
+                    sequence(depth + 1, untilClose = true)
                 }
                 c == '}' -> i++
                 c == '^' -> {
@@ -93,7 +105,7 @@ object TexSpeech {
             if (i >= s.length) return
             if (!s[i].isLetter()) {
                 val symbol = s[i++]
-                if (symbol in SPACING || symbol.isWhitespace()) out.append(' ') else out.append(symbol)
+                if (symbol in SPACING || symbol.isWhitespace()) out.append(' ')
                 return
             }
             val start = i

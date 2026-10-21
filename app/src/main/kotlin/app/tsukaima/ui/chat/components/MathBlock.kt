@@ -5,6 +5,7 @@ import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -38,6 +39,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -91,9 +93,9 @@ private data class TexKey(val tex: String, val px: Float, val argb: Int, val max
 
 /**
  * A drawn formula, or a failed one ([bitmap] null), so a bad formula is not re-parsed on every streaming delta.
- * [clipped]: wider than its key's width even at the smallest size.
+ * [clipped]: wider than its key's width even at the smallest size. [whole]: drawn at its key's size, not shrunk.
  */
-private class TexResult(val bitmap: ImageBitmap?, val clipped: Boolean = false)
+private class TexResult(val bitmap: ImageBitmap?, val clipped: Boolean = false, val whole: Boolean = false)
 
 private val Refused = TexResult(null)
 
@@ -112,13 +114,30 @@ private val texDispatcher = Dispatchers.Default.limitedParallelism(1)
 private var texReady = false
 
 /** [key]'s result when it is known without drawing: [Refused] by [MathSafety], or cached; null means a draw is due. */
-private fun knownTex(key: TexKey): TexResult? = if (!MathSafety.allowed(key.tex)) Refused else texCache.get(key)
+private fun knownTex(key: TexKey): TexResult? = if (!MathSafety.allowed(key.tex)) Refused else cachedTex(key)
+
+/**
+ * [key]'s cached result; for a width-limited key, also the formula drawn whole at that size when it fits the width
+ * (so a formula that fits is not redrawn when its paragraph's width changes, as on rotation).
+ */
+private fun cachedTex(key: TexKey): TexResult? {
+    texCache.get(key)?.let { return it }
+    if (key.maxWidth == Unbounded) return null
+    val whole = texCache.get(key.copy(maxWidth = Unbounded)) ?: return null
+    val bitmap = whole.bitmap ?: return null
+    return whole.takeIf { bitmap.width <= key.maxWidth }
+}
 
 /** Draws [key] (on [texDispatcher]) and caches the outcome, failures included. */
 private fun drawTex(context: Context, key: TexKey): TexResult {
-    texCache.get(key)?.let { return it } // another paragraph with the same formula may have drawn it meanwhile
+    if (!MathSafety.allowed(key.tex)) return Refused // callers check first; this draw path never trusts that
+    cachedTex(key)?.let { return it } // another paragraph with the same formula may have drawn it meanwhile
     val result = runCatching { fitTex(context, key) }.getOrNull() ?: TexResult(null)
     texCache.put(key, result)
+    // Drawn whole, it is also the formula with no width limit: reusable at any width it fits.
+    if (result.bitmap != null && result.whole && key.maxWidth != Unbounded) {
+        texCache.put(key.copy(maxWidth = Unbounded), result)
+    }
     return result
 }
 
@@ -131,7 +150,8 @@ private fun fitTex(context: Context, key: TexKey): TexResult? {
     }
     fun build(px: Float) = JLatexMathDrawable.builder(key.tex).textSize(px).color(key.argb).build()
     var drawable = build(key.px)
-    if (drawable.intrinsicWidth > key.maxWidth) {
+    val whole = drawable.intrinsicWidth <= key.maxWidth
+    if (!whole) {
         val floor = key.px * MinInlineScale
         var px = maxOf(floor, key.px * key.maxWidth / drawable.intrinsicWidth)
         drawable = build(px)
@@ -144,7 +164,7 @@ private fun fitTex(context: Context, key: TexKey): TexResult? {
     val w = drawable.intrinsicWidth
     val h = drawable.intrinsicHeight
     if (w <= 0 || h <= 0 || w.toLong() * h > MaxPixels) return null
-    return TexResult(drawable.toBitmap(w, h).asImageBitmap(), clipped = w > key.maxWidth)
+    return TexResult(drawable.toBitmap(w, h).asImageBitmap(), clipped = w > key.maxWidth, whole = whole)
 }
 
 /**
@@ -162,7 +182,8 @@ private fun rememberTexResult(key: TexKey): TexResult? {
 }
 
 /** The accessibility label of the formula [tex]. */
-internal fun formulaDescription(tex: String): String = "Formula: " + TexSpeech.readable(tex)
+internal fun formulaDescription(tex: String): String =
+    TexSpeech.readable(tex).let { if (it.isEmpty()) "Formula" else "Formula: $it" }
 
 /** One line of [style], in sp (an unspecified line height counts as 1.2 em), for a formula still being drawn. */
 private fun lineHeight(style: TextStyle): TextUnit = when {
@@ -295,7 +316,8 @@ private fun FormulaDialog(tex: String, style: TextStyle, color: Color, onDismiss
                 Modifier
                     .fillMaxWidth()
                     .background(colors.surfaceRaised, TsukaimaShapes.card)
-                    .clickable(remember { MutableInteractionSource() }, indication = null, onClick = {})
+                    // Swallow taps so they do not reach the scrim (no click action for accessibility to announce).
+                    .pointerInput(Unit) { detectTapGestures { } }
                     .padding(start = 18.dp, end = 4.dp, top = 4.dp, bottom = 18.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

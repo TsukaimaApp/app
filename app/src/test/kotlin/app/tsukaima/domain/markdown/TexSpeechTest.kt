@@ -68,6 +68,19 @@ class TexSpeechTest {
     }
 
     @Test
+    fun lineBreaksAreSpacesAndOtherControlSymbolsDropped() {
+        assertEquals("a b", read("a\\\\b"))
+        assertEquals("50 x", read("50\\% \\{x\\}"))
+    }
+
+    @Test
+    fun braceLessChainsDoNotOverflowTheStack() {
+        for (tex in listOf("\\frac".repeat(10_000), "^".repeat(10_000), "\\sqrt".repeat(10_000), "_{".repeat(10_000))) {
+            assertTrue(read(tex).length <= 300)
+        }
+    }
+
+    @Test
     fun lengthIsCappedAt300() {
         assertTrue(read("x+".repeat(1000)).length <= 300)
         assertTrue(read("\\frac{".repeat(5000)).length <= 300)

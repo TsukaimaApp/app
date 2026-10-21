@@ -1,6 +1,7 @@
 package app.tsukaima.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.runtime.getValue
@@ -17,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import app.tsukaima.domain.markdown.Markdown
 import app.tsukaima.domain.markdown.MdBlock
 import app.tsukaima.ui.chat.components.MarkdownText
+import app.tsukaima.ui.chat.components.formulaDescription
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -98,10 +100,50 @@ class MathUiTest : ComposeUiTest() {
         compose.onNodeWithContentDescription("Show formula", useUnmergedTree = true).performClick()
 
         awaitText("Formula")
+        // The clipped inline image and the dialog's whole one.
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(hasContentDescription("Formula: $tex"), useUnmergedTree = true).fetchSemanticsNodes().size == 2
+        }
         compose.onNodeWithContentDescription("Close").assertExists()
         compose.onNodeWithContentDescription("Close").performClick()
         compose.waitForIdle()
         compose.onNodeWithText("Formula").assertDoesNotExist()
+    }
+
+    @Test
+    fun `a cached formula draws in its first frame, also at another width it fits`() {
+        val description = "Formula: x to the power 2"
+        var copies by mutableStateOf(1)
+        var width by mutableStateOf(400.dp)
+        setThemed {
+            Column(Modifier.width(width)) { repeat(copies) { MarkdownText(Markdown.parse("so \$x^{2}\$ ok")) } }
+        }
+        awaitDescription(description)
+
+        // Without frames advancing on their own, an off-main draw could not land: only a synchronous cache hit shows.
+        compose.mainClock.autoAdvance = false
+        copies = 2
+        compose.waitForIdle() // the recomposer sees the change and asks for a frame (none runs)
+        compose.mainClock.advanceTimeByFrame()
+        assertEquals(
+            "new copy",
+            2,
+            compose.onAllNodes(hasContentDescription(description), useUnmergedTree = true).fetchSemanticsNodes().size,
+        )
+        width = 300.dp
+        compose.waitForIdle() // the recomposer sees the change and asks for a frame (none runs)
+        compose.mainClock.advanceTimeByFrame()
+        assertEquals(
+            "narrower",
+            2,
+            compose.onAllNodes(hasContentDescription(description), useUnmergedTree = true).fetchSemanticsNodes().size,
+        )
+    }
+
+    @Test
+    fun `an empty reading labels the image just Formula`() {
+        assertEquals("Formula", formulaDescription("{}"))
+        assertEquals("Formula: 1 over 2", formulaDescription("\\frac{1}{2}"))
     }
 
     @Test
