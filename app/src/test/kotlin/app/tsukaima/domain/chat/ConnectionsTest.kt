@@ -91,13 +91,33 @@ class ConnectionsTest {
     }
 
     @Test
-    fun countdownFromTheDeadline() {
+    fun countdownRoundsDown() {
+        // Whole minutes, rounded down, from two minutes on ...
         assertEquals("5 min left", ConnectionAnswers.countdown(deadlineAt = 1_000.0 + 300, nowSeconds = 1_000.0))
-        assertEquals("2 min left", ConnectionAnswers.countdown(deadlineAt = 1_000.0 + 61, nowSeconds = 1_000.0))
-        assertEquals("59 s left", ConnectionAnswers.countdown(deadlineAt = 1_000.0 + 59, nowSeconds = 1_000.0))
+        assertEquals("4 min left", ConnectionAnswers.countdown(deadlineAt = 1_000.0 + 299.5, nowSeconds = 1_000.0))
+        assertEquals("2 min left", ConnectionAnswers.countdown(deadlineAt = 1_000.0 + 179, nowSeconds = 1_000.0))
+        assertEquals("2 min left", ConnectionAnswers.countdown(deadlineAt = 1_000.0 + 120, nowSeconds = 1_000.0))
+        // ... seconds below, also rounded down (never "0 s": a fraction left still counts as a second).
+        assertEquals("119 s left", ConnectionAnswers.countdown(deadlineAt = 1_000.0 + 119.9, nowSeconds = 1_000.0))
+        assertEquals("61 s left", ConnectionAnswers.countdown(deadlineAt = 1_000.0 + 61, nowSeconds = 1_000.0))
+        assertEquals("1 s left", ConnectionAnswers.countdown(deadlineAt = 1_000.0 + 0.2, nowSeconds = 1_000.0))
         assertEquals("Expired", ConnectionAnswers.countdown(deadlineAt = 1_000.0, nowSeconds = 1_000.0))
         assertEquals("Expired", ConnectionAnswers.countdown(deadlineAt = 1_000.0, nowSeconds = 1_100.0))
         assertNull(ConnectionAnswers.countdown(deadlineAt = 0.0, nowSeconds = 1_000.0))
+    }
+
+    @Test
+    fun suggestionHintNamesAtMostFive() {
+        assertNull(ConnectionAnswers.suggestionHint(emptyList()))
+        assertEquals("Hermes suggests connecting: linear", ConnectionAnswers.suggestionHint(listOf("linear")))
+        assertEquals(
+            "Hermes suggests connecting: a, b, c, d, e",
+            ConnectionAnswers.suggestionHint(listOf("a", "b", "c", "d", "e")),
+        )
+        assertEquals(
+            "Hermes suggests connecting: A, B, C, D, E and 2 more",
+            ConnectionAnswers.suggestionHint(listOf("a", "b", "c", "d", "e", "f", "g")) { it.uppercase() },
+        )
     }
 
     @Test

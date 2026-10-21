@@ -3385,6 +3385,7 @@ class ChatViewModelTest {
         advanceUntilIdle()
 
         vm.answerConnection(opId, ConnectionAnswers.approve("github", mapOf("GITHUB_TOKEN" to "s3cr3t")))
+        advanceUntilIdle() // one answer at a time (cardAnswersAreSentOnce)
         vm.continueConnection(opId)
         advanceUntilIdle()
 
@@ -3467,6 +3468,144 @@ class ChatViewModelTest {
         val card = vm.state.value.chat.items.last() as ChatItem.ConnectionRequest
         assertEquals(opId, card.opId)
         assertEquals(AgentStatus.Connection, vm.state.value.status)
+    }
+
+    @Test
+    fun cardAnswersAreSentOnce() = runTest(dispatcher) {
+        val b = backend()
+        b.transport.on("connection.respond", obj("""{"status":"ok","settled":false}"""))
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.events.emit(connectionRequest())
+        advanceUntilIdle()
+        fun sent() = b.transport.methods().count { it == "connection.respond" }
+
+        val gate = CompletableDeferred<Unit>()
+        b.transport.gateNext["connection.respond"] = gate
+        vm.answerConnection(opId, ConnectionAnswers.approve("github"))
+        advanceUntilIdle()
+        assertEquals(setOf(opId), vm.state.value.answeringConnections)
+        // A double tap, or any other answer of the card while one is in flight, sends nothing.
+        vm.answerConnection(opId, ConnectionAnswers.approve("github"))
+        vm.skipConnection(opId)
+        vm.continueConnection(opId)
+        advanceUntilIdle()
+        assertEquals(1, sent())
+
+        // The result (success) frees the card.
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(emptySet<String>(), vm.state.value.answeringConnections)
+        vm.answerConnection(opId, ConnectionAnswers.skip("linear"))
+        advanceUntilIdle()
+        assertEquals(2, sent())
+
+        // So does a failure.
+        b.transport.rpcErrors["connection.respond"] = RpcException(4002, "Connection answer is invalid.")
+        vm.answerConnection(opId, ConnectionAnswers.skip("linear"))
+        advanceUntilIdle()
+        assertEquals(3, sent())
+        assertEquals(emptySet<String>(), vm.state.value.answeringConnections)
+
+        // And the card settling while the answer is still out.
+        val stuck = CompletableDeferred<Unit>()
+        b.transport.gateNext["connection.respond"] = stuck
+        vm.skipConnection(opId)
+        advanceUntilIdle()
+        assertEquals(setOf(opId), vm.state.value.answeringConnections)
+        b.events.emit(
+            ev(
+                "connection.update", 9,
+                """{"op_id":"$opId","seq":3,"deadline_at":1,"settled":true,"settled_by":"all_resolved",
+                    "targets":[{"name":"linear","kind":"connector","action":"connect","state":"skipped"}]}""",
+            ),
+        )
+        advanceUntilIdle()
+        assertEquals(emptySet<String>(), vm.state.value.answeringConnections)
+        stuck.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(4, sent())
+    }
+
+    @Test
+    fun connectSendsEnvBeforeOpeningTheLink() = runTest(dispatcher) {
+        fun frame(type: String, seq: Long, opSeq: Int, state: String) = ev(
+            type, seq,
+            """{"op_id":"$opId","seq":$opSeq,"deadline_at":${System.currentTimeMillis() / 1000 + 300},"settled":false,
+                "targets":[{"name":"notion","kind":"mcp","action":"install","state":"$state",
+                            "connect_url":"https://auth.example.test/notion",
+                            "required_env":[{"name":"NOTION_KEY","required":true,"secret":true}]}]}""",
+        )
+        fun card(vm: ChatViewModel) = vm.state.value.chat.items.last() as ChatItem.ConnectionRequest
+        val b = backend()
+        b.transport.on("connection.respond", obj("""{"status":"ok","settled":false}"""))
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.events.emit(frame("connection.request", 5, 1, "pending"))
+        advanceUntilIdle()
+
+        // A failed send takes the mark back: Connect stays the action.
+        b.transport.rpcErrors["connection.respond"] = RpcException(4002, "Connection answer is invalid.")
+        vm.answerConnection(opId, ConnectionAnswers.approve("notion", mapOf("NOTION_KEY" to "k3y")))
+        advanceUntilIdle()
+        assertEquals(emptyMap<String, Long>(), card(vm).envSentAt)
+
+        vm.answerConnection(opId, ConnectionAnswers.approve("notion", mapOf("NOTION_KEY" to "k3y")))
+        advanceUntilIdle()
+        assertEquals(
+            obj("""{"targets":[{"name":"notion","status":"approved","env":{"NOTION_KEY":"k3y"}}]}"""),
+            b.transport.last("connection.respond")["result"],
+        )
+        // The env went first; no browser opened, and none is offered before the server answered with a frame.
+        assertEquals(emptyList<String>(), b.openedUrls)
+        assertFalse(card(vm).continuesInBrowser(card(vm).targets.single()))
+
+        // The next frame still wants the browser: the card offers it, and only a tap opens it.
+        b.events.emit(frame("connection.update", 6, 2, "initiated"))
+        advanceUntilIdle()
+        assertTrue(card(vm).continuesInBrowser(card(vm).targets.single()))
+        assertEquals(emptyList<String>(), b.openedUrls)
+        vm.openConnectUrl(opId, "notion")
+        advanceUntilIdle()
+        assertEquals(listOf("https://auth.example.test/notion"), b.openedUrls)
+        assertFalse("the value is nowhere in the UI state", vm.state.value.toString().contains("k3y"))
+    }
+
+    @Test
+    fun reconnectRestoresThePendingConnection() = runTest(dispatcher) {
+        val b = backend()
+        b.transport.on("session.resume", obj(resumeJson.replace("\"running\":false", "\"running\":true")))
+        b.transport.on("session.events.since", obj("""{"events":[],"latest_seq":0,"truncated":false,"open_requests":[]}"""))
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        assertTrue(vm.state.value.chat.items.none { it is ChatItem.ConnectionRequest })
+
+        // The socket drops while the operation opens; the same live session comes back with its snapshot.
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        val pending = connectionRequest().payload.toString()
+        b.transport.on("session.resume", obj(resumeJson.replace("\"running\":false", "\"running\":true,\"pending_connection\":$pending")))
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+
+        val card = vm.state.value.chat.items.last() as ChatItem.ConnectionRequest
+        assertEquals(opId, card.opId)
+        assertFalse(card.settled)
+        assertEquals(AgentStatus.Connection, vm.state.value.status)
+        // It answers on the live session.
+        b.transport.on("connection.respond", obj("""{"status":"ok","settled":true}"""))
+        vm.skipConnection(opId)
+        advanceUntilIdle()
+        assertEquals(
+            obj("""{"type":"session","session_id":"$live"}"""),
+            b.transport.last("connection.respond")["owner"],
+        )
+        // A second reconnect with the same snapshot keeps one card.
+        b.connection.value = ConnectionState.Reconnecting
+        advanceUntilIdle()
+        b.connection.value = ConnectionState.Connected
+        advanceUntilIdle()
+        assertEquals(1, vm.state.value.chat.items.count { it is ChatItem.ConnectionRequest })
     }
 
     @Test

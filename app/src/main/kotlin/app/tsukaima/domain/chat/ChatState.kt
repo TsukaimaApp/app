@@ -144,7 +144,9 @@ sealed interface ChatItem {
      * (each carries the full [targets] snapshot; [seq] is the operation's own write counter, so an older frame moves
      * nothing). [owner] is the operation's owner as the server last named it (null until an update did); answers go
      * to `connection.respond`. [deadlineAt] is epoch seconds on the server clock; [settledBy] the server's reason
-     * (`all_resolved`, `continue`, `deadline`, `interrupt`) once [settled].
+     * (`all_resolved`, `continue`, `deadline`, `interrupt`) once [settled]. [suggested]: a display operation's
+     * `display.suggested` (it has no rows). [envSentAt]: per target, the card's [seq] when Connect sent its env ahead
+     * of a link (names only, never values).
      */
     data class ConnectionRequest(
         override val id: String,
@@ -155,7 +157,19 @@ sealed interface ChatItem {
         val settled: Boolean,
         val settledBy: String?,
         val seq: Long = -1,
-    ) : ChatItem
+        val suggested: List<String> = emptyList(),
+        val envSentAt: Map<String, Long> = emptyMap(),
+    ) : ChatItem {
+        /**
+         * Whether [target] (which has both `required_env` and a `connect_url`) is past its env step: Connect sent the
+         * env, and a newer frame than the one it was sent on still shows the row open with a link. Only then is the
+         * link offered (as "Continue in browser").
+         */
+        fun continuesInBrowser(target: ConnectionTarget): Boolean {
+            val sentAt = envSentAt[target.name] ?: return false
+            return target.connectUrl != null && !target.resolved && seq > sentAt
+        }
+    }
 
     /**
      * The agent's task checklist (`todo.updated`, or the `todos` + `revision` the todo tool's `tool.complete` mirrors):

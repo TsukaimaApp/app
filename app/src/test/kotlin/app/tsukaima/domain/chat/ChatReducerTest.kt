@@ -1578,6 +1578,51 @@ class ChatReducerTest {
     }
 
     @Test
+    fun displayOperationKeepsItsSuggestions() {
+        val display = """{"op_id":"d1","seq":1,"deadline_at":1761010838.5,"targets":[],"display":{"suggested":["linear","github"]}}"""
+        val card = live.feed(ev("connection.request", display, seq = 1)).items.single() as ChatItem.ConnectionRequest
+        assertEquals(listOf("linear", "github"), card.suggested)
+        assertTrue(card.targets.isEmpty())
+        // A request without a display block (or a malformed one) suggests nothing.
+        val plain = live.feed(ev("connection.request", connectionRequestJson, seq = 1)).items.single() as ChatItem.ConnectionRequest
+        assertEquals(emptyList<String>(), plain.suggested)
+        val odd = """{"op_id":"d2","seq":1,"deadline_at":1,"targets":[],"display":{"suggested":"linear"}}"""
+        assertEquals(emptyList<String>(), (live.feed(ev("connection.request", odd, seq = 1)).items.single() as ChatItem.ConnectionRequest).suggested)
+    }
+
+    @Test
+    fun envSentTargetContinuesInBrowserOnlyAfterTheNextUpdate() {
+        fun update(seq: Int, state: String, url: Boolean) = """
+            {"op_id":"m1","seq":$seq,"deadline_at":1761010838.5,"settled":false,
+             "targets":[{"name":"notion","kind":"mcp","action":"install","state":"$state"
+                         ${if (url) ",\"connect_url\":\"https://auth.example.test/notion\"" else ""},
+                         "required_env":[{"name":"NOTION_KEY","required":true,"secret":true}]}]}
+        """.trimIndent()
+        val opened = live.feed(ev("connection.request", update(1, "pending", url = true), seq = 1))
+        fun card(s: ChatState) = s.items.single() as ChatItem.ConnectionRequest
+        assertFalse(card(opened).continuesInBrowser(card(opened).targets.single()))
+
+        val sent = ChatReducer.onConnectionEnvSent(opened, "m1", "notion")
+        assertEquals(mapOf("notion" to 1L), card(sent).envSentAt)
+        // Sent, but no newer frame yet: no browser leg.
+        assertFalse(card(sent).continuesInBrowser(card(sent).targets.single()))
+
+        // The next frame still has the link and the row is open: the browser leg is offered.
+        val next = sent.feed(ev("connection.update", update(2, "initiated", url = true), seq = 2))
+        assertTrue(card(next).continuesInBrowser(card(next).targets.single()))
+        // Without a link, or once resolved, it is not.
+        val noLink = sent.feed(ev("connection.update", update(2, "pending", url = false), seq = 2))
+        assertFalse(card(noLink).continuesInBrowser(card(noLink).targets.single()))
+        val done = sent.feed(ev("connection.update", update(2, "connected", url = true), seq = 2))
+        assertFalse(card(done).continuesInBrowser(card(done).targets.single()))
+
+        // A send that failed takes the mark back.
+        assertEquals(emptyMap<String, Long>(), card(ChatReducer.onConnectionEnvFailed(sent, "m1", "notion")).envSentAt)
+        // No card for the op: unchanged.
+        assertEquals(opened, ChatReducer.onConnectionEnvSent(opened, "nope", "notion"))
+    }
+
+    @Test
     fun turnErrorSettlesAnOpenConnectionCard() {
         val s = live.feed(
             ev("connection.request", connectionRequestJson, seq = 1),

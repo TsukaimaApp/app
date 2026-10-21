@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -132,6 +133,12 @@ class ChatViewModel(
         launch { backend.events.collect(sync::onEvent) }
         launch { backend.serverRequests.collect(sync::onRequest) }
         launch { backend.connection.collect(::onConnection) }
+        // A card that settled (or left the transcript) has nothing in flight any more.
+        launch {
+            _state.map { s -> s.answeringConnections.filterNotTo(mutableSetOf()) { op -> openConnection(s.chat.items, op) } }
+                .filter { it.isNotEmpty() }
+                .collect { done -> _state.update { it.copy(answeringConnections = it.answeringConnections - done) } }
+        }
         launch {
             backend.settings.filterNotNull().map { it.voiceLanguage }.distinctUntilChanged().collect { tag ->
                 _state.update { it.copy(voiceLanguage = tag) }
@@ -556,17 +563,33 @@ class ChatViewModel(
     private val awaitingBrowser = mutableSetOf<String>()
 
     /**
-     * Sends [answer] for open connection operation [opId] (`connection.respond`). The card moves only with the
-     * server's `connection.update` frames, except that a `settled: true` reply settles it at once. Env values in
-     * the answer go to the socket only: never into the state, a log or a toast. A settled card answers nothing.
+     * Sends [answer] for open connection operation [opId] (`connection.respond`), once: while one answer of the card
+     * is in flight ([ChatUiState.answeringConnections], cleared by the reply or the card settling) any other is
+     * dropped. The card moves only with the server's `connection.update` frames, except that a `settled: true` reply
+     * settles it at once, and that an approval carrying env for a target with a link marks the env as sent
+     * ([ChatReducer.onConnectionEnvSent]; undone if the answer is not delivered). Env values in the answer go to the
+     * socket only: never into the state, a log or a toast. A settled card answers nothing.
      */
     fun answerConnection(opId: String, answer: ConnectionAnswer) {
         val card = connectionCard(opId) ?: return
         val owner = connectionOwner(card) ?: return
+        if (opId in _state.value.answeringConnections) return
+        _state.update { it.copy(answeringConnections = it.answeringConnections + opId) }
+        val envFirst = answer.targets
+            .filter { t -> t.status == ConnectionAnswers.APPROVED && t.env != null && card.targets.any { it.name == t.name && it.connectUrl != null } }
+            .map { it.name }
+        envFirst.forEach { name -> setChat { ChatReducer.onConnectionEnvSent(it, opId, name) } }
         launch {
-            session.respondConnection(opId, owner, answer)
-                .onSuccess { settled -> if (settled) setChat { ChatReducer.onConnectionSettled(it, opId, flair) } }
-                .onFailure { backend.toast("Couldn’t send the answer: ${it.message ?: "gateway error"}") }
+            try {
+                session.respondConnection(opId, owner, answer)
+                    .onSuccess { settled -> if (settled) setChat { ChatReducer.onConnectionSettled(it, opId, flair) } }
+                    .onFailure { e ->
+                        envFirst.forEach { name -> setChat { ChatReducer.onConnectionEnvFailed(it, opId, name) } }
+                        backend.toast("Couldn’t send the answer: ${e.message ?: "gateway error"}")
+                    }
+            } finally {
+                _state.update { it.copy(answeringConnections = it.answeringConnections - opId) }
+            }
         }
     }
 
@@ -605,6 +628,10 @@ class ChatViewModel(
             launch { session.wakeConnection(owner, opId) }
         }
     }
+
+    /** Whether [items] hold the open (unsettled) card of [opId]. */
+    private fun openConnection(items: List<ChatItem>, opId: String) =
+        items.any { it is ChatItem.ConnectionRequest && it.opId == opId && !it.settled }
 
     /** The open (unsettled) card of [opId], or null. */
     private fun connectionCard(opId: String): ChatItem.ConnectionRequest? =

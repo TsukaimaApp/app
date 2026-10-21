@@ -43,13 +43,17 @@ import app.tsukaima.ui.theme.tsukaima
  * A connection operation (`connection.request`, same tier as [ApprovalCard]): "Hermes wants to connect" with one row
  * per target (its name, helper text and state chip) and the server's deadline counting down.
  *
- * An unresolved row offers "Connect" and "Skip". Connect opens the target's link in the browser when it has one
- * ([onOpen]); otherwise it approves the row ([onAnswer]), with the values of its `required_env` fields (masked when
- * secret, prefilled with the default; a blank optional one is left out) once every required one is filled. The
- * footer offers "Skip all" and "Continue" (end the operation now). At or past the deadline every button is off.
- * Rows move only with the server's frames; once settled the card collapses to one line. Field values live only in
- * this composition (`remember`, never the saved-state bundle). Agent-reachable text is revealed through
- * [CommandText.reveal].
+ * An unresolved row offers "Connect" and "Skip". A row with `required_env` fields (masked when secret, prefilled
+ * with the default; a blank optional one is left out) approves ([onAnswer]) with their values once every required
+ * one is filled, even when it also has a link: the env goes first, and the link is offered ("Continue in browser",
+ * [onOpen]) only when a later frame still shows the row open with it ([ChatItem.ConnectionRequest.continuesInBrowser]).
+ * A row with only a link opens it ([onOpen]); a bare row approves. The footer offers "Skip all" and "Continue" (end
+ * the operation now). A display operation (no rows) shows a "Hermes suggests connecting: …" line and Continue.
+ *
+ * While an answer is in flight ([answering]) every button is off and Connect reads "Connecting…"; at or past the
+ * deadline every button is off. Rows move only with the server's frames; once settled the card collapses to one
+ * line. Field values live only in this composition (`remember`, never the saved-state bundle) and are dropped as
+ * soon as Connect sends them. Agent-reachable text is revealed through [CommandText.reveal].
  */
 @Composable
 fun ConnectionCard(
@@ -59,6 +63,7 @@ fun ConnectionCard(
     onSkipAll: () -> Unit,
     onContinue: () -> Unit,
     modifier: Modifier = Modifier,
+    answering: Boolean = false,
     nowSeconds: () -> Double = { System.currentTimeMillis() / 1000.0 },
 ) {
     val colors = MaterialTheme.tsukaima
@@ -83,11 +88,18 @@ fun ConnectionCard(
         }
     }
     val countdown = ConnectionAnswers.countdown(item.deadlineAt, now)
-    val active = countdown != "Expired"
+    val active = countdown != "Expired" && !answering
+    val hint = remember(item.targets.isEmpty(), item.suggested) {
+        if (item.targets.isEmpty()) ConnectionAnswers.suggestionHint(item.suggested) { CommandText.reveal(it).text } else null
+    }
     FloatingCard(modifier) {
         CardHeader(IconName.Link, "Hermes wants to connect")
+        hint?.let { Text(it, style = TsukaimaType.caption, color = colors.ink2) }
         item.targets.forEachIndexed { index, target ->
-            TargetRow(item.id, target, active, onAnswer, onOpen, Modifier.padding(top = if (index == 0) 0.dp else 12.dp))
+            TargetRow(
+                item.id, target, active, answering, item.continuesInBrowser(target), onAnswer, onOpen,
+                Modifier.padding(top = if (index == 0) 0.dp else 12.dp),
+            )
         }
         Row(
             modifier = Modifier
@@ -108,6 +120,8 @@ private fun TargetRow(
     cardId: String,
     target: ConnectionTarget,
     active: Boolean,
+    answering: Boolean,
+    inBrowser: Boolean,
     onAnswer: (ConnectionAnswer) -> Unit,
     onOpen: (name: String) -> Unit,
     modifier: Modifier = Modifier,
@@ -128,8 +142,10 @@ private fun TargetRow(
         }
         helpers.forEach { Text(it, style = TsukaimaType.caption, color = colors.ink2, modifier = Modifier.padding(top = 2.dp)) }
         if (target.resolved) return@Column
-        target.requiredEnv.forEach { field -> EnvField(field, value(field)) { typed[field.name] = it } }
+        // The env went out and the server still wants the browser: only the link is left to do.
+        if (!inBrowser) target.requiredEnv.forEach { field -> EnvField(field, value(field)) { typed[field.name] = it } }
         val ready = target.requiredEnv.all { !it.required || value(it).isNotEmpty() }
+        val linkOnly = target.connectUrl != null && (inBrowser || target.requiredEnv.isEmpty())
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -138,21 +154,29 @@ private fun TargetRow(
         ) {
             GhostButton("Skip", { onAnswer(ConnectionAnswers.skip(target.name)) }, enabled = active, size = ButtonSize.Sm)
             PrimaryButton(
-                "Connect",
+                when {
+                    answering -> "Connecting…"
+                    inBrowser -> "Continue in browser"
+                    else -> "Connect"
+                },
                 {
                     when {
-                        target.connectUrl != null -> onOpen(target.name)
-                        target.requiredEnv.isNotEmpty() -> onAnswer(
-                            ConnectionAnswers.approve(
-                                target.name,
-                                target.requiredEnv.filter { it.required || value(it).isNotBlank() }.associate { it.name to value(it) },
-                            ),
-                        )
+                        linkOnly -> onOpen(target.name)
+                        target.requiredEnv.isNotEmpty() -> {
+                            onAnswer(
+                                ConnectionAnswers.approve(
+                                    target.name,
+                                    target.requiredEnv.filter { it.required || value(it).isNotBlank() }.associate { it.name to value(it) },
+                                ),
+                            )
+                            // Sent: the typed values leave the composition at once.
+                            typed.clear()
+                        }
                         else -> onAnswer(ConnectionAnswers.approve(target.name))
                     }
                 },
-                icon = if (target.connectUrl != null) IconName.OpenInNew else null,
-                enabled = active && (target.connectUrl != null || ready),
+                icon = if (linkOnly) IconName.OpenInNew else null,
+                enabled = active && (linkOnly || ready),
                 size = ButtonSize.Sm,
             )
         }

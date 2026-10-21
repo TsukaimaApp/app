@@ -68,6 +68,8 @@ data class ChatUiState(
     val voiceLanguage: String? = null,
     /** The voice language picker's options, loaded when its sheet opens. */
     val voiceLanguages: List<VoiceLanguage> = emptyList(),
+    /** Connection operations (op ids) with an answer in flight: their card's buttons are off ("Connecting…"). */
+    val answeringConnections: Set<String> = emptySet(),
 ) {
     /** What the status line shows. */
     val status: AgentStatus get() = gatewayStatus ?: if (compacting && chat.status != AgentStatus.Offline) AgentStatus.Compacting else chat.status

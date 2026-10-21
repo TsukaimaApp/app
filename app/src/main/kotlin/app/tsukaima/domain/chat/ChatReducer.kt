@@ -528,6 +528,7 @@ object ChatReducer {
             settled = false,
             settledBy = null,
             seq = payload["seq"]?.primitive()?.longOrNull ?: -1,
+            suggested = ConnectionAnswers.suggested(payload["display"] as? JsonObject),
         )
         val items = state.items + card
         return state.copy(items = items, status = statusFor(items) ?: AgentStatus.Connection)
@@ -563,6 +564,27 @@ object ChatReducer {
         if (card == null || card.settled) return state
         val items = state.items.replace(card) { card.copy(settled = true) }
         return state.copy(items = items, status = statusAfterApproval(state.status, items, flair))
+    }
+
+    /**
+     * Connect sent target [name]'s env on operation [opId] ahead of its link: marks it with the card's current seq, so
+     * only a newer frame offers the browser leg ([ChatItem.ConnectionRequest.continuesInBrowser]). No card: unchanged.
+     */
+    fun onConnectionEnvSent(state: ChatState, opId: String, name: String): ChatState =
+        updateConnection(state, opId) { it.copy(envSentAt = it.envSentAt + (name to it.seq)) }
+
+    /** The env answer of [onConnectionEnvSent] was not delivered: the mark goes, Connect is the action again. */
+    fun onConnectionEnvFailed(state: ChatState, opId: String, name: String): ChatState =
+        updateConnection(state, opId) { it.copy(envSentAt = it.envSentAt - name) }
+
+    private fun updateConnection(
+        state: ChatState,
+        opId: String,
+        block: (ChatItem.ConnectionRequest) -> ChatItem.ConnectionRequest,
+    ): ChatState {
+        val card = state.items.firstOrNull { it is ChatItem.ConnectionRequest && it.opId == opId } as? ChatItem.ConnectionRequest
+            ?: return state
+        return state.copy(items = state.items.replace(card) { block(card) })
     }
 
     /**

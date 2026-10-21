@@ -9,7 +9,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
-import kotlin.math.ceil
+import kotlin.math.floor
 
 /**
  * One credential an MCP install still needs (`required_env[]` of a connection target): the card draws a field per
@@ -139,18 +139,38 @@ object ConnectionAnswers {
 
     /**
      * Time left until [deadlineAt] (epoch seconds, server clock) as of [nowSeconds] (the device clock, skew not
-     * corrected): "n min left" (rounded up) from a minute on, "n s left" below, "Expired" at or past it; null when
-     * the operation carries no deadline.
+     * corrected): "n min left" in whole minutes rounded down from two minutes on, "n s left" below (also rounded down,
+     * never 0), "Expired" at or past it; null when the operation carries no deadline.
      */
     fun countdown(deadlineAt: Double, nowSeconds: Double): String? {
         if (deadlineAt <= 0) return null
         val left = deadlineAt - nowSeconds
         return when {
             left <= 0 -> "Expired"
-            left >= 60 -> "${ceil(left / 60).toInt()} min left"
-            else -> "${ceil(left).toInt()} s left"
+            left >= 120 -> "${floor(left / 60).toInt()} min left"
+            else -> "${floor(left).toInt().coerceAtLeast(1)} s left"
         }
     }
+
+    /** At most this many suggested names are spelled out on a display card; the rest are counted. */
+    private const val SUGGESTED_SHOWN = 5
+
+    /**
+     * The helper line of a display operation (`display.suggested`, no rows): "Hermes suggests connecting: a, b" with
+     * each name through [reveal], the first five and then "and n more"; null when nothing is suggested.
+     */
+    fun suggestionHint(suggested: List<String>, reveal: (String) -> String = { it }): String? {
+        if (suggested.isEmpty()) return null
+        val names = suggested.take(SUGGESTED_SHOWN).joinToString(", ") { reveal(it) }
+        val more = suggested.size - SUGGESTED_SHOWN
+        return "Hermes suggests connecting: $names" + if (more > 0) " and $more more" else ""
+    }
+
+    /** `display.suggested` of a request: the slugs a display operation pins, blank and non-string entries dropped. */
+    fun suggested(display: JsonObject?): List<String> =
+        (display?.get("suggested") as? JsonArray).orEmpty().mapNotNull { e ->
+            (e as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim()?.takeIf { it.isNotEmpty() }
+        }
 
     private fun JsonObject.text(key: String): String? =
         (this[key] as? JsonPrimitive)?.takeIf { it !is JsonNull && it.isString }?.contentOrNull

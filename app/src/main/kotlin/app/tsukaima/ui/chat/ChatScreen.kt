@@ -478,6 +478,7 @@ internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatAct
             onOpen = { actions.onConnectionOpen(item.opId, it) },
             onSkipAll = { actions.onConnectionSkipAll(item.opId) },
             onContinue = { actions.onConnectionContinue(item.opId) },
+            answering = item.opId in state.answeringConnections,
         )
         is ChatItem.SideNote -> SideNoteCard(item, media = media)
         is ChatItem.Todos -> TodoCard(item)
