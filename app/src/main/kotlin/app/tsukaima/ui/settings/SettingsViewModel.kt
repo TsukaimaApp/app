@@ -149,10 +149,22 @@ class SettingsViewModel(
     /** One event per [signOut]; the app routes to Onboarding. */
     val signedOut: Flow<Unit> = _signedOut.receiveAsFlow()
 
-    private val _reports = Channel<String>(Channel.BUFFERED)
+    private val _reports = Channel<ReportShare>(Channel.BUFFERED)
 
-    /** One finished problem report per [reportProblem]; the screen opens the share sheet with it. */
-    val reports: Flow<String> = _reports.receiveAsFlow()
+    /**
+     * One finished problem report per [reportProblem], sent only while the screen that asked is resumed; the screen
+     * collects it while resumed, [claimReport]s it and opens the share sheet with it.
+     */
+    val reports: Flow<ReportShare> = _reports.receiveAsFlow()
+
+    /** Ids for [reportProblem] requests. */
+    private var reportRequests = 0L
+
+    /** The report request the resumed screen is waiting for; cleared when the screen pauses or leaves. */
+    private var liveReport: ReportRequest? = null
+
+    /** The settings screen is resumed ([setReportsResumed]). */
+    private var reportsResumed = false
 
     init {
         viewModelScope.launch {
@@ -497,21 +509,50 @@ class SettingsViewModel(
 
     /**
      * "Report a problem": builds the report off the main thread and emits it on [reports]. With [fromCrash] (the
-     * crash banner's "Report") the recorded crash is forgotten once the report carries it. A tap while one is being
-     * built is ignored.
+     * crash banner's "Report") the recorded crash is forgotten once the report is shared. A tap while one is being
+     * built is ignored. A report that finishes after the screen paused or left is not shared (it would open the share
+     * sheet on a later visit): a toast says to ask again.
      */
     fun reportProblem(fromCrash: Boolean = false) {
         if (_state.value.reporting) return
         _state.update { it.copy(reporting = true) }
+        val request = ReportRequest(++reportRequests, fromCrash)
+        liveReport = request
         viewModelScope.launch {
             val text = withContext(io) { runCatching(buildReport) }
             text.onSuccess { report ->
-                _reports.send(report)
-                if (fromCrash) dismissCrash()
+                if (liveReport === request && reportsResumed) _reports.send(ReportShare(request.id, report)) else staleReport()
             }.onFailure { toast("Couldn’t build the report") }
+            if (text.isFailure && liveReport === request) liveReport = null
             _state.update { it.copy(reporting = false) }
         }
     }
+
+    /**
+     * The screen's lifecycle: [resumed] while the settings screen is resumed. A pause (or leaving) drops the report
+     * being built for it.
+     */
+    fun setReportsResumed(resumed: Boolean) {
+        reportsResumed = resumed
+        if (!resumed) liveReport = null
+    }
+
+    /**
+     * The screen received report [id]: true = share it now (it is the one this visit asked for); false = a stale one
+     * from an earlier visit, dropped with a toast.
+     */
+    fun claimReport(id: Long): Boolean {
+        val request = liveReport
+        if (request == null || request.id != id || !reportsResumed) {
+            staleReport()
+            return false
+        }
+        liveReport = null
+        if (request.fromCrash) dismissCrash()
+        return true
+    }
+
+    private fun staleReport() = toast("Report ready — tap Report a problem again")
 
     /** The crash banner's "Dismiss": hides it and forgets the recorded crash. */
     fun dismissCrash() {
@@ -566,3 +607,9 @@ private fun compact(n: Double): String = when {
  */
 fun serverVoiceLabel(sttProvider: String?, ttsProvider: String?): String =
     if (sttProvider == null || ttsProvider == null) "On Hermes" else "On Hermes ($sttProvider · $ttsProvider)"
+
+/** A finished problem report for the share sheet; [id] ties it to its [SettingsViewModel.reportProblem] request. */
+data class ReportShare(val id: Long, val text: String)
+
+/** One [SettingsViewModel.reportProblem] request. */
+private class ReportRequest(val id: Long, val fromCrash: Boolean)

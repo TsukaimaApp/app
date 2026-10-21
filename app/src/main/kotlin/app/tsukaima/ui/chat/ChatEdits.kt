@@ -102,9 +102,9 @@ internal class ChatEdits(
 
     /**
      * A refused rewind. Storage failures (5070–5072) come after the server archived the cut rows, so the history is
-     * reloaded; anything else changed nothing there, so the transcript snapshot comes back (unless a rebuild from
-     * history replaced it meanwhile). An edit keeps its text and attachments in the composer, and its row unless the
-     * row is gone (4018).
+     * reloaded; anything else changed nothing there, so the transcript snapshot comes back, with what arrived during
+     * the request ([afterRefusal]; unless a rebuild from history replaced it meanwhile). An edit keeps its text and
+     * attachments in the composer, and its row unless the row is gone (4018).
      */
     private suspend fun failed(
         e: Exception, live: String, localId: String, before: ChatUiState, text: String, sent: List<PendingAttachment>,
@@ -114,7 +114,8 @@ internal class ChatEdits(
         val archived = code in STORAGE_FAILURES
         val gone = code == TARGET_GONE
         state.update { s ->
-            val items = if (!archived && s.chat.items.any { it.id == localId }) before.chat.items else s.chat.items
+            val rewound = !archived && s.chat.items.any { it.id == localId }
+            val items = if (rewound) afterRefusal(before.chat.items, s.chat.items, localId) else s.chat.items
             val status = if (s.chat.status == AgentStatus.Offline) AgentStatus.Offline else AgentStatus.Idle
             val restored = s.copy(chat = s.chat.copy(items = items, status = status))
             if (!fromComposer) return@update restored
@@ -152,6 +153,17 @@ internal class ChatEdits(
 
         /** `prompt.submit`: session storage failed after the cut was written (disk full, write error, unavailable). */
         private val STORAGE_FAILURES = 5070..5072
+
+        /**
+         * The transcript after a refused rewind: the pre-rewind snapshot [before], each item in the version [now] holds
+         * (a side note may have completed meanwhile), then the items that arrived during the request (in [now] but not
+         * in [before], in their order), without the rewind's own bubble [localId].
+         */
+        fun afterRefusal(before: List<ChatItem>, now: List<ChatItem>, localId: String): List<ChatItem> {
+            val current = now.associateBy { it.id }
+            val kept = before.mapTo(HashSet()) { it.id }
+            return before.map { current[it.id] ?: it } + now.filter { it.id !in kept && it.id != localId }
+        }
 
         /**
          * The user message reply [assistantId] answers: the nearest user message above it, if it has a persisted row

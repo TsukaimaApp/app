@@ -129,6 +129,25 @@ class VoiceControllerTest {
         assertEquals(8, r.state.revealed["a1"])
     }
 
+    @Test fun theNextSentenceIsHintedWhileOneIsSpoken() = runTest {
+        val r = rig()
+        say(r, "is it up")
+        r.add(reply("a1", "Yes. No", streaming = true), AgentStatus.Replying)
+        advanceUntilIdle()
+        assertEquals(emptyList<String>(), r.output.hints) // nothing follows yet
+        // "No." arrives while "Yes." plays: hinted at once ("Done." queues behind it, not hinted yet).
+        r.replace(reply("a1", "Yes. No. Done.", streaming = false), AgentStatus.Idle)
+        advanceUntilIdle()
+        assertEquals(listOf("No."), r.output.hints)
+        r.output.finishSpeaking()
+        advanceUntilIdle()
+        assertEquals(listOf("No.", "Done."), r.output.hints) // "No." is spoken with "Done." as its next
+        r.output.finishSpeaking()
+        advanceUntilIdle()
+        assertEquals(listOf("Yes.", "No.", "Done."), r.output.spoken)
+        assertEquals(listOf("No.", "Done."), r.output.hints)
+    }
+
     @Test fun codeIsNotSpoken() = runTest {
         val r = rig(output = FakeSpeechOutput(instant = true))
         say(r, "clean up")

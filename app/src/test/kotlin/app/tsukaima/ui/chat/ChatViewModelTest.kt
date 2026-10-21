@@ -3164,6 +3164,44 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun editFailureKeepsEventsThatArrivedMeanwhile() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val b = backend().apply {
+            transport.on("session.resume", obj(twoTurnsJson))
+            transport.on("prompt.btw", obj("""{"task_id":"btw_1"}"""))
+        }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        vm.setInput("what time is it?")
+        vm.sendAside(SideKind.Question)
+        advanceUntilIdle()
+        assertEquals(listOf("h-1", "h-2", "h-3", "h-4", "side-btw_1"), vm.state.value.chat.items.map { it.id })
+
+        b.transport.gateNext["prompt.submit"] = gate
+        b.transport.rpcErrors["prompt.submit"] = RpcException(4029, "truncation parameters require confirm_truncate=true")
+        vm.editMessage("h-3")
+        vm.setInput("and the init system?")
+        vm.send()
+        advanceUntilIdle()
+
+        // While the rewind is in flight: the pending side note completes and a background task finishes.
+        b.events.emit(ev("btw.complete", 1, """{"task_id":"btw_1","text":"Noon."}"""))
+        b.events.emit(ev("background.complete", 2, """{"task_id":"bg_2","text":"Backup done."}"""))
+        advanceUntilIdle()
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        val items = vm.state.value.chat.items
+        assertEquals(listOf("h-1", "h-2", "h-3", "h-4", "side-btw_1", "side-bg_2"), items.map { it.id })
+        val side = items[4] as ChatItem.SideNote
+        assertEquals("Noon.", side.text)
+        assertFalse(side.pending)
+        assertEquals("Backup done.", (items[5] as ChatItem.SideNote).text)
+        assertEquals("and the init system?", vm.state.value.input)
+        assertEquals(3L, vm.state.value.pendingEdit)
+    }
+
+    @Test
     fun plainSendStoresTheAcceptedRow() = runTest(dispatcher) {
         val b = backend().apply { transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":5}""")) }
         val vm = vm(b)

@@ -8,7 +8,9 @@ import android.os.Looper
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
 import app.tsukaima.data.api.ApiException
 import app.tsukaima.data.api.SpeechDto
@@ -25,12 +27,14 @@ import java.util.concurrent.atomic.AtomicInteger
  * ([synthesize], the `/api/audio/speak` call), writes the returned audio to `cache/tts/<uuid>.<ext>` (the extension
  * from its MIME type, so the player can tell the container) and plays it with a [MediaPlayer] (assistant usage, speech
  * content), suspending until playback ends. The file is deleted when the sentence finishes, fails or is cancelled;
- * files left by an earlier process are cleared on the first sentence's write (off the main thread).
+ * files left by an earlier process are cleared on the first sentence's write (off the main thread). While a sentence
+ * plays, the next one (the controller's [prefetch] hint, or `speak`'s `next`) is synthesised ahead through a
+ * [SentencePipeline]: one sentence at most, dropped (its file deleted) when the next sentence spoken is another one.
  *
  * Failures never surface: a refused or failed synthesis, unreadable audio or a playback error is logged at warn (never
  * with the text) and [speak] returns, so the voice controller reveals the text and moves on. Cancelling [speak] stops
- * playback (or aborts the request); [stop] stops the sentence playing and drops any sentence still being synthesised,
- * so it does not play once its audio arrives. Audio focus is held across a run of sentences like
+ * playback (or aborts the request); [stop] stops the sentence playing, cancels the one being synthesised (it does not
+ * play) and the prefetched one, deleting its file. Audio focus is held across a run of sentences like
  * [AndroidSpeechOutput]'s; losing it to another app stops the sentence playing (and drops one being synthesised).
  *
  * The voice language setting does not apply: the server's TTS voice and language settings decide, so [languages] is
@@ -56,19 +60,28 @@ class ServerSpeechOutput(
     /** Bumped by [stop]: a [speak] that started before the bump does not play. */
     private val stops = AtomicInteger()
 
+    /** Synthesis one sentence ahead; cancelled by [stop]. */
+    private val pipeline = SentencePipeline(
+        CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+        produce = ::synthesizeToFile,
+        discard = { it.delete() },
+    )
+
     /** The stale `cache/tts` files (a process that died mid-sentence) are cleared, once, on the first write. */
     private val swept = AtomicBoolean()
 
     override val available: Boolean = true
 
-    override suspend fun speak(text: String) {
+    override suspend fun speak(text: String) = speak(text, next = null)
+
+    override suspend fun speak(text: String, next: String?) {
         if (text.isBlank()) return
         // Counted from the request on: focus held from the previous sentence survives this one's synthesis.
         inFlight.incrementAndGet()
         main.removeCallbacks(releaseFocus)
         val epoch = stops.get()
         try {
-            val file = synthesizeToFile(text) ?: return
+            val file = pipeline.take(text, next?.takeIf { it.isNotBlank() }) ?: return
             try {
                 if (stops.get() != epoch) return // stopped while synthesising
                 focus.request()
@@ -146,8 +159,13 @@ class ServerSpeechOutput(
         }
     }
 
+    override fun prefetch(text: String) {
+        if (text.isNotBlank()) pipeline.prefetch(text)
+    }
+
     override fun stop() {
         stops.incrementAndGet()
+        pipeline.cancel()
         playback?.let {
             it.done.complete(Unit)
             it.release()
@@ -169,7 +187,7 @@ class ServerSpeechOutput(
     private companion object {
         const val TAG = "Tsukaima"
 
-        /** Under the app's cache dir; holds at most the sentence playing. */
+        /** Under the app's cache dir; holds at most the sentence playing and the next one. */
         const val CACHE_DIR = "tts"
 
         /** How long the focus outlives the last sentence, so the next one does not re-raise the music in between. */

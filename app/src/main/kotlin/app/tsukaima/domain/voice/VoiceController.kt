@@ -251,6 +251,8 @@ class VoiceController(
 
     private fun enqueue(u: Utterance) {
         if (u.text == null && current == null && queue.isEmpty()) return u.id?.let { reveal(it, u.end) } ?: Unit
+        // The sentence after the one being spoken arrived: the output may prepare it while that one plays.
+        if (u.text != null && current?.text != null && queue.none { it.text != null }) output.prefetch(u.text)
         queue.addLast(u)
         drainQueue()
     }
@@ -270,7 +272,7 @@ class VoiceController(
                 val u = queue.removeFirstOrNull() ?: break
                 current = u
                 u.id?.let { reveal(it, u.end) }
-                u.text?.let { output.speak(it) }
+                u.text?.let { output.speak(it, next = queue.firstOrNull { q -> q.text != null }?.text) }
                 u.then?.invoke()
             }
         } finally {

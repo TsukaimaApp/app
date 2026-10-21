@@ -56,6 +56,18 @@ internal class FakeSpeechOutput(var instant: Boolean = false, override val avail
         private set
     private var done: CompletableDeferred<Unit>? = null
 
+    /** Next-sentence hints: `speak`'s `next` (non-null ones) and [prefetch] calls, in order. */
+    val hints = mutableListOf<String>()
+
+    override suspend fun speak(text: String, next: String?) {
+        next?.let { hints += it }
+        speak(text)
+    }
+
+    override fun prefetch(text: String) {
+        hints += text
+    }
+
     override suspend fun speak(text: String) {
         spoken += text
         if (instant) return

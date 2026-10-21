@@ -165,20 +165,55 @@ class SettingsViewModelTest {
             clearCrash = { cleared.incrementAndGet() },
         ).also { vms += it }
         vm.await { it.lastCrash != null }
+        vm.setReportsResumed(true)
 
         vm.reportProblem()
-        assertEquals("REPORT", withTimeout(STORE_TIMEOUT_MS) { vm.reports.first() })
+        val plain = withTimeout(STORE_TIMEOUT_MS) { vm.reports.first() }
+        assertEquals("REPORT", plain.text)
         vm.await { !it.reporting }
+        assertTrue(vm.claimReport(plain.id))
         assertEquals(crash, vm.state.value.lastCrash) // the plain row keeps the banner
 
         vm.reportProblem(fromCrash = true)
-        assertEquals("REPORT", withTimeout(STORE_TIMEOUT_MS) { vm.reports.first() })
+        val fromCrash = withTimeout(STORE_TIMEOUT_MS) { vm.reports.first() }
+        assertEquals("REPORT", fromCrash.text)
+        assertTrue(vm.claimReport(fromCrash.id))
         vm.await { it.lastCrash == null && !it.reporting }
 
         fail = true
         vm.reportProblem()
         vm.await { !it.reporting }
         withTimeout(STORE_TIMEOUT_MS) { while ("Couldn’t build the report" !in toasts) kotlinx.coroutines.delay(10) }
+    }
+
+    @Test
+    fun reportShareDoesNotLeakIntoALaterVisit() = runBlocking<Unit> {
+        val gate = java.util.concurrent.CountDownLatch(1)
+        val vm = SettingsViewModel(
+            repo, store, creds, connection,
+            toast = { toasts += it },
+            buildReport = { gate.await(); "REPORT" },
+        ).also { vms += it }
+        vm.setReportsResumed(true)
+        vm.reportProblem()
+        vm.setReportsResumed(false) // left Settings while logcat runs
+        gate.countDown()
+        vm.await { !it.reporting }
+        withTimeout(STORE_TIMEOUT_MS) {
+            while ("Report ready — tap Report a problem again" !in toasts) kotlinx.coroutines.delay(10)
+        }
+
+        // The next visit: nothing from the earlier request is waiting to be shared.
+        vm.setReportsResumed(true)
+        val leaked = kotlinx.coroutines.withTimeoutOrNull(200) { vm.reports.first() }
+        assertNull(leaked)
+
+        // A report this visit asks for is shared; a stale id is refused.
+        vm.reportProblem()
+        val fresh = withTimeout(STORE_TIMEOUT_MS) { vm.reports.first() }
+        assertFalse(vm.claimReport(fresh.id - 1))
+        assertTrue(vm.claimReport(fresh.id))
+        assertFalse(vm.claimReport(fresh.id)) // shared once
     }
 
     @Test

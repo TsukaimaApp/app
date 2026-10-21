@@ -36,8 +36,11 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.serialization.json.JsonObject
 import app.tsukaima.BuildConfig
 import app.tsukaima.data.api.PairingDto
@@ -129,17 +132,15 @@ fun SettingsScreen(
     }
     // ROLE_ASSISTANT cannot be requested through the role dialog: the system's own picker is the way.
     val onAssistant: () -> Unit = { openAssistantSettings(context, vm::assistantSettingsUnavailable) }
-    LaunchedEffect(vm, context) {
-        vm.reports.collect { report ->
-            try {
-                shareReport(context, report)
-            } catch (_: ActivityNotFoundException) {
-                vm.reportShareFailed()
-            } catch (_: IllegalArgumentException) { // FileProvider refused the path
-                vm.reportShareFailed()
-            } catch (_: java.io.IOException) {
-                vm.reportShareFailed()
-            }
+    // A report is shared only by the visit that asked for it, while it is resumed (the view model outlives the screen).
+    LifecycleResumeEffect(vm) {
+        vm.setReportsResumed(true)
+        onPauseOrDispose { vm.setReportsResumed(false) }
+    }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(vm, context, lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            vm.reports.collect { report -> if (vm.claimReport(report.id)) share(context, vm, report.text) }
         }
     }
     SettingsContent(
@@ -492,6 +493,19 @@ private fun SignOutDialog(state: SettingsUiState, actions: SettingsActions) {
         onDismiss = { actions.onAskSignOut(false) },
         danger = true,
     )
+}
+
+/** Opens the share sheet with [report]; a failure toasts through [vm]. */
+private suspend fun share(context: Context, vm: SettingsViewModel, report: String) {
+    try {
+        shareReport(context, report)
+    } catch (_: ActivityNotFoundException) {
+        vm.reportShareFailed()
+    } catch (_: IllegalArgumentException) { // FileProvider refused the path
+        vm.reportShareFailed()
+    } catch (_: java.io.IOException) {
+        vm.reportShareFailed()
+    }
 }
 
 /** "Report a problem": shares a text report with logs and the last crash. */
