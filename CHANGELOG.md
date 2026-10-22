@@ -3,7 +3,7 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
-## Unreleased
+## 0.9.3 — 2026-10-22 (versionCode 23)
 
 ### Fixed
 - Clarify questions: choices are full-width rows whose text wraps, so a long choice is read in full (they were
