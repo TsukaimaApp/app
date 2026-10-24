@@ -21,7 +21,7 @@ interface LiveTransport {
     /** Sends a client event; false when the channel is not open. */
     fun send(event: JsonObject): Boolean
 
-    /** Mutes the mic track and sends the mute/unmute event. */
+    /** Mutes or unmutes the mic track (the controller sends the `session.input_audio.mute`/`unmute` event). */
     fun setMicMuted(muted: Boolean)
 
     /** Idempotent teardown (no `session.close`; the controller sends that). */

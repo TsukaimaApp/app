@@ -5,7 +5,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
-import kotlinx.serialization.json.longOrNull
 
 /** Who spoke a transcript fragment. */
 enum class LiveSpeaker { User, Assistant }
@@ -42,8 +41,8 @@ sealed interface LiveEvent {
                 "session.started" -> Started(obj.obj("session")?.str("id"))
                 "session.input_transcript.delta" -> Transcript(fragment(LiveSpeaker.User, obj))
                 "session.output_transcript.delta" -> Transcript(fragment(LiveSpeaker.Assistant, obj))
-                "session.delegation.created" ->
-                    obj.obj("delegation")?.str("id")?.let { Delegation(it) } ?: Unknown(type)
+                "session.delegation.created" -> obj.obj("delegation")?.str("id")?.takeIf { it.isNotEmpty() }
+                    ?.let { Delegation(it) } ?: Unknown(type)
                 "error" -> {
                     val e = obj.obj("error")
                     Error(e?.str("message") ?: "GPT-Live error", e?.str("code"))
@@ -59,8 +58,8 @@ sealed interface LiveEvent {
         private fun fragment(speaker: LiveSpeaker, o: JsonObject) = LiveFragment(
             speaker,
             o.str("delta") ?: "",
-            (o["start_ms"] as? JsonPrimitive)?.longOrNull ?: 0L,
-            (o["end_ms"] as? JsonPrimitive)?.longOrNull ?: 0L,
+            (o["start_ms"] as? JsonPrimitive)?.doubleOrNull?.toLong() ?: 0L,
+            (o["end_ms"] as? JsonPrimitive)?.doubleOrNull?.toLong() ?: 0L,
         )
 
         private fun JsonObject.str(key: String): String? =

@@ -39,6 +39,16 @@ class LiveEventTest {
         assertEquals(LiveEvent.Closed("closed", null), LiveEvent.parse("""{"type":"session.closed"}"""))
     }
 
+    @Test fun fractionalTimesAreTruncatedNotZero() = assertEquals(
+        LiveEvent.Transcript(LiveFragment(LiveSpeaker.User, "hi", 10, 20)),
+        LiveEvent.parse("""{"type":"session.input_transcript.delta","delta":"hi","start_ms":10.7,"end_ms":20.2}"""),
+    )
+
+    @Test fun emptyDelegationIdIsUnknown() = assertEquals(
+        LiveEvent.Unknown("session.delegation.created"),
+        LiveEvent.parse("""{"type":"session.delegation.created","delegation":{"id":""}}"""),
+    )
+
     @Test fun parseGarbageIsNull() {
         val garbage = listOf(
             "", "nope", "[1]", "42", "\"x\"", "{}",

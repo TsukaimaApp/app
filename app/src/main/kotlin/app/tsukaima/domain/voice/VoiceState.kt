@@ -17,6 +17,8 @@ enum class VoiceMode { InApp, Assist }
  * [transcribing]: the recorded utterance is being recognised on the server; cleared by the run's result or when the
  * mic closes.
  * [error]: why voice cannot listen ("Speech recognition isn’t available on this device", a recogniser failure).
+ * [live]: the GPT-Live session (live engine only; null for the phone engine).
+ * [caption]: live engine only: what the voice is saying now ("Connecting…" while the session starts).
  */
 data class VoiceState(
     val phase: VoicePhase = VoicePhase.Listening,
@@ -26,7 +28,15 @@ data class VoiceState(
     val startIndex: Int = 0,
     val error: String? = null,
     val transcribing: Boolean = false,
+    val live: LiveInfo? = null,
+    val caption: String = "",
 )
+
+/**
+ * A GPT-Live session as the voice screen shows it: the server [voice] name, [seconds] since `session.started` (the
+ * billing meter), and why it [ended] (null while it runs).
+ */
+data class LiveInfo(val voice: String, val seconds: Int, val ended: String? = null)
 
 /**
  * The phase for the voice indicator. [listening] means listen-eligible (voice started and the chat could take a new
