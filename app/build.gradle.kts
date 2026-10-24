@@ -23,6 +23,10 @@ android {
         targetSdk = 36
         versionCode = 23
         versionName = "0.9.3"
+        // libwebrtc (live voice) is 11.5 MB of native code per ABI; every Android 10+ phone is 64-bit ARM.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     signingConfigs {
@@ -90,6 +94,7 @@ dependencies {
     implementation(libs.androidx.security.crypto)
     implementation(libs.okhttp)
     implementation(libs.jlatexmath.android)
+    implementation(libs.stream.webrtc.android)
     debugImplementation(libs.androidx.compose.ui.tooling)
     // The empty ComponentActivity that createComposeRule() launches (debug only; the release APK never has it).
     debugImplementation(libs.androidx.compose.ui.test.manifest)
