@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- arm64-v8a only on purpose: libwebrtc per ABI is 7–12 MB; every Android 10+ phone is 64-bit ARM. -->
+    <issue id="ChromeOsAbiSupport" severity="ignore" />
+</lint>

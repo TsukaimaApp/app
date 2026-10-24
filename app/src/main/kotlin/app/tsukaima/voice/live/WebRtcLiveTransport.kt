@@ -7,6 +7,7 @@ import app.tsukaima.domain.livevoice.LiveHistoryMessage
 import app.tsukaima.domain.livevoice.LiveStartException
 import app.tsukaima.domain.livevoice.LiveTransport
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -36,6 +38,8 @@ import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -55,6 +59,11 @@ import kotlin.coroutines.resumeWithException
  *
  * The transport never sends an event of its own: the controller sends `session.input_audio.mute`/`unmute` and
  * `session.close`. One [start] per instance.
+ *
+ * Threads: [start] runs the blocking native work (libwebrtc's first initialisation, the connect sequence) on
+ * [Dispatchers.IO]; [close] returns at once and disposes the native objects on [releaser]. Every native call in the
+ * connect sequence is made under [lock] right after checking [closed], so a concurrent [close] either comes first
+ * (the start throws) or waits for that call to be issued (the calls are asynchronous, so the wait is short).
  */
 class WebRtcLiveTransport(
     context: Context,
@@ -74,6 +83,9 @@ class WebRtcLiveTransport(
     private var micTrack: AudioTrack? = null
     private var dataChannel: DataChannel? = null
 
+    /** Runs [releaseNative] for [close] off the caller's thread; its one thread starts on the first [close]. */
+    private val releaser: ExecutorService = Executors.newSingleThreadExecutor { r -> Thread(r, "live-voice-release") }
+
     /** Set from libwebrtc's threads (no lock: [close] may be blocking in `peer.close()` while they run). */
     @Volatile private var remoteTrack: AudioTrack? = null
     private val sink = SpeakingProbe { _speaking.value = it }
@@ -88,15 +100,17 @@ class WebRtcLiveTransport(
     override val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
 
     override suspend fun start(history: List<LiveHistoryMessage>) {
-        try {
-            connect(history)
-        } catch (e: Throwable) {
-            // Tear down what was created; events stay open until close() (the controller reports start_failed).
-            closedEmitted.set(true)
-            releaseNative()
-            when (e) {
-                is CancellationException, is LiveStartException -> throw e
-                else -> throw LiveStartException(e.message ?: "Live voice start failed", e)
+        withContext(Dispatchers.IO) {
+            try {
+                connect(history)
+            } catch (e: Throwable) {
+                // Tear down what was created; events stay open until close() (the controller reports start_failed).
+                closedEmitted.set(true)
+                releaseNative()
+                when (e) {
+                    is CancellationException, is LiveStartException -> throw e
+                    else -> throw LiveStartException(e.message ?: "Live voice start failed", e)
+                }
             }
         }
         live = true
@@ -105,12 +119,13 @@ class WebRtcLiveTransport(
     }
 
     private suspend fun connect(history: List<LiveHistoryMessage>) {
+        // The first call in the process loads and initialises libwebrtc: outside the lock, so close() never waits.
+        val factory = WebRtc.factory(appContext)
         val peer = synchronized(lock) {
             if (closed) throw LiveStartException("Live voice transport closed")
             if (startCalled) throw LiveStartException("Live voice session already started")
             startCalled = true
             route.acquire()
-            val factory = WebRtc.factory(appContext)
             val config = PeerConnection.RTCConfiguration(emptyList()).apply {
                 sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             }
@@ -141,12 +156,10 @@ class WebRtcLiveTransport(
                 mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false"))
             },
         )
-        ensureOpen()
         peer.awaitSet(offer, local = true)
-        ensureOpen()
         awaitIceGathering()
-        ensureOpen()
-        val sdp = peer.localDescription?.description ?: throw LiveStartException("Missing local SDP offer")
+        val sdp = whileOpen { peer.localDescription?.description }
+            ?: throw LiveStartException("Missing local SDP offer")
         val historyJson = history.takeIf { it.isNotEmpty() }?.let { HistoryJson.encodeToJsonElement(it).jsonArray }
         // Byte-exact: the SDP goes out as libwebrtc wrote it (CRLF line ends, trailing CRLF included).
         val answer = try {
@@ -158,7 +171,6 @@ class WebRtcLiveTransport(
         } catch (e: Exception) {
             throw LiveStartException(e.message ?: "Live voice session creation failed", e)
         }
-        ensureOpen()
         peer.awaitSet(SessionDescription(SessionDescription.Type.ANSWER, answer), local = false)
     }
 
@@ -176,8 +188,10 @@ class WebRtcLiveTransport(
         if (failed == true) throw LiveStartException("WebRTC connection failed")
     }
 
-    private fun ensureOpen() {
-        if (synchronized(lock) { closed }) throw LiveStartException("Live voice transport closed")
+    /** [block] (a native call) under [lock], unless [close] came first: then the start fails. */
+    private inline fun <T> whileOpen(block: () -> T): T = synchronized(lock) {
+        if (closed) throw LiveStartException("Live voice transport closed")
+        block()
     }
 
     override fun send(event: JsonObject): Boolean = synchronized(lock) {
@@ -191,13 +205,20 @@ class WebRtcLiveTransport(
         synchronized(lock) { micTrack?.setEnabled(!muted) }
     }
 
+    /**
+     * Returns at once: the audio route is given back here (cheap, and before any next session takes it), the native
+     * objects are disposed on [releaser] (`peer.close()` blocks while libwebrtc winds down), which then shuts down.
+     */
     override fun close() {
         synchronized(lock) {
             if (closed) return
             closed = true
         }
         closedEmitted.set(true)
-        releaseNative()
+        route.release()
+        _speaking.value = false
+        releaser.execute(::releaseNative)
+        releaser.shutdown()
         channel.close()
     }
 
@@ -349,33 +370,33 @@ class WebRtcLiveTransport(
 
         /** HermesJson drops defaults; the vendor needs every history item's `"type": "message"`. */
         val HistoryJson = Json(HermesJson) { encodeDefaults = true }
+    }
 
-        suspend fun PeerConnection.awaitOffer(constraints: MediaConstraints): SessionDescription =
-            suspendCancellableCoroutine { cont ->
-                createOffer(
-                    object : SdpObserver {
-                        override fun onCreateSuccess(sdp: SessionDescription) = cont.resume(sdp)
-                        override fun onCreateFailure(error: String?) =
-                            cont.resumeWithException(LiveStartException("createOffer failed: $error"))
-                        override fun onSetSuccess() = Unit
-                        override fun onSetFailure(error: String?) = Unit
-                    },
-                    constraints,
-                )
+    private suspend fun PeerConnection.awaitOffer(constraints: MediaConstraints): SessionDescription =
+        suspendCancellableCoroutine { cont ->
+            val observer = object : SdpObserver {
+                override fun onCreateSuccess(sdp: SessionDescription) = cont.resume(sdp)
+                override fun onCreateFailure(error: String?) =
+                    cont.resumeWithException(LiveStartException("createOffer failed: $error"))
+                override fun onSetSuccess() = Unit
+                override fun onSetFailure(error: String?) = Unit
             }
+            whileOpen { createOffer(observer, constraints) }
+        }
 
-        suspend fun PeerConnection.awaitSet(description: SessionDescription, local: Boolean): Unit =
-            suspendCancellableCoroutine { cont ->
-                val observer = object : SdpObserver {
-                    override fun onCreateSuccess(sdp: SessionDescription) = Unit
-                    override fun onCreateFailure(error: String?) = Unit
-                    override fun onSetSuccess() = cont.resume(Unit)
-                    override fun onSetFailure(error: String?) {
-                        val which = if (local) "setLocalDescription" else "setRemoteDescription"
-                        cont.resumeWithException(LiveStartException("$which failed: $error"))
-                    }
+    private suspend fun PeerConnection.awaitSet(description: SessionDescription, local: Boolean): Unit =
+        suspendCancellableCoroutine { cont ->
+            val observer = object : SdpObserver {
+                override fun onCreateSuccess(sdp: SessionDescription) = Unit
+                override fun onCreateFailure(error: String?) = Unit
+                override fun onSetSuccess() = cont.resume(Unit)
+                override fun onSetFailure(error: String?) {
+                    val which = if (local) "setLocalDescription" else "setRemoteDescription"
+                    cont.resumeWithException(LiveStartException("$which failed: $error"))
                 }
+            }
+            whileOpen {
                 if (local) setLocalDescription(observer, description) else setRemoteDescription(observer, description)
             }
-    }
+        }
 }

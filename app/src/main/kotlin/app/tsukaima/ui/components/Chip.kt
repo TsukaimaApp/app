@@ -37,7 +37,8 @@ import app.tsukaima.ui.theme.tsukaima
 /**
  * Outlined pill chip (model/profile pickers, filters). [selected] fills with the pale lavender
  * `accentSelected` and switches the label to ink1; [borderless] drops the hairline (the top-bar
- * model chip). A null [onClick] makes the chip passive: a label, not a button.
+ * model chip). A null [onClick] makes the chip passive: a label, not a button
+ * (and without the `selected` semantics).
  *
  * Visual height follows `Chip.jsx` (min 36dp, 7/12 padding); the touch target is 44dp.
  */
@@ -66,15 +67,17 @@ fun Chip(
     Box(
         modifier = modifier
             .sizeIn(minHeight = Dimens.hit)
-            .semantics { this.selected = selected }
             .then(
+                // A passive chip is a label: no selectable state to announce.
                 if (onClick == null) Modifier
-                else Modifier.clickable(
-                    interactionSource = source,
-                    indication = null,
-                    role = Role.Button,
-                    onClick = onClick,
-                ),
+                else Modifier
+                    .semantics { this.selected = selected }
+                    .clickable(
+                        interactionSource = source,
+                        indication = null,
+                        role = Role.Button,
+                        onClick = onClick,
+                    ),
             ),
         contentAlignment = Alignment.Center,
     ) {

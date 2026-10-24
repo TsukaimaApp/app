@@ -431,12 +431,8 @@ class HermesApi(
             put("data_url", "data:$mime;base64," + Base64.getEncoder().encodeToString(audio))
             put("mime_type", mime)
         }
-        val request = newRequest("POST", "api/audio/transcribe", body, true, false, emptyArray())
         // Cancellable (await): closing the mic or leaving voice mode aborts the upload.
-        val response = transcribeClient.newCall(request).await()
-        return withContext(Dispatchers.IO) {
-            response.use { decode(request, it) { text -> HermesJson.decodeFromString(TranscriptionDto.serializer(), text) } }
-        }
+        return audioPost("api/audio/transcribe", body, managed = false, TranscriptionDto.serializer())
     }
 
     /**
@@ -445,11 +441,8 @@ class HermesApi(
      * Cancellable, and on [transcribeClient]: a long sentence on a slow provider outlasts the shared timeouts.
      */
     suspend fun speak(text: String): SpeechDto {
-        val request = newRequest("POST", "api/audio/speak", buildJsonObject { put("text", text) }, true, false, emptyArray())
-        val response = transcribeClient.newCall(request).await()
-        return withContext(Dispatchers.IO) {
-            response.use { decode(request, it) { body -> HermesJson.decodeFromString(SpeechDto.serializer(), body) } }
-        }
+        val body = buildJsonObject { put("text", text) }
+        return audioPost("api/audio/speak", body, managed = false, SpeechDto.serializer())
     }
 
     /** `GET /api/audio/voice-config`, the speech-to-text and text-to-speech parts only (see [VoiceConfigDto]). */
@@ -469,14 +462,27 @@ class HermesApi(
             put("sdp", sdp)
             if (history != null) put("history", history)
         }
-        val request = newRequest("POST", "api/audio/voice-live/session", body, true, true, emptyArray())
+        return audioPost("api/audio/voice-live/session", body, managed = true, VoiceLiveSessionDto.serializer())
+    }
+
+    /**
+     * An authenticated `POST` of [body] to [path] on [transcribeClient], decoded with [serializer] on IO. Cancellable
+     * while the call is in flight; a non-2xx answer is an [ApiException] carrying the server's `detail`.
+     */
+    private suspend fun <T> audioPost(
+        path: String,
+        body: JsonObject,
+        managed: Boolean,
+        serializer: KSerializer<T>,
+    ): T {
+        val request = newRequest("POST", path, body, true, managed, emptyArray())
         val response = transcribeClient.newCall(request).await()
         return withContext(Dispatchers.IO) {
-            response.use { decode(request, it) { text -> HermesJson.decodeFromString(VoiceLiveSessionDto.serializer(), text) } }
+            response.use { decode(request, it) { text -> HermesJson.decodeFromString(serializer, text) } }
         }
     }
 
-    /** Audio relays ([transcribe], [speak]): 60 s, longer than the shared client's 20 s call timeout. */
+    /** Audio relays ([transcribe], [speak], [voiceLiveSession]): 60 s, longer than the shared client's 20 s call timeout. */
     private val transcribeClient: OkHttpClient by lazy {
         client.newBuilder()
             .callTimeout(TRANSCRIBE_TIMEOUT_S, TimeUnit.SECONDS)

@@ -69,6 +69,10 @@ android {
         // Robolectric Compose UI tests (ui/*UiTest) read the merged resources and manifest.
         unitTests.isIncludeAndroidResources = true
     }
+
+    lint {
+        lintConfig = file("lint.xml")
+    }
 }
 
 kotlin {
