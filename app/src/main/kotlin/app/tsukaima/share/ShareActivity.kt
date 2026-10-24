@@ -5,6 +5,8 @@ import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -44,8 +46,9 @@ import java.util.Collections
 /**
  * "Send to Tsukaima" in the system share sheet: text, images and PDFs from another app, in a translucent window over
  * it. The streams are copied into the app's cache here, while the sender's grant is valid ([SharedFileStore]); then
- * one [ShareCard] asks where they go (skipped when there is no last chat: a new chat), and the choice is left on
- * [AppContainer.pendingShare] for that chat, which [MainActivity] opens. Back, a tap outside or leaving the window
+ * one [ShareCard] asks where they go (always shown: nothing reaches Hermes without a tap; without a last chat it
+ * offers "New chat" alone), and the choice is left on [AppContainer.pendingShare] for that chat, which
+ * [MainActivity] opens. Back, a tap outside or leaving the window
  * cancel the share and delete the copies. Nothing is ever sent from here: the chat's composer only gets the draft.
  */
 class ShareActivity : ComponentActivity() {
@@ -72,21 +75,17 @@ class ShareActivity : ComponentActivity() {
             model.prepare(request, fallbackMime = intent.type?.takeUnless { it.endsWith("/*") })
         }
         lifecycleScope.launch {
-            val share = model.prepared.filterNotNull().first()
-            when {
-                share.empty -> finish()
-                share.lastChatId == null -> deliver(share, ShareTarget.NewChat)
-            }
+            if (model.prepared.filterNotNull().first().empty) finish()
         }
         setContent {
             val settings by container.settings.collectAsStateWithLifecycle()
             val share by model.prepared.collectAsStateWithLifecycle()
             TsukaimaTheme(darkTheme = isDarkTheme(settings?.theme), dynamicColor = settings?.materialYou == true) {
                 // While copying (a moment), only the see-through window.
-                val ready = share?.takeIf { !it.empty && it.lastChatId != null } ?: return@TsukaimaTheme
+                val ready = share?.takeIf { !it.empty } ?: return@TsukaimaTheme
                 ShareCard(
                     summary = ShareIntake.summary(ready.text, ready.files),
-                    hasLastChat = true,
+                    hasLastChat = ready.lastChatId != null,
                     onLastChat = { deliver(ready, ShareTarget.LastChat) },
                     onNewChat = { deliver(ready, ShareTarget.NewChat) },
                     onDismiss = ::finish,
@@ -139,7 +138,7 @@ class ShareActivity : ComponentActivity() {
     }
 }
 
-/** A share with its streams copied: [lastChatId] is where "Continue last chat" goes (null: straight to a new chat). */
+/** A share with its streams copied: [lastChatId] is where "Continue last chat" goes (null: only "New chat"). */
 internal data class PreparedShare(val text: String, val files: List<SharedFile>, val lastChatId: String?) {
     val empty: Boolean get() = text.isEmpty() && files.isEmpty()
 }
@@ -163,7 +162,7 @@ internal class ShareModel(private val container: AppContainer, private val app: 
 
     fun prepare(request: ShareRequest, fallbackMime: String?) {
         viewModelScope.launch {
-            val skipped = mutableListOf<String>()
+            val skipped = mutableListOf<String>() // toasts, one per stream left out
             val files = withContext(Dispatchers.IO) {
                 try {
                     container.sharedFiles.prune()
@@ -172,7 +171,7 @@ internal class ShareModel(private val container: AppContainer, private val app: 
                 }
                 request.streams.mapNotNull { copy(app.contentResolver, it, fallbackMime, skipped) }
             }
-            skipped.forEach { ShareActivity.toast(app, "Skipped $it: over 12 MB") }
+            skipped.forEach { ShareActivity.toast(app, it) }
             val share = PreparedShare(request.text, files, container.settings.filterNotNull().first().lastChatId)
             if (share.empty && skipped.isEmpty()) ShareActivity.toast(app, ShareActivity.NOTHING)
             _prepared.value = share
@@ -181,7 +180,8 @@ internal class ShareModel(private val container: AppContainer, private val app: 
 
     /**
      * One stream into the cache, or null: a URI that is not another app's `content:` one (a `file:` path, or this
-     * app's own provider, would read Tsukaima's private files), an unreadable one, or over the size cap ([skipped]).
+     * app's own provider, would read Tsukaima's private files; see [ShareIntake.acceptsAuthority]), an unreadable
+     * one, or one over the size cap. A named stream left out adds its toast to [skipped].
      */
     private fun copy(
         resolver: ContentResolver,
@@ -190,7 +190,10 @@ internal class ShareModel(private val container: AppContainer, private val app: 
         skipped: MutableList<String>,
     ): SharedFile? {
         val uri = raw.toUri()
-        if (uri.scheme != ContentResolver.SCHEME_CONTENT || uri.authority.orEmpty().startsWith(app.packageName)) {
+        val authority = uri.authority
+        if (uri.scheme != ContentResolver.SCHEME_CONTENT ||
+            !ShareIntake.acceptsAuthority(authority, authority?.let(::providerPackage), app.packageName)
+        ) {
             Log.w(TAG, "share: ignored a stream that is not another app's content URI")
             return null
         }
@@ -198,17 +201,34 @@ internal class ShareModel(private val container: AppContainer, private val app: 
         return try {
             val info = picked.describe()
             if (Attachments.tooLarge(info.size)) {
-                skipped += info.name
+                skipped += "Skipped ${info.name}: over 12 MB"
                 return null
             }
-            container.sharedFiles.copy(info.name, info.mime ?: fallbackMime, info.size) { picked.open() }
-                ?.also { copies += it }
+            val copied = container.sharedFiles.copy(info.name, info.mime ?: fallbackMime, info.size) { picked.open() }
+            // Unreadable, or of unknown size and over the cap once read.
+            if (copied == null) skipped += "Skipped ${info.name}" else copies += copied
+            copied
         } catch (c: CancellationException) {
             throw c
         } catch (e: Exception) {
             Log.w(TAG, "share: couldn’t read a stream", e)
             null
         }
+    }
+
+    /** The package whose content provider [authority] names, or null when none resolves (or it is not visible). */
+    private fun providerPackage(authority: String): String? = try {
+        val pm = app.packageManager
+        val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pm.resolveContentProvider(authority, PackageManager.ComponentInfoFlags.of(0))
+        } else {
+            @Suppress("DEPRECATION")
+            pm.resolveContentProvider(authority, 0)
+        }
+        info?.packageName
+    } catch (e: RuntimeException) {
+        Log.w(TAG, "share: resolving a provider failed", e)
+        null
     }
 
     override fun onCleared() {

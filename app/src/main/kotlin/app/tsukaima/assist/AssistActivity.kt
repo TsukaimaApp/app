@@ -147,7 +147,7 @@ class AssistActivity : ComponentActivity() {
             factory = viewModelFactory {
                 initializer {
                     val resume = if (trusted) AssistSessionPolicy.sessionToResume(settings, System.currentTimeMillis()) else null
-                    ChatViewModel(backend, resume)
+                    ChatViewModel(backend, resume, sharing = false) // never the last chat, never takes shares
                 }
             },
         )

@@ -102,6 +102,8 @@ class DrawerViewModel(
     changes: Flow<Unit> = emptyFlow(),
     private val changeDebounceMs: Long = 1_000,
     private val searchDebounceMs: Long = 300,
+    /** Stored session [id] was deleted from the drawer (e.g. to forget it as the share card's last chat). */
+    private val onDeleted: suspend (id: String) -> Unit = {},
 ) : ViewModel() {
     private val _state = MutableStateFlow(DrawerUiState())
     val state: StateFlow<DrawerUiState> = _state.asStateFlow()
@@ -200,7 +202,9 @@ class DrawerViewModel(
         removes = id.takeIf { archived },
     ) { repo.archive(id, archived) }
 
-    fun delete(id: String) = mutate("Couldn't delete the session", removes = id) { repo.delete(id) }
+    fun delete(id: String) = mutate("Couldn't delete the session", removes = id) {
+        repo.delete(id).onSuccess { onDeleted(id) }
+    }
 
     /** Runs [block]; on success, if it removed the open session ([removes]), says so on [openSessionRemoved]. */
     private fun mutate(failure: String, removes: String? = null, block: suspend () -> Result<Unit>) {

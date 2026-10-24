@@ -282,4 +282,16 @@ class DrawerViewModelTest {
         advanceTimeBy(2_000)
         assertEquals(initial + 1, loads())
     }
+
+    @Test
+    fun deleteReportsTheDeletedIdOnlyOnSuccess() = runTest {
+        val deleted = mutableListOf<String>()
+        val vm = DrawerViewModel(FakeSessions(sessions), settings, onDeleted = { deleted += it })
+        vm.delete("b")
+        val failing = object : SessionsSource by FakeSessions(sessions) {
+            override suspend fun delete(id: String): Result<Unit> = Result.failure(java.io.IOException("x"))
+        }
+        DrawerViewModel(failing, settings, onDeleted = { deleted += it }).delete("c")
+        assertEquals(listOf("b"), deleted)
+    }
 }

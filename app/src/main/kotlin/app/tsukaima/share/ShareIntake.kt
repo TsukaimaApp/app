@@ -24,6 +24,16 @@ object ShareIntake {
     }
 
     /**
+     * Whether a stream's content provider [authority] may be read: not blank, no user-id prefix (`10@…`, which
+     * would address another user's provider), and not one of this app's own providers ([ownerPackage], the
+     * package the system resolves the authority to, equal to [appPackage]): the share target is exported, so
+     * any app could otherwise have Tsukaima read and upload its own private files. An authority that does not
+     * resolve ([ownerPackage] null) is another app's or none, and fails on open.
+     */
+    fun acceptsAuthority(authority: String?, ownerPackage: String?, appPackage: String): Boolean =
+        !authority.isNullOrBlank() && '@' !in authority && ownerPackage != appPackage
+
+    /**
      * "Link" for a single http(s) URL, else the first line of text cut to 60 chars with "…", else "3 images" /
      * "2 files" / "report.pdf".
      */

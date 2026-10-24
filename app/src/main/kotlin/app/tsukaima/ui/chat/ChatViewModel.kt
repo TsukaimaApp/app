@@ -60,6 +60,11 @@ class ChatViewModel(
     private val dispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
     private val io: CoroutineDispatcher = Dispatchers.IO,
     private val flair: () -> String = ThinkingFlair::next,
+    /**
+     * Whether this chat takes part in sharing: takes shares ([takePendingShare]) and is remembered as the last chat.
+     * False for the device-assistant sheet.
+     */
+    private val sharing: Boolean = true,
 ) : ViewModel() {
     private val session = GatewaySession(backend.transport) { backend.settings.value?.profile }
     private val _state = MutableStateFlow(ChatUiState(loading = storedSessionId != null, isNew = storedSessionId == null))
@@ -102,6 +107,9 @@ class ChatViewModel(
             if (liveChanged) edits.onLiveChanged()
         },
     )
+
+    /** The share waiting when this chat was created: the only NewChat share it takes ([takePendingShare]). */
+    private val shareAtStart: SharedContent? = if (sharing) backend.pendingShare.value else null
 
     /** Cached copies behind the composer's shared attachments ([attachShared]), deleted once each is released. */
     private val sharedSources = mutableMapOf<PickedFile, SharedFile>()
@@ -162,17 +170,12 @@ class ChatViewModel(
                 }
             }
         }
-        launch {
-            // "Continue last chat" on the share card: the chat that last bound a stored id (resumed, created, rotated).
-            _state.map { it.chat.storedSessionId }.filterNotNull().distinctUntilChanged()
-                .collect { backend.rememberLastChat(it) }
-        }
-        // A new chat takes only the share that was waiting when it was created (the one opened for it): a new chat
-        // already open would otherwise take a later one, then be replaced by the chat the share opens.
-        val shareAtStart = backend.pendingShare.value
-        launch {
-            backend.pendingShare.filterNotNull().collect { content ->
-                if (takesShare(content, shareAtStart) && backend.takeShare(content)) attachShared(content)
+        if (sharing) {
+            launch {
+                // "Continue last chat" on the share card: the chat that last bound a stored id (resumed, created,
+                // rotated).
+                _state.map { it.chat.storedSessionId }.filterNotNull().distinctUntilChanged()
+                    .collect { backend.rememberLastChat(it) }
             }
         }
         open()
@@ -260,12 +263,23 @@ class ChatViewModel(
 
     // ---- composer ---------------------------------------------------------------------------------
 
-    /** Whether [content] is this chat's: the stored session it names, or (a new chat's) the share it opened for. */
-    private fun takesShare(content: SharedContent, atStart: SharedContent?): Boolean =
-        when (val id = content.sessionId) {
-            null -> content.target == ShareTarget.NewChat && storedSessionId == null && content === atStart
-            else -> id == storedSessionId
+    /**
+     * The chat screen came to the front (ON_RESUME): takes the waiting share ([ChatBackend.pendingShare]) when it is
+     * this chat's, once (compare-and-set). A chat under another screen is never resumed, so it never takes one meant
+     * for the fresh chat the share opens. A LastChat share is this chat's when it names this chat's stored id; a
+     * NewChat share when this is a new chat created while the share was already waiting ([shareAtStart]): a new chat
+     * on screen when the user shared is resumed before the app navigates to the chat opened for the share, and would
+     * otherwise take it and then be replaced.
+     */
+    fun takePendingShare() {
+        if (!sharing) return
+        val content = backend.pendingShare.value ?: return
+        val mine = when (content.target) {
+            ShareTarget.NewChat -> storedSessionId == null && content === shareAtStart
+            ShareTarget.LastChat -> content.sessionId != null && content.sessionId == storedSessionId
         }
+        if (mine && backend.takeShare(content)) attachShared(content)
+    }
 
     /**
      * A share taken off [ChatBackend.pendingShare]: its text goes into the composer (after a blank line when there

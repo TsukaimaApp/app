@@ -198,7 +198,10 @@ fun ChatScreen(
     val activity = LocalActivity.current
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { if (activity?.isChangingConfigurations != true) vm.closeVoice() }
     // Back from a connection's browser leg: the backend reads the account now.
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.onScreenResumed() }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        vm.onScreenResumed()
+        vm.takePendingShare() // a share from another app meant for this chat
+    }
     ChatContent(
         state = state,
         showMenu = showMenu,

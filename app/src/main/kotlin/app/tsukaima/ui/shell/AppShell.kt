@@ -46,6 +46,8 @@ import app.tsukaima.data.ticks
 import app.tsukaima.di.AppContainer
 import app.tsukaima.ui.components.ToastHost
 import app.tsukaima.share.ShareTarget
+import android.util.Log
+import java.io.IOException
 import app.tsukaima.ui.drawer.DrawerViewModel
 import app.tsukaima.ui.drawer.SessionsDrawer
 import app.tsukaima.ui.navigation.Route
@@ -104,6 +106,15 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
                     container.settings,
                     isReachable = { container.connection.hermes.value.reachable },
                     changes = container.gateway.events.ticks(ServerChanges.SESSIONS),
+                    onDeleted = { id ->
+                        if (container.settings.value?.lastChatId == id) {
+                            try {
+                                container.settingsStore.update { it.copy(lastChatId = null) }
+                            } catch (e: IOException) {
+                                Log.w("Tsukaima", "forgetting the last chat failed", e)
+                            }
+                        }
+                    },
                 )
             }
         },
@@ -149,11 +160,9 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
                 ApprovalNotifier.SCREEN_CHAT -> {
                     // A share for a new chat opens one (not the last conversation): the new chat takes it.
                     val newChatShare = container.pendingShare.value?.target == ShareTarget.NewChat
-                    val session = if (newChatShare) {
-                        null
-                    } else {
-                        request.sessionId ?: container.settings.value?.lastSessionId
-                    }
+                    // A notification's own session id still wins.
+                    val session = request.sessionId
+                        ?: if (newChatShare) null else container.settings.value?.lastSessionId
                     val entryNow = navController.currentBackStackEntry
                     val alreadyOpen = session != null && entryNow?.destination?.route == Route.Chat.path &&
                         entryNow.arguments?.getString(Route.ARG_SESSION) == session

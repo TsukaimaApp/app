@@ -46,7 +46,10 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
-/** A share ([ChatBackend.pendingShare]) lands in the right chat's composer, once, and its cached copy is released. */
+/**
+ * A share ([ChatBackend.pendingShare]) lands in the right chat's composer, once, when that chat's screen resumes
+ * ([ChatViewModel.takePendingShare]), and its cached copy is released.
+ */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModelShareTest {
     @get:Rule
@@ -138,8 +141,9 @@ class ChatViewModelShareTest {
         ),
     )
 
-    private fun vm(b: Backend, storedId: String? = null) =
-        ChatViewModel(b, storedId, dispatcher = dispatcher, io = dispatcher, flair = { "flair" }).also { created += it }
+    private fun vm(b: Backend, storedId: String? = null, sharing: Boolean = true) =
+        ChatViewModel(b, storedId, dispatcher = dispatcher, io = dispatcher, flair = { "flair" }, sharing = sharing)
+            .also { created += it }
 
     private fun sharedFile(name: String = "notes.txt"): SharedFile {
         val dir = tmp.newFolder()
@@ -154,6 +158,7 @@ class ChatViewModelShareTest {
         b.pendingShare.value = SharedContent("hello", listOf(file), ShareTarget.NewChat, sessionId = null)
 
         val vm = vm(b)
+        vm.takePendingShare()
         advanceUntilIdle()
 
         assertEquals("hello", vm.state.value.input)
@@ -161,6 +166,11 @@ class ChatViewModelShareTest {
         assertEquals("notes.txt", chip.name)
         assertNull("consumed once", b.pendingShare.value)
         assertTrue(b.deleted.isEmpty())
+
+        vm.takePendingShare() // a rotation resumes the screen again: nothing more
+        advanceUntilIdle()
+        assertEquals("hello", vm.state.value.input)
+        assertEquals(1, vm.state.value.attachments.size)
 
         vm.send()
         advanceUntilIdle()
@@ -175,6 +185,9 @@ class ChatViewModelShareTest {
 
         val mine = vm(b, storedId = "s-mine")
         val fresh = vm(b) // a new chat takes only a NewChat share
+        advanceUntilIdle()
+        mine.takePendingShare()
+        fresh.takePendingShare()
         advanceUntilIdle()
 
         assertEquals("", mine.state.value.input)
@@ -191,9 +204,10 @@ class ChatViewModelShareTest {
         advanceUntilIdle()
         vm.setInput("draft")
 
-        // The share arrives while this chat's view model already exists.
+        // The share arrives while this chat is open (the app was in the background), then the chat resumes.
         b.pendingShare.value =
             SharedContent("https://example.com/a", emptyList(), ShareTarget.LastChat, sessionId = "s-mine")
+        vm.takePendingShare()
         advanceUntilIdle()
 
         assertEquals("draft\n\nhttps://example.com/a", vm.state.value.input)
@@ -201,17 +215,40 @@ class ChatViewModelShareTest {
     }
 
     @Test
-    fun aNewChatOpenedEarlierLeavesALaterNewChatShareToTheFreshOne() = runTest(dispatcher) {
+    fun aChatUnderAnotherScreenLeavesItsShareToTheFreshChatTheShareOpens() = runTest(dispatcher) {
+        val b = backend(stored = "s-x")
+        val buried = vm(b, storedId = "s-x") // Status → Chat(X) → Settings: never resumed while the share waits
+        advanceUntilIdle()
+        val file = sharedFile()
+        b.pendingShare.value = SharedContent("hello", listOf(file), ShareTarget.LastChat, sessionId = "s-x")
+        advanceUntilIdle()
+
+        val fresh = vm(b, storedId = "s-x") // navigateTop(Chat(X)): a new entry, resumed
+        fresh.takePendingShare()
+        advanceUntilIdle()
+
+        assertEquals("", buried.state.value.input)
+        assertTrue(buried.state.value.attachments.isEmpty())
+        assertEquals("hello", fresh.state.value.input)
+        assertEquals("notes.txt", fresh.state.value.attachments.single().name)
+        assertNull(b.pendingShare.value)
+        assertTrue(b.deleted.isEmpty())
+    }
+
+    @Test
+    fun aNewChatOnScreenBeforeTheShareLeavesItToTheFreshOne() = runTest(dispatcher) {
         val b = backend()
-        val earlier = vm(b) // e.g. the new chat on screen before the user went to share from another app
+        val earlier = vm(b) // the new chat on screen before the user shared from another app
         advanceUntilIdle()
         val share = SharedContent("hello", emptyList(), ShareTarget.NewChat, sessionId = null)
         b.pendingShare.value = share
+        earlier.takePendingShare() // the app comes back: it resumes before the share's new chat replaces it
         advanceUntilIdle()
         assertEquals("", earlier.state.value.input)
         assertSame(share, b.pendingShare.value)
 
         val fresh = vm(b)
+        fresh.takePendingShare()
         advanceUntilIdle()
         assertEquals("hello", fresh.state.value.input)
         assertNull(b.pendingShare.value)
@@ -230,11 +267,26 @@ class ChatViewModelShareTest {
     }
 
     @Test
+    fun theAssistChatNeitherBecomesTheLastChatNorTakesShares() = runTest(dispatcher) {
+        val b = backend(stored = "s-assist")
+        val share = SharedContent("hello", emptyList(), ShareTarget.NewChat, sessionId = null)
+        b.pendingShare.value = share
+        val assist = vm(b, sharing = false)
+        assist.takePendingShare()
+        advanceUntilIdle()
+
+        assertNull(b.settings.value?.lastChatId)
+        assertEquals("", assist.state.value.input)
+        assertSame(share, b.pendingShare.value)
+    }
+
+    @Test
     fun removingASharedAttachmentDeletesItsCopy() = runTest(dispatcher) {
         val b = backend()
         val file = sharedFile()
         b.pendingShare.value = SharedContent("", listOf(file), ShareTarget.NewChat, sessionId = null)
         val vm = vm(b)
+        vm.takePendingShare()
         advanceUntilIdle()
 
         vm.removeAttachment(vm.state.value.attachments.single().localId)

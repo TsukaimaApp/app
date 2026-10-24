@@ -1,6 +1,7 @@
 package app.tsukaima.share
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -47,5 +48,17 @@ class ShareIntakeTest {
         assertEquals("report.pdf", ShareIntake.summary("", listOf(file("report.pdf", "application/pdf"))))
         val mixed = listOf(file("a.png", "image/png"), file("r.pdf", "application/pdf"))
         assertEquals("2 files", ShareIntake.summary("", mixed))
+    }
+
+    @Test
+    fun onlyOtherAppsProvidersAreRead() {
+        val app = "app.tsukaima"
+        val photos = "com.google.android.apps.photos"
+        assertTrue(ShareIntake.acceptsAuthority("$photos.contentprovider", photos, app))
+        assertTrue("unresolved: fails on open", ShareIntake.acceptsAuthority("media", null, app))
+        assertFalse("our own provider", ShareIntake.acceptsAuthority("x.files", app, app))
+        assertFalse("user-id prefix", ShareIntake.acceptsAuthority("10@media", "com.android.providers.media", app))
+        assertFalse(ShareIntake.acceptsAuthority("", null, app))
+        assertFalse(ShareIntake.acceptsAuthority(null, null, app))
     }
 }
