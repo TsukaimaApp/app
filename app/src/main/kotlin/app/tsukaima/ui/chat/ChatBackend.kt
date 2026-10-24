@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
@@ -20,6 +21,7 @@ import app.tsukaima.data.RecentIds
 import app.tsukaima.data.api.FileDownload
 import app.tsukaima.data.api.ModelOptionsDto
 import app.tsukaima.data.api.TranscriptionDto
+import app.tsukaima.data.api.VoiceLiveStatusDto
 import app.tsukaima.data.api.WorkspacesDto
 import app.tsukaima.data.files.FileSaver
 import app.tsukaima.data.files.ImagePreview
@@ -31,6 +33,7 @@ import app.tsukaima.data.prefs.Settings
 import app.tsukaima.di.AppContainer
 import app.tsukaima.domain.chat.ChatItem
 import app.tsukaima.domain.chat.ChatReducer
+import app.tsukaima.domain.livevoice.LiveTransport
 import app.tsukaima.domain.voice.SpeechInput
 import app.tsukaima.domain.voice.SpeechOutput
 import app.tsukaima.domain.voice.VoiceLanguage
@@ -122,6 +125,30 @@ interface ChatBackend {
     /** The voice language picker's options, "System default" first (device locales, TTS languages, fallback). */
     fun voiceLanguages(): List<VoiceLanguage>
 
+    /**
+     * Whether the user allows the GPT-Live engine ([Settings.liveVoice]); it is used only when the server reports
+     * `gpt-live` too ([voiceLiveStatus]). False for backends without a live path.
+     */
+    val liveVoiceEnabled: Boolean get() = false
+
+    /** The server's voice engine (`GET …/voice-live/status`); a failure means the phone engine. */
+    suspend fun voiceLiveStatus(): Result<VoiceLiveStatusDto> = Result.failure(IOException("no live voice"))
+
+    /** A fresh transport for one live voice session. Only called when [liveVoiceEnabled]. */
+    fun liveTransport(): LiveTransport = error("no live voice")
+
+    /** A live voice session started: keep mic and connection alive while the screen is off. */
+    fun startLiveService() = Unit
+
+    /** The live voice session ended. */
+    fun stopLiveService() = Unit
+
+    /** The live voice notification's End action: the chat with a live session open closes it. */
+    val liveVoiceEndRequests: Flow<Unit> get() = emptyFlow()
+
+    /** Seconds of the live voice session running now (the chat writes it, the notification shows it). */
+    val liveVoiceSeconds: MutableStateFlow<Int> get() = MutableStateFlow(0) // no live path: a write goes nowhere
+
     /** A share from another app waiting for its chat ([SharedContent.target]); null when none. */
     val pendingShare: StateFlow<SharedContent?> get() = NoPendingShare
 
@@ -185,6 +212,13 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override fun speechInput() = c.speechInput()
     override fun speechOutput() = c.speechOutput()
     override fun voiceLanguages() = c.voiceLanguages(includeEngine = true)
+    override val liveVoiceEnabled get() = c.settings.value?.liveVoice ?: true
+    override suspend fun voiceLiveStatus() = c.repository.voiceLiveStatus()
+    override fun liveTransport() = c.liveTransport()
+    override fun startLiveService() = Unit // the foreground service comes with the notification (Task 9)
+    override fun stopLiveService() = Unit
+    override val liveVoiceEndRequests get() = c.liveVoiceEndRequests
+    override val liveVoiceSeconds get() = c.liveVoiceSeconds
     override val pendingShare get() = c.pendingShare
     override fun takeShare(content: SharedContent) = c.pendingShare.compareAndSet(content, null)
     override fun deleteSharedFile(file: SharedFile) {

@@ -11,6 +11,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -60,6 +61,9 @@ import app.tsukaima.domain.voice.VoiceLanguage
 import app.tsukaima.domain.voice.VoiceLanguages
 import app.tsukaima.ui.components.ToastState
 import app.tsukaima.voice.AndroidSpeechInput
+import app.tsukaima.voice.live.WebRtcLiveTransport
+import app.tsukaima.domain.livevoice.LiveStartException
+import app.tsukaima.domain.livevoice.LiveTransport
 import app.tsukaima.voice.AndroidSpeechOutput
 import app.tsukaima.voice.ServerSpeechInput
 import app.tsukaima.voice.ServerSpeechOutput
@@ -226,6 +230,21 @@ class AppContainer(context: Context) {
         val here = Locale.getDefault()
         return Locale.forLanguageTag(tag).getDisplayName(here).ifBlank { tag }.replaceFirstChar { it.titlecase(here) }
     }
+
+    /**
+     * A fresh WebRTC transport for one GPT-Live session; its offer goes to Hermes (`POST …/voice-live/session`),
+     * which answers with the vendor's SDP.
+     */
+    fun liveTransport(): LiveTransport = WebRtcLiveTransport(appContext) { sdp, history ->
+        repository.voiceLiveSession(sdp, history).getOrThrow().transport?.sdp?.takeIf { it.isNotBlank() }
+            ?: throw LiveStartException("no answer SDP")
+    }
+
+    /** The live voice notification's End action; the chat with the live session open closes it. */
+    val liveVoiceEndRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    /** Seconds of the live voice session running now (0 when none); the notification shows them. */
+    val liveVoiceSeconds = MutableStateFlow(0)
 
     fun openFile(uri: String, mime: String): Boolean = viewFile(appContext, uri, mime)
 

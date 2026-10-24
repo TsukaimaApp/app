@@ -41,6 +41,8 @@ internal class ChatReconnector(
      * with the items it replaced and whether the live session id changed.
      */
     private val onRebuilt: (before: List<ChatItem>, liveChanged: Boolean) -> Unit = { _, _ -> },
+    /** Runs just before the transcript is replaced by stored history ([onRebuilt] follows). */
+    private val onRebuilding: () -> Unit = {},
 ) {
     private var job: Job? = null
     private var held: MutableList<Frame.Event>? = null
@@ -95,6 +97,7 @@ internal class ChatReconnector(
             val r = session.resume(stored)
             val sameLive = r.sessionId == previousLive
             val beforeBind = chat.items
+            if (!sameLive) onRebuilding()
             bindResumed(r, rebuild = !sameLive)
             if (!sameLive) onRebuilt(beforeBind, true)
             // A chat that saw no seq yet sends 0, not the NO_SEQ sentinel: the server reads a negative
@@ -104,6 +107,7 @@ internal class ChatReconnector(
                 // The ring lost events we never saw: trust the stored history instead of a replay with holes. A
                 // pending Stop stays only while the session still runs: a lost turn end will never clear it.
                 val beforeTruncated = chat.items
+                onRebuilding()
                 setChat {
                     it.copy(
                         items = withCarried(ChatSync.transcript(r), it.items),

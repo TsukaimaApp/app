@@ -194,9 +194,15 @@ fun ChatScreen(
         if (granted) vm.openVoice() else vm.voiceDenied()
     }
     LaunchedEffect(vm) { vm.closed.collect { onDeleted() } }
-    // Voice mode ends when the chat leaves the screen (app in the background, another destination), not on rotation.
+    // The phone voice ends when the chat leaves the screen (app in the background, another destination), not on
+    // rotation; a live session goes on in the background (its service holds the mic) until the chat itself is left.
     val activity = LocalActivity.current
-    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { if (activity?.isChangingConfigurations != true) vm.closeVoice() }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        if (activity?.isChangingConfigurations != true && vm.state.value.voice?.live == null) vm.closeVoice()
+    }
+    DisposableEffect(Unit) {
+        onDispose { if (activity?.isChangingConfigurations != true) vm.closeVoice() }
+    }
     // Back from a connection's browser leg: the backend reads the account now.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         vm.onScreenResumed()

@@ -7,6 +7,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,6 +26,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import app.tsukaima.data.api.VoiceLiveStatusDto
 import app.tsukaima.data.gateway.ApprovalChoice
 import app.tsukaima.data.gateway.ConnectionState
 import app.tsukaima.data.gateway.GatewayClosedException
@@ -41,6 +43,8 @@ import app.tsukaima.domain.chat.ThinkingFlair
 import app.tsukaima.domain.chat.queuesSends
 import app.tsukaima.domain.voice.VoiceLanguages
 import app.tsukaima.domain.voice.VoiceMode
+import app.tsukaima.domain.voice.VoicePhase
+import app.tsukaima.domain.voice.VoiceState
 import app.tsukaima.share.ShareTarget
 import app.tsukaima.share.SharedContent
 import app.tsukaima.share.SharedFile
@@ -65,6 +69,8 @@ class ChatViewModel(
      * False for the device-assistant sheet.
      */
     private val sharing: Boolean = true,
+    /** The clock (milliseconds, monotonic): the voice engine status cache and the live voice meter. */
+    private val now: () -> Long = { System.nanoTime() / 1_000_000 },
 ) : ViewModel() {
     private val session = GatewaySession(backend.transport) { backend.settings.value?.profile }
     private val _state = MutableStateFlow(ChatUiState(loading = storedSessionId != null, isNew = storedSessionId == null))
@@ -89,6 +95,8 @@ class ChatViewModel(
         val attachments: List<PendingAttachment>,
         val voice: Boolean = false,
         val interrupted: Boolean = false,
+        val surface: String? = null,
+        val voiceContext: String? = null,
     )
 
     private val failedSends = mutableMapOf<String, FailedSend>()
@@ -100,6 +108,7 @@ class ChatViewModel(
     private val queuedSends = mutableMapOf<String, FailedSend>()
     private val sync = ChatReconnector(
         session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), storedSessionId, flair, _state,
+        onRebuilding = { voice.beginRebuild() },
         onRebuilt = { before, liveChanged ->
             restorePurgedSends(before, rowsKept = false) // a resume retires never-drained queue rows
             restoreFailedSends()
@@ -139,7 +148,16 @@ class ChatViewModel(
         _state,
         { text, interrupted -> sendText(text, voice = true, interrupted = interrupted) },
         history,
+        sendLive = ::sendLive,
+        interrupt = ::interrupt,
+        now = now,
     )
+
+    /** The Mic tap's status call in flight ([openVoice]). */
+    private var voiceStart: Job? = null
+
+    /** The last voice engine status and when it came (`now()`), reused for [LIVE_STATUS_TTL_MS]. */
+    private var liveStatus: Pair<Long, VoiceLiveStatusDto?>? = null
 
     private val chat get() = _state.value.chat
     private fun setChat(block: (ChatState) -> ChatState) = _state.update { it.copy(chat = block(it.chat)) }
@@ -156,6 +174,8 @@ class ChatViewModel(
                 .filter { it.isNotEmpty() }
                 .collect { done -> _state.update { it.copy(answeringConnections = it.answeringConnections - done) } }
         }
+        // The live voice notification's End: only a chat with the live engine open answers it.
+        launch { backend.liveVoiceEndRequests.collect { if (voice.liveOpen) closeVoice() } }
         launch {
             backend.settings.filterNotNull().map { it.voiceLanguage }.distinctUntilChanged().collect { tag ->
                 _state.update { it.copy(voiceLanguage = tag) }
@@ -338,16 +358,33 @@ class ChatViewModel(
     }
 
     /**
+     * A GPT-Live delegation: sends [prompt] (the user's last words) with [context] (the recent spoken exchange) as a
+     * `voice-live` turn, never queued (the live engine interrupts a running turn first). As [sendText] otherwise: the
+     * user bubble is in and the status Thinking before this returns.
+     */
+    fun sendLive(prompt: String, context: String): Boolean {
+        val trimmed = prompt.trim()
+        if (trimmed.isEmpty()) return false
+        if (!_state.value.writable) return false.also { backend.toast("Not connected to Hermes") }
+        if (_state.value.compacting) {
+            return false.also { backend.toast("Compacting the context, try again in a moment") }
+        }
+        val live = chat.liveSessionId ?: return false.also { backend.toast("Still connecting to Hermes") }
+        startTurn(live, trimmed, emptyList(), fromComposer = false, surface = VOICE_LIVE, voiceContext = context)
+        return true
+    }
+
+    /**
      * Adds the user bubble (status Thinking) and submits it; [fromComposer] also clears the typed text. While a turn
      * runs a typed send is queued behind it (never a redirect that would end it); a voice turn is not.
      */
     private fun startTurn(
         live: String, text: String, sent: List<PendingAttachment>, fromComposer: Boolean,
-        voice: Boolean = false, interrupted: Boolean = false,
+        voice: Boolean = false, interrupted: Boolean = false, surface: String? = null, voiceContext: String? = null,
     ) {
         val localId = "u-l${++userCounter}"
         pruneQueuedSends()
-        val queued = mustQueue(voice)
+        val queued = mustQueue(voice, surface)
         _state.update {
             val chat = ChatReducer.onSubmitted(
                 it.chat, text, localId, flair, sent.map(PendingAttachment::name),
@@ -355,7 +392,8 @@ class ChatViewModel(
             )
             if (fromComposer) it.copy(input = "", chat = chat) else it.copy(chat = chat)
         }
-        launch { submit(live, localId, text, sent, voice, interrupted, queued) }
+        val request = FailedSend(text, sent, voice, interrupted, surface, voiceContext)
+        launch { submit(live, localId, text, sent, request, queued) }
     }
 
     /**
@@ -363,18 +401,21 @@ class ChatViewModel(
      * and attachments wait in [failedSends] (not back in the composer, which would show them twice).
      */
     private suspend fun submit(
-        live: String, localId: String, text: String, sent: List<PendingAttachment>,
-        voice: Boolean = false, interrupted: Boolean = false, queued: Boolean = false,
+        live: String, localId: String, text: String, sent: List<PendingAttachment>, request: FailedSend,
+        queued: Boolean = false,
     ) {
         try {
-            val accepted = session.submit(live, Attachments.promptText(text, sent), voice, interrupted, queued = queued)
+            val accepted = session.submit(
+                live, Attachments.promptText(text, sent), request.voice, request.interrupted, queued = queued,
+                surface = request.surface, voiceContext = request.voiceContext,
+            )
             attachments.sent(sent)
-            if (queued && accepted.status == QUEUED) queuedSends[localId] = FailedSend(text, sent, voice, interrupted)
+            if (queued && accepted.status == QUEUED) queuedSends[localId] = request
             setChat { ChatReducer.onSubmitAccepted(it, localId, accepted.userRowId, status = accepted.status) }
         } catch (c: CancellationException) {
             throw c
         } catch (e: Exception) {
-            failedSends[localId] = FailedSend(text, sent, voice, interrupted)
+            failedSends[localId] = request
             // A queued send that failed leaves the live turn running.
             setChat { c -> c.copy(items = c.items.markFailed(localId, true), status = if (queued) c.status else unlessOffline(c.status, AgentStatus.Idle)) }
             backend.toast("Message not sent: ${e.message ?: "gateway error"}")
@@ -403,12 +444,12 @@ class ChatViewModel(
         }
         failedSends.remove(localId)
         queuedSends.remove(localId)
-        val queued = mustQueue(failed.voice)
+        val queued = mustQueue(failed.voice, failed.surface)
         setChat { c ->
             val items = c.items.markFailed(localId, false, queued)
             c.copy(items = items, status = if (queued) c.status else AgentStatus.Thinking(flair()))
         }
-        launch { submit(live, localId, failed.text, failed.attachments, failed.voice, failed.interrupted, queued) }
+        launch { submit(live, localId, failed.text, failed.attachments, failed, queued) }
     }
 
     /** The reasoning header of message [id] was tapped. */
@@ -464,10 +505,10 @@ class ChatViewModel(
 
     /**
      * A typed send goes behind the running turn (`queued: true`), and behind earlier queued sends still waiting (the
-     * server may be between turns, about to run them): [queuesSends], which the composer shows too. A voice turn never
-     * queues.
+     * server may be between turns, about to run them): [queuesSends], which the composer shows too. A voice turn (and
+     * a GPT-Live delegation, [surface] `voice-live`) never queues.
      */
-    private fun mustQueue(voice: Boolean) = !voice && chat.queuesSends
+    private fun mustQueue(voice: Boolean, surface: String? = null) = !voice && surface != VOICE_LIVE && chat.queuesSends
 
     /** A failed bubble's send: one that never reached Hermes, or a queued one whose turn end purged it. */
     private fun failedSend(localId: String): FailedSend? =
@@ -720,15 +761,49 @@ class ChatViewModel(
     // ---- voice ------------------------------------------------------------------------------------
 
     /**
-     * Opens voice mode on this chat (no-op while open); see [ChatVoice]. Needs `RECORD_AUDIO`, asked by the screen.
-     * A resumed chat starts voice only once its history is in, so nothing said before is spoken; [listen] false
-     * waits for a tap on the indicator instead of listening at once.
+     * Opens voice mode on this chat (no-op while open, or while a closed live session is still ending); see
+     * [ChatVoice]. Needs `RECORD_AUDIO`, asked by the screen. In the app with the live voice setting on, the server
+     * is asked first (at most [LIVE_STATUS_TIMEOUT_MS], the answer reused for [LIVE_STATUS_TTL_MS]) while the voice
+     * screen shows Connecting…: `gpt-live` and available opens the GPT-Live engine, anything else the phone engine,
+     * which a live start failure also falls back to (with a toast). A resumed chat starts voice only once its history
+     * is in, so nothing said before is spoken; [listen] false waits for a tap on the indicator instead of listening
+     * at once.
      */
-    fun openVoice(mode: VoiceMode = VoiceMode.InApp, onApprovalNeeded: () -> Unit = {}, listen: Boolean = true) =
-        voice.open(mode, onApprovalNeeded, listen)
+    fun openVoice(mode: VoiceMode = VoiceMode.InApp, onApprovalNeeded: () -> Unit = {}, listen: Boolean = true) {
+        if (voice.busy || voiceStart?.isActive == true) return
+        if (mode == VoiceMode.Assist || !backend.liveVoiceEnabled) return voice.open(mode, onApprovalNeeded, listen)
+        _state.update {
+            it.copy(voice = VoiceState(phase = VoicePhase.Idle, caption = CONNECTING, startIndex = it.chat.items.size))
+        }
+        voiceStart = launch {
+            val status = voiceLiveStatus()
+            val engine = if (status != null && status.mode == GPT_LIVE && status.available) {
+                VoiceEngine.Live(status.voice.ifBlank { "live" })
+            } else {
+                VoiceEngine.Chained
+            }
+            voice.open(mode, onApprovalNeeded, listen, engine) {
+                backend.toast("Live voice couldn’t start — using phone voice")
+                voice.open(mode, onApprovalNeeded, listen, VoiceEngine.Chained)
+            }
+        }
+    }
 
-    /** Leaves voice mode: listening and speech stop, the running turn goes on. */
-    fun closeVoice() = voice.close()
+    /** The server's voice engine status: cached for [LIVE_STATUS_TTL_MS]; null on timeout or any failure. */
+    private suspend fun voiceLiveStatus(): VoiceLiveStatusDto? {
+        liveStatus?.let { (at, status) -> if (now() - at < LIVE_STATUS_TTL_MS) return status }
+        val status = withTimeoutOrNull(LIVE_STATUS_TIMEOUT_MS) { backend.voiceLiveStatus() }?.getOrNull()
+        liveStatus = now() to status
+        return status
+    }
+
+    /** Leaves voice mode: listening and speech stop (a live session ends), the running turn goes on. */
+    fun closeVoice() {
+        if (voiceStart?.isActive == true) _state.update { it.copy(voice = null) } // the status call was in flight
+        voiceStart?.cancel()
+        voiceStart = null
+        voice.close()
+    }
 
     fun setVoiceMuted(muted: Boolean) = voice.setMuted(muted)
 
@@ -761,7 +836,8 @@ class ChatViewModel(
     fun voiceDenied() = backend.toast("Microphone access is needed for voice mode")
 
     override fun onCleared() {
-        closeVoice()
+        voiceStart?.cancel()
+        voice.dispose()
         // Shared copies still in the composer (or held for a retry) go with the chat.
         sharedSources.values.forEach(backend::deleteSharedFile)
         sharedSources.clear()
@@ -998,5 +1074,19 @@ class ChatViewModel(
 
         /** How long a voice language pick waits for the saved setting to show before restarting the recogniser. */
         const val SETTINGS_SETTLE_MS = 2_000L
+
+        /** The Mic tap's budget for the voice engine status call. */
+        const val LIVE_STATUS_TIMEOUT_MS = 4_000L
+
+        /** How long a voice engine status answer is reused. */
+        const val LIVE_STATUS_TTL_MS = 60_000L
+
+        /** The status `mode` of the GPT-Live engine. */
+        const val GPT_LIVE = "gpt-live"
+
+        /** `prompt.submit` surface of a GPT-Live delegation. */
+        const val VOICE_LIVE = "voice-live"
+
+        const val CONNECTING = "Connecting…"
     }
 }

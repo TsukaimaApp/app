@@ -601,6 +601,34 @@ class LiveVoiceControllerTest {
         assertEquals(listOf("It is noon.", "In Tokyo"), r.says)
     }
 
+    @Test fun beginRebuildHoldsTheFeedUntilRebased() = liveTest {
+        val r = rig(unconfined = true)
+        user(r, "what time is it")
+        delegate(r, "d1")
+        r.add(reply("a1", "It is noon. In Tokyo", streaming = true), AgentStatus.Replying)
+        settle()
+        assertEquals(listOf("It is noon."), r.says)
+        val before = r.chat.value.items
+        r.controller.beginRebuild()
+        // An older reply now sits where this turn began: fed before rebased, it and this reply would be spoken.
+        r.chat.value = r.chat.value.copy(
+            items = listOf(ChatItem.UserMessage("h0", "older"), ChatItem.UserMessage("h1", "earlier"),
+                reply("h2", "An old answer that ran long. With more.", streaming = false),
+                ChatItem.UserMessage("h3", "what time is it"), reply("h4", "It is noon. In Tokyo", streaming = true)),
+        )
+        settle()
+        assertEquals(listOf("It is noon."), r.says)
+        r.controller.rebased(before)
+        settle()
+        assertEquals(listOf("It is noon."), r.says)
+        r.chat.update { c ->
+            c.copy(items = c.items.dropLast(1) + reply("h4", "It is noon. In Tokyo", streaming = false),
+                status = AgentStatus.Idle)
+        }
+        settle()
+        assertEquals(listOf("It is noon.", "In Tokyo"), r.says)
+    }
+
     @Test fun stopDuringTheStartWindowEndsWithItsReason() = liveTest {
         val t = FakeLiveTransport().apply { startGate = CompletableDeferred() }
         val r = rig(started = false, transport = t)

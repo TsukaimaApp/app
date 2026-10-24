@@ -91,6 +91,7 @@ class LiveVoiceController(
     private val cursors = ArrayList<ReplyCursor>() // by ordinal: the k-th assistant message since the submit
     private val handledRequests = HashSet<String>() // request card ids already announced
     private var startedAt = 0L
+    private var rebuilding = false // between beginRebuild and rebased: the chat's items are not the ones fed so far
 
     /**
      * How far one assistant message of the active delegation was spoken. Keyed by ordinal, not id, so a history
@@ -190,6 +191,15 @@ class LiveVoiceController(
     }
 
     /**
+     * The chat's transcript is about to be replaced (call it before the rebuild): the reply is not fed from the
+     * rebuilt items until [rebased] has moved the cursors onto them, so a collector that sees the new items first
+     * (on an immediate dispatcher, inside the update) cannot speak an old reply or this one again.
+     */
+    fun beginRebuild() {
+        rebuilding = true
+    }
+
+    /**
      * The chat's transcript was replaced (a reconnect rebuilt it from stored history, so every item has a new id);
      * [itemsBeforeRebuild] is the transcript just before. Call it right after the rebuild (same thread). The voice
      * transcript keeps as many trailing items as it showed before, the active delegation's submit point moves the
@@ -199,6 +209,7 @@ class LiveVoiceController(
      * the spoken prefix ends on a boundary there and nothing is spoken twice or skipped.
      */
     fun rebased(itemsBeforeRebuild: List<ChatItem>) {
+        rebuilding = false
         if (!launched || ended) return
         val items = chat.value.items
         fun moved(index: Int) =
@@ -338,7 +349,7 @@ class LiveVoiceController(
     /** One step of the delegation loop; idempotent (called on every chat change and every [TICK_MS]). */
     private fun feed() {
         val id = delegationId ?: return
-        if (ended) return
+        if (ended || rebuilding) return
         val c = chat.value
         val status = c.status
         // turnLive, not running: a turn paused on a request card is not finished.
