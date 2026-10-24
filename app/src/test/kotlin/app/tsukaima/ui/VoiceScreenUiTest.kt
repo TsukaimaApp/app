@@ -1,11 +1,13 @@
 package app.tsukaima.ui
 
 import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import app.tsukaima.domain.chat.AgentStatus
 import app.tsukaima.domain.chat.ChatState
+import app.tsukaima.domain.voice.LiveInfo
 import app.tsukaima.domain.voice.VoicePhase
 import app.tsukaima.domain.voice.VoiceState
 import app.tsukaima.ui.chat.ChatActions
@@ -57,5 +59,31 @@ class VoiceScreenUiTest : ComposeUiTest() {
         // The label sits on the icon; the 64dp clickable circle merges it, so the labelled node is the button.
         compose.onNodeWithContentDescription("End voice").assertHasClickAction().performClick()
         assertEquals(1, closes)
+    }
+
+    private fun renderLive(voice: VoiceState) = setThemed {
+        VoiceScreen(
+            state = ChatUiState(chat = ChatState(status = AgentStatus.Idle), model = "Hermes 4 · 405B", isNew = false),
+            voice = voice,
+            actions = ChatActions(),
+            onModel = {},
+        )
+    }
+
+    @Test
+    fun `live mode shows voice chip timer and caption`() {
+        renderLive(VoiceState(phase = VoicePhase.Listening, live = LiveInfo("marin", 84), caption = "Sure, checking."))
+
+        compose.onNodeWithText("Live · marin").assertExists().assertHasNoClickAction()
+        compose.onNodeWithText("Listening · 1:24").assertExists()
+        compose.onNodeWithText("Sure, checking.").assertExists()
+        compose.onNodeWithContentDescription("Voice language").assertDoesNotExist()
+    }
+
+    @Test
+    fun `ended live shows the reason`() {
+        renderLive(VoiceState(phase = VoicePhase.Idle, live = LiveInfo("marin", 84, ended = "connection_lost")))
+
+        compose.onNodeWithText("Live voice dropped").assertExists()
     }
 }

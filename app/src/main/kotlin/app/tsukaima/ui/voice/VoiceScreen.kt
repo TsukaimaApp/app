@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -38,6 +39,7 @@ import app.tsukaima.domain.chat.AgentStatus
 import app.tsukaima.domain.chat.ChatItem
 import app.tsukaima.domain.chat.ChatState
 import app.tsukaima.domain.chat.ToolStatus
+import app.tsukaima.domain.voice.LiveInfo
 import app.tsukaima.domain.voice.VoiceMode
 import app.tsukaima.domain.voice.VoicePhase
 import app.tsukaima.domain.voice.VoiceState
@@ -110,7 +112,13 @@ fun VoiceScreen(
             Spacer(Modifier.weight(1f))
             Chip(state.model ?: "Model", onClick = onModel, trailing = IconName.ExpandMore, borderless = true)
             Spacer(Modifier.weight(1f))
-            IconButton44(IconName.Translate, "Voice language", onClick = { actions.onMenu(ChatMenu.VoiceLanguage) })
+            val live = voice.live
+            if (live != null) {
+                // Passive: the live voice is the server's, there is no language to pick.
+                Chip("Live · ${live.voice}", onClick = null, borderless = true)
+            } else {
+                IconButton44(IconName.Translate, "Voice language", onClick = { actions.onMenu(ChatMenu.VoiceLanguage) })
+            }
         }
         Column(
             modifier = Modifier
@@ -122,9 +130,20 @@ fun VoiceScreen(
         ) {
             VoiceIndicator(voice.phase, 180.dp, onTap = actions.onVoiceTap)
             VoiceStatusLine(
-                voiceLine(voice.phase, state.status, VoiceMode.InApp, voice.transcribing),
+                voiceLine(voice.phase, state.status, VoiceMode.InApp, voice.transcribing, voice.live),
                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 2.dp),
             )
+            if (voice.caption.isNotBlank()) {
+                Text(
+                    voice.caption,
+                    style = TsukaimaType.body,
+                    color = colors.ink2,
+                    textAlign = TextAlign.Center,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp),
+                )
+            }
             voice.error?.let {
                 Text(
                     it,
@@ -224,6 +243,22 @@ private fun VoiceScreenPreview(dark: Boolean, voice: VoiceState, status: AgentSt
 
 private val previewSpeaking = VoiceState(phase = VoicePhase.Speaking, startIndex = 1, revealed = mapOf("a1" to 62))
 private val previewListening = VoiceState(phase = VoicePhase.Listening, startIndex = 1, heard = "Yes, go ahead")
+
+private val previewLive = VoiceState(
+    phase = VoicePhase.Speaking,
+    startIndex = 1,
+    revealed = mapOf("a1" to 62),
+    live = LiveInfo("marin", 84),
+    caption = "It failed at 3am with a 401: the storage token expired on the 16th.",
+)
+
+@Preview(name = "VoiceScreen live light", heightDp = 760)
+@Composable
+private fun VoiceScreenLiveLight() = VoiceScreenPreview(false, previewLive, AgentStatus.Replying)
+
+@Preview(name = "VoiceScreen live dark", heightDp = 760)
+@Composable
+private fun VoiceScreenLiveDark() = VoiceScreenPreview(true, previewLive, AgentStatus.Replying)
 
 @Preview(name = "VoiceScreen speaking light", heightDp = 760)
 @Composable

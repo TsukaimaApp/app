@@ -99,6 +99,10 @@ class SettingsActions(
     val onVoiceProcessing: (VoiceProcessing) -> Unit = {},
     /** The voice processing sheet opens: probe the server's STT and TTS providers for its label. */
     val onVoiceProcessingOpen: () -> Unit = {},
+    /** The Live voice switch flipped. */
+    val onLiveVoice: (Boolean) -> Unit = {},
+    /** The Voice section is on screen: ask the server about GPT-Live for the switch's caption. */
+    val onVoiceSectionShown: () -> Unit = {},
     /** "Use as device assistant": opens the system's assistant settings. */
     val onAssistant: () -> Unit = {},
     val onTheme: (ThemeMode) -> Unit = {},
@@ -166,6 +170,8 @@ fun SettingsScreen(
             onVoiceLanguagesOpen = vm::loadVoiceLanguages,
             onVoiceProcessing = vm::setVoiceProcessing,
             onVoiceProcessingOpen = vm::loadVoiceProviders,
+            onLiveVoice = vm::setLiveVoice,
+            onVoiceSectionShown = vm::loadVoiceLiveStatus,
             onAssistant = onAssistant,
             onTheme = vm::setTheme,
             onMaterialYou = vm::setMaterialYou,
@@ -382,6 +388,15 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                         actions.onVoiceProcessingOpen()
                         showVoiceProcessing = true
                     },
+                    modifier = Modifier.bleed(12.dp),
+                )
+                LaunchedEffect(Unit) { actions.onVoiceSectionShown() }
+                TsukaimaRow(
+                    title = "Live voice (GPT-Live)",
+                    subtitle = state.liveVoiceCaption.ifEmpty { null },
+                    leading = IconName.GraphicEq,
+                    trailing = { TsukaimaSwitch(state.liveVoice, actions.onLiveVoice) },
+                    onClick = { actions.onLiveVoice(!state.liveVoice) },
                     modifier = Modifier.bleed(12.dp),
                 )
                 val language = VoiceLanguages.label(state.voiceLanguage, state.voiceLanguages)

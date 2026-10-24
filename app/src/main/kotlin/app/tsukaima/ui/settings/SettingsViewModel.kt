@@ -1,5 +1,6 @@
 package app.tsukaima.ui.settings
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CoroutineDispatcher
@@ -97,6 +98,10 @@ data class SettingsUiState(
     val voiceLanguages: List<VoiceLanguage> = emptyList(),
     /** Where voice mode recognises speech and speaks replies. */
     val voiceProcessing: VoiceProcessing = VoiceProcessing.Phone,
+    /** The GPT-Live voice setting ([app.tsukaima.data.prefs.Settings.liveVoice]). */
+    val liveVoice: Boolean = true,
+    /** What the server says about GPT-Live, once asked; empty until then. */
+    val liveVoiceCaption: String = "",
     /** The server's speech-to-text provider (`/api/audio/voice-config`), once probed; null = unknown or none. */
     val sttProvider: String? = null,
     /** The server's text-to-speech provider (`/api/audio/voice-config`), once probed; null = unknown or not named. */
@@ -189,6 +194,7 @@ class SettingsViewModel(
                         notifications = s.notifications,
                         voiceLanguage = s.voiceLanguage,
                         voiceProcessing = s.voiceProcessing,
+                        liveVoice = s.liveVoice,
                         // Seed the form once; later emissions (our own writes) must not clobber typing.
                         serverUrl = if (firstLoad && it.serverUrl.isEmpty()) s.serverUrl else it.serverUrl,
                         username = if (firstLoad && it.username.isEmpty()) s.username else it.username,
@@ -486,6 +492,33 @@ class SettingsViewModel(
     fun setVoiceProcessing(mode: VoiceProcessing) {
         _state.update { it.copy(voiceProcessing = mode) }
         viewModelScope.launch { settings.update { it.copy(voiceProcessing = mode) } }
+    }
+
+    /** Saves whether voice mode may use the server's GPT-Live engine; the next voice session uses it. */
+    fun setLiveVoice(on: Boolean) {
+        _state.update { it.copy(liveVoice = on) }
+        viewModelScope.launch { settings.update { it.copy(liveVoice = on) } }
+    }
+
+    /**
+     * The Voice section shows: asks the server whether it runs GPT-Live and sets [SettingsUiState.liveVoiceCaption].
+     * The server's `reason` for "not ready" is only logged, never shown.
+     */
+    fun loadVoiceLiveStatus() {
+        viewModelScope.launch {
+            val result = repo.voiceLiveStatus()
+            val status = result.getOrNull()
+            val caption = when {
+                status == null -> "Couldn’t ask the server"
+                status.mode != "gpt-live" -> "Off on this server (chained voice)"
+                status.available -> "On this server: GPT-Live, voice ${status.voice}"
+                else -> {
+                    Log.d("Tsukaima", "GPT-Live not ready: ${status.reason}")
+                    "On the server but not ready"
+                }
+            }
+            _state.update { it.copy(liveVoiceCaption = caption) }
+        }
     }
 
     /**

@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.tsukaima.domain.chat.AgentStatus
 import app.tsukaima.domain.chat.StatusTone
+import app.tsukaima.domain.voice.LiveInfo
 import app.tsukaima.domain.voice.VoiceMode
 import app.tsukaima.domain.voice.VoicePhase
 import app.tsukaima.ui.chat.components.PreviewPage
@@ -34,10 +35,17 @@ data class VoiceLine(val label: String, val tone: StatusTone, val pulsing: Boole
  * The status line for a voice [phase]. Thinking/Approval defer to the chat [status] label (the thinking flair, the
  * running tool, the waiting request); Idle keeps Offline/Stopped red and otherwise invites speech (the mic is closed
  * until a tap, in both modes). [transcribing] (server recognition has the utterance) turns Listening into
- * "Transcribing…". [mode] does not change the mapping; it is kept for the callers' symmetry.
+ * "Transcribing…". [mode] does not change the mapping; it is kept for the callers' symmetry. A GPT-Live session
+ * ([live]) adds its clock to the running phases ("Listening · 1:24", Idle is "Connecting…") and, once ended, names why.
  */
 @Suppress("UNUSED_PARAMETER")
-fun voiceLine(phase: VoicePhase, status: AgentStatus, mode: VoiceMode, transcribing: Boolean = false): VoiceLine = when (phase) {
+fun voiceLine(
+    phase: VoicePhase,
+    status: AgentStatus,
+    mode: VoiceMode,
+    transcribing: Boolean = false,
+    live: LiveInfo? = null,
+): VoiceLine = if (live != null) liveLine(phase, status, live) else when (phase) {
     VoicePhase.Listening -> VoiceLine(if (transcribing) "Transcribing…" else "Listening…", StatusTone.Accent, true)
     VoicePhase.Thinking -> VoiceLine(status.label, StatusTone.Accent, true)
     VoicePhase.Speaking -> VoiceLine("Speaking", StatusTone.Accent, true)
@@ -48,6 +56,30 @@ fun voiceLine(phase: VoicePhase, status: AgentStatus, mode: VoiceMode, transcrib
         else -> VoiceLine("Tap to speak", StatusTone.Grey, false)
     }
 }
+
+private fun liveLine(phase: VoicePhase, status: AgentStatus, live: LiveInfo): VoiceLine {
+    live.ended?.let { reason ->
+        val label = when (reason) {
+            "close_requested", "stop_phrase", "closed" -> "Live voice ended"
+            "audio_focus_lost" -> "Audio taken by another app"
+            "start_failed" -> "Live voice couldn’t start"
+            else -> "Live voice dropped"
+        }
+        return VoiceLine(label, StatusTone.Grey, false)
+    }
+    val clock = liveClock(live.seconds)
+    return when (phase) {
+        VoicePhase.Listening -> VoiceLine("Listening · $clock", StatusTone.Accent, true)
+        VoicePhase.Speaking -> VoiceLine("Speaking · $clock", StatusTone.Accent, true)
+        VoicePhase.Thinking -> VoiceLine("${status.label} · $clock", StatusTone.Accent, true)
+        VoicePhase.Approval -> VoiceLine("${status.label} · $clock", StatusTone.Amber, false)
+        VoicePhase.Muted -> VoiceLine("Muted · $clock", StatusTone.Grey, false)
+        VoicePhase.Idle -> VoiceLine("Connecting…", StatusTone.Accent, true)
+    }
+}
+
+/** [seconds] as `m:ss` (minutes unpadded): 64 → "1:04", 750 → "12:30". */
+internal fun liveClock(seconds: Int): String = "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
 
 /**
  * Centred 7dp dot + serif-italic [line]; the label cross-fades in 180 ms when it changes. [centred] false starts it

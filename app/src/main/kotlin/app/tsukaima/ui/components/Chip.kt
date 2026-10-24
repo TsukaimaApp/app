@@ -37,14 +37,14 @@ import app.tsukaima.ui.theme.tsukaima
 /**
  * Outlined pill chip (model/profile pickers, filters). [selected] fills with the pale lavender
  * `accentSelected` and switches the label to ink1; [borderless] drops the hairline (the top-bar
- * model chip).
+ * model chip). A null [onClick] makes the chip passive: a label, not a button.
  *
  * Visual height follows `Chip.jsx` (min 36dp, 7/12 padding); the touch target is 44dp.
  */
 @Composable
 fun Chip(
     label: String,
-    onClick: () -> Unit,
+    onClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
     selected: Boolean = false,
     leading: IconName? = null,
@@ -67,7 +67,15 @@ fun Chip(
         modifier = modifier
             .sizeIn(minHeight = Dimens.hit)
             .semantics { this.selected = selected }
-            .clickable(interactionSource = source, indication = null, role = Role.Button, onClick = onClick),
+            .then(
+                if (onClick == null) Modifier
+                else Modifier.clickable(
+                    interactionSource = source,
+                    indication = null,
+                    role = Role.Button,
+                    onClick = onClick,
+                ),
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Row(
@@ -76,7 +84,7 @@ fun Chip(
                 .clip(shape)
                 .background(fill)
                 .border(1.dp, border, shape)
-                .pressWash(source, shape)
+                .then(if (onClick == null) Modifier else Modifier.pressWash(source, shape))
                 .padding(horizontal = 12.dp, vertical = 7.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,

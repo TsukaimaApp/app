@@ -282,6 +282,39 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun liveVoiceStatusCaptionCoversTheFourOutcomes() = runBlocking<Unit> {
+        snapshot.value = Settings(serverUrl = "http://${hostPort()}")
+        var reply: MockResponse = json("""{"ok":true,"mode":"gpt-live","available":true,"voice":"marin"}""")
+        routes["/api/audio/voice-live/status"] = { reply }
+        val vm = vm()
+        vm.loadVoiceLiveStatus()
+        assertEquals("On this server: GPT-Live, voice marin", vm.await { it.liveVoiceCaption.isNotEmpty() }.liveVoiceCaption)
+
+        reply = json("""{"ok":true,"mode":"gpt-live","available":false,"reason":"no key"}""")
+        vm.loadVoiceLiveStatus()
+        assertEquals("On the server but not ready", vm.await { it.liveVoiceCaption.endsWith("not ready") }.liveVoiceCaption)
+
+        reply = json("""{"ok":true,"mode":"chained"}""")
+        vm.loadVoiceLiveStatus()
+        assertEquals("Off on this server (chained voice)", vm.await { it.liveVoiceCaption.startsWith("Off") }.liveVoiceCaption)
+
+        reply = MockResponse.Builder().code(404).body("{}").build()
+        vm.loadVoiceLiveStatus()
+        assertEquals("Couldn’t ask the server", vm.await { it.liveVoiceCaption.startsWith("Couldn") }.liveVoiceCaption)
+    }
+
+    @Test
+    fun setLiveVoicePersists() = runBlocking<Unit> {
+        store.update { it.copy(voiceLanguage = "pl-PL") }
+        val vm = vm()
+        vm.await { it.voiceLanguage == "pl-PL" } // seeded from the store
+        assertTrue(vm.state.value.liveVoice)
+        vm.setLiveVoice(false)
+        assertFalse(awaitStore { !it.liveVoice }.liveVoice)
+        vm.await { !it.liveVoice }
+    }
+
+    @Test
     fun signInNormalizesUrlAndPersists() = runBlocking<Unit> {
         routes["/auth/password-login"] = ::loginOk
         val vm = vm()
