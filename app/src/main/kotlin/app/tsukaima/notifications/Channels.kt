@@ -128,7 +128,8 @@ class AndroidNotificationPoster(context: Context) : NotificationPoster {
 
     override fun cancelAll() = manager.cancelAll()
 
-    private companion object {
+    internal companion object {
+        /** Immutable, and an update replaces the extras of an earlier intent with the same request code. */
         const val FLAGS = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
     }
 

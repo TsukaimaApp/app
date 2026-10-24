@@ -65,6 +65,9 @@ object ApprovalNotifier {
     const val SERVICE_ID = 0x75_6b_01
     const val GATEWAY_ID = 0x75_6b_02
 
+    /** The live voice foreground service's ongoing notification ([LiveVoiceService]). */
+    const val LIVE_VOICE_ID = 0x75_6b_03
+
     private const val MAX_COMMAND = 200
     private const val MAX_PAIRING_FIELD = 40
     private const val HIDDEN_SUFFIX = " (hidden characters)"

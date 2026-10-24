@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
     <queries>
         <intent>
@@ -113,6 +115,12 @@
             android:name=".notifications.GatewayService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Runs exactly while a live voice session does: the mic and the WebRTC socket stay alive, screen off. -->
+        <service
+            android:name=".notifications.LiveVoiceService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|mediaPlayback" />
 
         <receiver
             android:name=".notifications.NotificationActionReceiver"

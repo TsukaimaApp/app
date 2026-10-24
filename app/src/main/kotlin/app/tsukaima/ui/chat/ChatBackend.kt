@@ -219,8 +219,8 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override val liveVoiceEnabled get() = c.settings.value?.liveVoice ?: true
     override suspend fun voiceLiveStatus() = c.repository.voiceLiveStatus()
     override fun liveTransport() = c.liveTransport()
-    override fun startLiveService() = Unit // the foreground service comes with the notification (Task 9)
-    override fun stopLiveService() = Unit
+    override fun startLiveService() = c.startLiveService()
+    override fun stopLiveService() = c.stopLiveService()
     override val liveVoiceEndRequests get() = c.liveVoiceEndRequests
     override val liveVoiceSeconds get() = c.liveVoiceSeconds
     override val pendingShare get() = c.pendingShare

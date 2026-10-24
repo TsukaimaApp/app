@@ -21,6 +21,7 @@ import app.tsukaima.domain.chat.StatusTone
 import app.tsukaima.domain.voice.LiveInfo
 import app.tsukaima.domain.voice.VoiceMode
 import app.tsukaima.domain.voice.VoicePhase
+import app.tsukaima.domain.voice.liveClock
 import app.tsukaima.ui.chat.components.PreviewPage
 import app.tsukaima.ui.chat.components.StatusDot
 import app.tsukaima.ui.chat.components.statusVisual
@@ -77,9 +78,6 @@ private fun liveLine(phase: VoicePhase, status: AgentStatus, live: LiveInfo): Vo
         VoicePhase.Idle -> VoiceLine("Connecting…", StatusTone.Accent, true)
     }
 }
-
-/** [seconds] as `m:ss` (minutes unpadded): 64 → "1:04", 750 → "12:30". */
-internal fun liveClock(seconds: Int): String = "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
 
 /**
  * Centred 7dp dot + serif-italic [line]; the label cross-fades in 180 ms when it changes. [centred] false starts it

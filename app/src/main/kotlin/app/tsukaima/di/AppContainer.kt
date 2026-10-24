@@ -53,6 +53,7 @@ import app.tsukaima.notifications.ApprovalAnswerer
 import app.tsukaima.notifications.BackgroundController
 import app.tsukaima.notifications.BackgroundPolicy
 import app.tsukaima.notifications.GatewayService
+import app.tsukaima.notifications.LiveVoiceService
 import app.tsukaima.notifications.NotificationHub
 import app.tsukaima.notifications.OpenScreen
 import app.tsukaima.domain.voice.SpeechInput
@@ -245,6 +246,14 @@ class AppContainer(context: Context) {
 
     /** Seconds of the live voice session running now (0 when none); the notification shows them. */
     val liveVoiceSeconds = MutableStateFlow(0)
+
+    /** Starts [LiveVoiceService] for a live session; a refused start is an end request (no unattended session). */
+    fun startLiveService() {
+        if (!LiveVoiceService.start(appContext)) liveVoiceEndRequests.tryEmit(Unit)
+    }
+
+    /** Stops [LiveVoiceService]; a no-op when it is not running. */
+    fun stopLiveService() = LiveVoiceService.stop(appContext)
 
     fun openFile(uri: String, mime: String): Boolean = viewFile(appContext, uri, mime)
 

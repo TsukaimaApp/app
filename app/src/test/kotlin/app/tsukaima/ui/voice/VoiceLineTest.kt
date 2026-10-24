@@ -25,12 +25,6 @@ class VoiceLineTest {
     private fun live(phase: VoicePhase, seconds: Int = 64, ended: String? = null, status: AgentStatus = AgentStatus.Idle) =
         voiceLine(phase, status, VoiceMode.InApp, live = LiveInfo("marin", seconds, ended))
 
-    @Test fun liveClockFormatsMinutesAndPaddedSeconds() {
-        assertEquals("0:00", liveClock(0))
-        assertEquals("1:04", liveClock(64))
-        assertEquals("12:30", liveClock(750))
-    }
-
     @Test fun liveRunningLinesCarryTheClock() {
         assertEquals(VoiceLine("Listening · 1:04", StatusTone.Accent, true), live(VoicePhase.Listening))
         assertEquals(VoiceLine("Speaking · 1:04", StatusTone.Accent, true), live(VoicePhase.Speaking))
