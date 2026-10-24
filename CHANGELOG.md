@@ -3,6 +3,27 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## Unreleased
+
+### Added
+- Send to Tsukaima: share a link, text, screenshots, photos or a PDF from any app’s share sheet. A small "Send to
+  Hermes" card asks whether it goes to the last chat or a new one; the text lands in the composer and the files as
+  attachments, and nothing is sent until you tap Send. Files over 12 MB are skipped with a notice.
+- Live voice (GPT-Live): when your Hermes runs GPT-Live, voice mode becomes a live, full-duplex conversation with
+  the server’s voice while Hermes does the work. Every request the voice hands over runs as an ordinary turn in the
+  open chat, so the transcript shows it with its tools and reply; the voice says when Hermes is working and
+  paraphrases the answer. The running time is always on screen (the session is billed per minute), a notification
+  with End keeps it going with the screen off, and saying "stop", "that’s all" or "goodbye" ends it. If it can’t
+  start, phone voice opens instead. Settings → Voice → "Live voice (GPT-Live)" turns it off and says what the server
+  reports. The assistant sheet keeps phone voice.
+
+### Changed
+- The app is now built for 64-bit ARM (arm64-v8a) only, which every Android 10+ phone is; the live voice engine’s
+  WebRTC library would otherwise add 7–25 MB per extra processor type. The APK grows from about 6 MB to about 18 MB.
+- New permissions for live voice: changing audio settings (call audio on the headset or loudspeaker for the
+  session), and the microphone and media-playback foreground service types. The WebRTC library also adds network
+  state access, which the app does not use.
+
 ## 0.9.3 — 2026-10-22 (versionCode 23)
 
 ### Fixed

@@ -5,6 +5,9 @@ Chat with your agent, browse sessions, manage cron jobs, and get actionable noti
 
 Version **0.9.3** (versionCode 23). Changes per release: [`CHANGELOG.md`](CHANGELOG.md).
 
+Runs on Android 10+ phones and tablets with a 64-bit ARM processor (arm64-v8a only: the live voice engine’s native
+WebRTC library would add 7–25 MB per extra ABI, and every Android 10+ phone is 64-bit ARM). The APK is about 18 MB.
+
 ## Features
 
 - Streaming chat over the Hermes JSON-RPC WebSocket: replies, reasoning, tool calls, mid-turn commentary
@@ -31,6 +34,8 @@ Version **0.9.3** (versionCode 23). Changes per release: [`CHANGELOG.md`](CHANGE
   only when tapped (the card names the host)
 - **File deliveries**: the agent's `MEDIA:` lines become file cards with image previews; tap to save to
   Downloads and open
+- **Send to Tsukaima** from any app’s share sheet: a link, text, screenshots, photos or a PDF land in the composer
+  of your last chat or a new one (you pick on a small "Send to Hermes" card); nothing is sent until you tap Send
 - Resume a running chat with the reply streamed so far; replay missed events after a reconnect
 - Sessions drawer: server-side **search**, rename, archive, delete, live refresh; working-directory and model pickers
 - Cron job management (create, edit, pause/resume, run now)
@@ -41,7 +46,7 @@ Version **0.9.3** (versionCode 23). Changes per release: [`CHANGELOG.md`](CHANGE
   cron-failed alerts via a foreground service; each kind can be switched off
 - HTTPS fronts (Tailscale Serve or any TLS reverse proxy) as well as plain `http://` on a tailnet
 - Light/dark themes, Material You option, wide (tablet/foldable) pane layout
-- Voice mode and an assistant slot (see below)
+- Voice mode, **live voice** (GPT-Live, when your Hermes runs it) and an assistant slot (see below)
 - **Report a problem** (Settings → Support): shares a text report with versions, device, server host, the last
   crash and the app's own log (never your username, password or token)
 
@@ -82,6 +87,35 @@ Not supported: a hotword, and anything on the lock screen. Android 10 and 11: wh
 recogniser becomes the device's default speech recogniser and forwards to the system one, so voice input from the
 assistant gesture and other apps keeps working there (only for apps that hold the microphone permission
 themselves); Android 12+ keeps the two apart.
+
+### Live voice (GPT-Live)
+
+When your Hermes runs GPT-Live (`voice.voice_chat_mode: gpt-live` and an OpenAI key on the server) and Settings →
+Voice → "Live voice (GPT-Live)" is on (the default), the mic opens a live conversation instead: you and the voice
+talk freely, with no turns, while Hermes does the work. The switch’s caption says what the server reports ("On this
+server: GPT-Live, voice marin", "Off on this server (chained voice)", "On the server but not ready", "Couldn’t ask
+the server"); with the switch off, or on a server without GPT-Live, voice mode works as above. The voice is seeded
+with the chat’s recent text turns. Whenever it hands a request to Hermes, that request runs as an ordinary turn in
+the open chat (with the last few minutes of the spoken exchange as context, and Hermes asked for speakable prose),
+so the transcript shows the prompt, the tool rows and the reply; the voice says when Hermes is working and
+paraphrases the answer. A request that needs approval or an answer is announced ("Hermes needs you to answer
+something on screen") and answered with a tap, as above. Saying only "stop", "that’s all", "goodbye", "cancel" (or
+a few other English phrases, optionally after "hey Hermes") ends the conversation; so do End and Keyboard.
+
+GPT-Live is billed per minute of session time, idle time included, on the server’s OpenAI account, so the status
+line always shows the running time ("Listening · 1:24") and the end toast says how long it was ("Live voice ended ·
+1:24"). Unlike phone voice, it keeps going with the screen off or another app in front: a "Live voice with Hermes"
+notification shows the time and has an End button. Leaving the chat ends it; another app taking the audio (a phone
+call) ends it too. If a session can’t start, the app says "Live voice couldn’t start — using phone voice" and opens
+phone voice instead. A session that drops later is not retried: the voice screen shows "Live voice dropped" until
+End or Keyboard. The voice, its persona and the language are the server’s; the language and voice-processing
+settings do not apply, and the assistant sheet always uses phone voice. Audio is routed to a connected headset, else
+the loudspeaker; headphones help on phones whose echo cancelling is weak.
+
+The OpenAI key never reaches the phone: the app sends its WebRTC offer and the seed history to Hermes, which opens
+the session with OpenAI (or the endpoint set in its `voice.gpt_live` config) and returns the vendor’s answer. The
+audio itself then streams between the phone and the vendor; transcripts and requests travel on the same connection,
+and every request the voice hands over goes to Hermes as above.
 
 ## Screenshots
 
@@ -144,8 +178,13 @@ e.g. Tailscale Serve's).
 - `INTERNET`: talk to your Hermes server.
 - `POST_NOTIFICATIONS` (Android 13+): approval requests and gateway alerts.
 - `RECORD_AUDIO`: voice mode and the assistant sheet; asked on the first mic tap.
+- `MODIFY_AUDIO_SETTINGS`: live voice switches the phone to call audio (communication mode, headset or
+  loudspeaker) for the session and restores it afterwards.
 - `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_DATA_SYNC`: keeps the event connection alive in the background
   so notifications can arrive; shown as a persistent low-priority notification.
+- `FOREGROUND_SERVICE_MICROPHONE` / `FOREGROUND_SERVICE_MEDIA_PLAYBACK`: keep the mic and the audio of a live voice
+  session going with the screen off; the service runs only while a session is open, with its own notification.
+- `ACCESS_NETWORK_STATE`: merged in by the WebRTC library (live voice); the app itself does not use it.
 
 ## Docs
 

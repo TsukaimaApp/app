@@ -60,7 +60,7 @@
 <!-- Badge by the Obtainium project, https://github.com/ImranR98/Obtainium (GPL-3.0), used as that project invites. -->
 <a class="obt" href="obtainium://add/https://github.com/TsukaimaApp/app"><img src="img/badge_obtainium.png" width="161" height="62" alt="Get it on Obtainium"></a>
 </div>
-<p class="fine"><small>Opens in Obtainium on your phone · <a href="https://github.com/ImranR98/Obtainium">Get Obtainium</a></small><small>Android 10+ · about 6 MB · no account</small></p>
+<p class="fine"><small>Opens in Obtainium on your phone · <a href="https://github.com/ImranR98/Obtainium">Get Obtainium</a></small><small>Android 10+ · about 18 MB · no account</small></p>
 </div>
 <div id="d-phone" class="phone" role="img" aria-label="The Tsukaima chat screen">
 <div class="sys" aria-hidden="true"><span>9:41</span><span class="bat"></span></div>
@@ -133,7 +133,7 @@
 </div>
 
 <div class="feat r">
-<div class="copy"><h3>One agent, many hats.</h3><p>Chats group by Hermes profile — so your ops agent and your research agent stay separate even though they share a server. The drawer is the navigation; there's no tab bar.</p><p>Search runs on the server, archived chats are a tap away, and cron jobs can be created, edited, paused or run from the phone.</p></div>
+<div class="copy"><h3>One agent, many hats.</h3><p>Chats group by Hermes profile — so your ops agent and your research agent stay separate even though they share a server. The drawer is the navigation; there's no tab bar.</p><p>Search runs on the server, archived chats are a tap away, and cron jobs can be created, edited, paused or run from the phone.</p><p>Share a link, a screenshot or a PDF from any app to Tsukaima and it waits in the composer of your last chat or a new one — nothing goes until you tap Send.</p></div>
 <div class="demo" id="d-drawer">
 <div class="drawer">
 <div class="dh"><img src="img/mark.svg" alt="" width="620" height="660">Tsukaima<span class="k" lang="ja">使い魔</span></div>
@@ -157,7 +157,7 @@
 <section id="voice">
 <div class="label">Voice</div>
 <h2>Say it instead.</h2>
-<p class="sub">Voice mode listens, sends what it hears, and reads replies aloud sentence by sentence as they stream. Tap the orb to interrupt. Set Tsukaima as the device assistant and long-press home for one exchange. Speech is processed on the phone or on your Hermes, your choice. Approvals still need a tap.</p>
+<p class="sub">Voice mode listens, sends what it hears, and reads replies aloud sentence by sentence as they stream. Tap the orb to interrupt. Set Tsukaima as the device assistant and long-press home for one exchange. Speech is processed on the phone or on your Hermes, your choice. If your Hermes runs GPT-Live, voice becomes a live conversation instead — talk freely while Hermes does the work, with the minutes on screen because the session is billed by time. Approvals still need a tap.</p>
 <div class="facts">
 <div class="fact"><b>On the phone</b><span>Android's own speech recogniser and text-to-speech, on-device where the system supports it.</span></div>
 <div class="fact"><b>On Hermes</b><span>One utterance at a time, uploaded as Opus to your Hermes, transcribed and spoken with the engines you configured there.</span></div>
@@ -194,12 +194,12 @@
 <div class="faq">
 <details><summary>Does it work without a Hermes instance?</summary><p>No. Tsukaima is a client, not an agent. It needs a running Hermes Agent to connect to — on a home server, a VPS, or your laptop.</p></details>
 <details><summary>Can I reach it from outside my network?</summary><p>Yes, however you'd reach Hermes itself: Tailscale, WireGuard, a reverse proxy with TLS. Plain http is allowed only for local and private hosts — loopback, LAN, tailnet and single-label names; anything else needs https.</p></details>
-<details><summary>Is anything sent to Nous or to the Tsukaima author?</summary><p>No. Tsukaima has no telemetry and no service of its own; the app talks to your Hermes. Images from other hosts load only when you tap them, and voice on the phone uses Android's own speech services.</p></details>
+<details><summary>Is anything sent to Nous or to the Tsukaima author?</summary><p>No. Tsukaima has no telemetry and no service of its own; the app talks to your Hermes. Images from other hosts load only when you tap them, and voice on the phone uses Android's own speech services. Live voice, when your Hermes runs it, streams your audio to OpenAI; the key stays on your Hermes.</p></details>
 <details><summary>Which tool calls need approval?</summary><p>Whichever ones your Hermes asks about; its own settings decide. Tsukaima surfaces every one of those as an approval card; it doesn't decide for you.</p></details>
 <details><summary>Will there be an iOS version?</summary><p>Not planned. Tsukaima is Android-first and leans on Material 3.</p></details>
 <details><summary>Why the name?</summary><p>A tsukaima (<span lang="ja">使い魔</span>) is a familiar — a spirit bound to its master and sent out to do the work. The agent runs elsewhere; this is the thing in your hand that's bound to it.</p></details>
 <details><summary>How do I get updates?</summary><p>Add Tsukaima to Obtainium and it watches the GitHub releases for you, or download the next APK from Releases. The app does not update itself.</p></details>
-<details><summary>Which Android versions?</summary><p>Android 10 and newer, on phones, tablets and foldables. On a wide screen the drawer becomes a pane beside the chat.</p></details>
+<details><summary>Which Android versions?</summary><p>Android 10 and newer, on phones, tablets and foldables with a 64-bit ARM processor (every Android 10+ phone has one). On a wide screen the drawer becomes a pane beside the chat.</p></details>
 </div>
 </section>
 

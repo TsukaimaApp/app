@@ -461,7 +461,10 @@ Tagged as in v0.9.0: **[live]** probed, **[source]** read from the 0.22.2 source
 
 - `GET /api/audio/voice-live/status?profile=<id>` → `{ok, mode:"chained"|"gpt-live", available, reason:string|null,
   model, voice}`. `404` on a Hermes without the route. `available: true` is a hint, not a promise.
-- `POST /api/audio/voice-live/session {sdp, history?}` → `200 {ok, session:{id}, transport:{type:"webrtc", sdp}}`.
+- `POST /api/audio/voice-live/session?profile=<id> {sdp, history?}` → `200 {ok, session:{id}, transport:{type:
+  "webrtc", sdp}}` (the app adds `?profile=` for a non-default profile, as on the status call; the answer SDP is
+  the vendor’s, so the media then flows between the phone and the vendor, not through Hermes [source:
+  `tools/voice_live.py` `create_webrtc_session`]).
   `400` blank SDP, `503` no API key, `502` vendor rejected (errors carry `{"detail": "…"}`). The SDP goes out
   byte-exact incl. trailing CRLF; allow ~45 s.
 - `prompt.submit` takes two more optional params for delegated voice turns: `surface` (`"voice-live"`) and

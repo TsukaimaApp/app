@@ -226,7 +226,7 @@ const REQUIRED_HREFS = [
 ];
 const REQUIRED_TEXT = [
   'Android 10+',
-  'about 6 MB',
+  'about 18 MB',
   'no account',
   'Connected · Hermes 0.22.2',
   'Opens in Obtainium on your phone',
