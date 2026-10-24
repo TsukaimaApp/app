@@ -39,7 +39,9 @@ cache folder is pruned of entries older than 24 h on every share and on app star
 1. `ShareActivity` (exported, translucent theme over the sender) reads the intent, copies the streams on IO, then
    shows one small card: title "Send to Hermes", a one-line summary ("Link", first 60 chars of text, "3 images",
    "report.pdf"), and two buttons: **Continue last chat** and **New chat**. Back/outside-tap cancels and deletes
-   the copies. The card is skipped when there is no last chat: the share goes to a new chat directly **(call)**.
+   the copies. The card is always shown, even with no last chat (then **New chat** alone): attaching uploads the
+   file to the Hermes workspace at once, so an exported share target must never deliver without a user tap
+   **(call, security)**. Only `content:` URIs whose provider belongs to another package are read.
 2. The choice becomes `SharedContent(text, files, target)` on `AppContainer.pendingShare` (same process) and
    starts `MainActivity` with the existing deep-link extras (`EXTRA_OPEN_SCREEN = chat`, `EXTRA_SESSION_ID` = the
    last chat's stored id or absent for a new chat), flags `NEW_TASK | SINGLE_TOP | CLEAR_TOP`.
