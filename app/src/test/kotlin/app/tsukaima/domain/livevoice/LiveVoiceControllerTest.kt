@@ -6,6 +6,7 @@ import app.tsukaima.domain.chat.ChatState
 import app.tsukaima.domain.chat.ToolStatus
 import app.tsukaima.domain.voice.LiveInfo
 import app.tsukaima.domain.voice.VoicePhase
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -601,13 +602,62 @@ class LiveVoiceControllerTest {
     }
 
     @Test fun stopDuringTheStartWindowEndsWithItsReason() = liveTest {
-        val r = rig(started = false)
-        r.transport.channelOpen = false
-        r.controller.stop("left_chat")
-        advanceTimeBy(LiveVoiceController.START_TIMEOUT_MS * 2)
+        val t = FakeLiveTransport().apply { startGate = CompletableDeferred() }
+        val r = rig(started = false, transport = t)
+        r.controller.stop("x")
+        assertEquals(listOf("session.close"), t.sentTypes) // the channel is open: the server may hold a session
+        // The connect the stop abandoned fails late: that is not a start failure any more.
+        t.startResult = Result.failure(LiveStartException("502"))
+        t.startGate?.complete(Unit)
         runCurrent()
-        assertEquals(listOf("left_chat" to 0), r.ended)
-        assertTrue(r.transport.closed)
+        advanceTimeBy(LiveVoiceController.START_TIMEOUT_MS + LiveVoiceController.CLOSE_TIMEOUT_MS)
+        runCurrent()
+        assertEquals(listOf("x" to 0), r.ended)
+        assertTrue(t.closed)
+    }
+
+    @Test fun midTurnResumeMergingBubblesDoesNotSpeakAgain() = liveTest {
+        val r = rig(unconfined = true)
+        user(r, "what time is it")
+        delegate(r, "d1")
+        val turnUser = r.chat.value.items.last()
+        toolRound(r, 1)
+        r.add(reply("b2", "Let me check.", streaming = true, reasoning = "hm"), AgentStatus.Replying)
+        r.replace(reply("b2", "Let me check.", streaming = false, reasoning = "hm"))
+        r.add(tool("t2", ToolStatus.Running), AgentStatus.Tool("terminal"))
+        r.replace(tool("t2", ToolStatus.Done), AgentStatus.Thinking("hm"))
+        r.add(reply("b3", " It is n", streaming = true), AgentStatus.Replying)
+        settle()
+        assertEquals(listOf("Let me check."), r.says)
+        val before = r.chat.value.items
+        // A resume while the turn runs: persisted rows (no tools, no blank bubbles) plus one in-flight bubble that
+        // carries every delta of the turn so far.
+        r.chat.value = r.chat.value.copy(
+            items = listOf(
+                ChatItem.UserMessage("h0", "earlier"),
+                ChatItem.UserMessage("h1", (turnUser as ChatItem.UserMessage).text),
+                reply("a-inflight", "Let me check. It is n", streaming = true),
+            ),
+        )
+        r.controller.rebased(before)
+        settle()
+        assertEquals(listOf("Let me check."), r.says)
+        r.replace(reply("a-inflight", "Let me check. It is noon.", streaming = true))
+        settle()
+        r.replace(reply("a-inflight", "Let me check. It is noon.", streaming = false), AgentStatus.Idle)
+        settle()
+        assertEquals(listOf("Let me check.", "It is noon."), r.says)
+        assertEquals(VoicePhase.Listening, r.state.phase) // settled
+        assertFalse(noResult in r.thinks)
+    }
+
+    @Test fun literalDoubleMarkersAreKept() = liveTest {
+        val r = rig()
+        user(r, "what is two to the tenth")
+        delegate(r, "d1")
+        r.add(reply("a1", "2**10 is 1024.", streaming = false), AgentStatus.Idle)
+        settle()
+        assertEquals(listOf("2**10 is 1024."), r.says)
     }
 
     @Test fun delegationBeforeStartedIsIgnored() = liveTest {

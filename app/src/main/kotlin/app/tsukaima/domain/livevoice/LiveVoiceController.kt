@@ -99,6 +99,9 @@ class LiveVoiceController(
     private class ReplyCursor {
         val chunker = SentenceChunker()
         var flushed = false
+
+        /** Raw chars of the message already spoken (through the last sentence, or all of it once flushed). */
+        var consumed = 0
     }
 
     private val seconds get() = _state.value.live?.seconds ?: 0
@@ -190,7 +193,10 @@ class LiveVoiceController(
      * The chat's transcript was replaced (a reconnect rebuilt it from stored history, so every item has a new id);
      * [itemsBeforeRebuild] is the transcript just before. Call it right after the rebuild (same thread). The voice
      * transcript keeps as many trailing items as it showed before, the active delegation's submit point moves the
-     * same way; reply cursors are per ordinal, so a reply already spoken is not spoken again.
+     * same way. During a delegation the turn restarts after the rebuilt transcript's last user bubble, and the reply
+     * text already spoken is laid over the rebuilt replies in order: a resume mid-turn merges the turn's bubbles into
+     * one in-flight bubble (the concatenation of its deltas), and every finished bubble was flushed at its end, so
+     * the spoken prefix ends on a boundary there and nothing is spoken twice or skipped.
      */
     fun rebased(itemsBeforeRebuild: List<ChatItem>) {
         if (!launched || ended) return
@@ -198,7 +204,22 @@ class LiveVoiceController(
         fun moved(index: Int) =
             (items.size - (itemsBeforeRebuild.size - index).coerceAtLeast(0)).coerceIn(0, items.size)
         val startIndex = moved(_state.value.startIndex)
-        if (delegationId != null) itemsAtSubmit = moved(itemsAtSubmit)
+        if (delegationId != null) {
+            val lastUser = items.indexOfLast { it is ChatItem.UserMessage }
+            itemsAtSubmit = if (lastUser >= 0) lastUser + 1 else moved(itemsAtSubmit)
+            var remaining = cursors.sumOf { it.consumed }
+            cursors.clear()
+            for (i in itemsAtSubmit until items.size) {
+                val m = items[i] as? ChatItem.AssistantMessage ?: continue
+                val cursor = ReplyCursor()
+                val position = minOf(remaining, m.text.length)
+                cursor.chunker.seek(position)
+                cursor.consumed = position
+                cursor.flushed = position == m.text.length && !m.streaming
+                remaining -= position
+                cursors.add(cursor)
+            }
+        }
         _state.update { it.copy(startIndex = startIndex) }
         onChat(chat.value)
     }
@@ -355,19 +376,39 @@ class LiveVoiceController(
     /** Speaks [m]'s new complete sentences (raw text chunked, then made plain), and its tail once it stopped. */
     private fun feedReply(id: String, cursor: ReplyCursor, m: ChatItem.AssistantMessage) {
         if (cursor.flushed) return
-        for (chunk in cursor.chunker.feed(m.text)) speakReply(id, chunk)
+        for (chunk in cursor.chunker.feedPositions(m.text)) {
+            speakReply(id, chunk.text)
+            cursor.consumed = chunk.end
+        }
         if (!m.streaming) {
             cursor.chunker.flush()?.let { speakReply(id, it) }
+            cursor.consumed = m.text.length
             cursor.flushed = true
         }
     }
 
     private fun speakReply(id: String, raw: String) {
-        // A sentence boundary inside a bold span leaves its markers unpaired in each chunk, which plain() keeps.
-        val text = SpeechText.plain(raw).replace(STRAY_EMPHASIS, "").trim()
+        val text = stripStrayEmphasis(SpeechText.plain(raw).trim())
         if (text.isEmpty()) return
         spokeAny = true
         speak(id, text)
+    }
+
+    /**
+     * A sentence boundary inside a bold span leaves its markers unpaired in each chunk, which `plain()` keeps: an odd
+     * count of a marker loses the one at the chunk's start or end (`2**10` and `__init__` stay).
+     */
+    private fun stripStrayEmphasis(chunk: String): String {
+        var t = chunk
+        for (marker in EMPHASIS_MARKERS) {
+            if ((t.split(marker).size - 1) % 2 == 0) continue
+            t = when {
+                t.startsWith(marker) -> t.removePrefix(marker).trim()
+                t.endsWith(marker) -> t.removeSuffix(marker).trim()
+                else -> t
+            }
+        }
+        return t
     }
 
     /** A request card still waiting for the user (approval, clarify, masked prompt, connection). */
@@ -486,6 +527,6 @@ class LiveVoiceController(
         private const val MAX_HEARD_CHARS = 2_000
         private const val APPEND_CHAR_LIMIT = 1_400
         private val WHITESPACE = Regex("\\s+")
-        private val STRAY_EMPHASIS = Regex("\\*\\*|__|~~")
+        private val EMPHASIS_MARKERS = listOf("**", "__", "~~")
     }
 }

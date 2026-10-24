@@ -1,5 +1,6 @@
 package app.tsukaima.domain.livevoice
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -7,7 +8,8 @@ import kotlinx.serialization.json.JsonObject
 
 /**
  * A scripted live transport: the test [emit]s server events, sets [speaking], and reads what the controller [sent].
- * [startResult] is what [start] does (a failure throws its exception); [channelOpen] false makes [send] refuse.
+ * [startResult] is what [start] does (a failure throws its exception), after [startGate] completes when set;
+ * [channelOpen] false makes [send] refuse.
  */
 internal class FakeLiveTransport : LiveTransport {
     val eventFlow = MutableSharedFlow<LiveEvent>(extraBufferCapacity = 64)
@@ -15,6 +17,7 @@ internal class FakeLiveTransport : LiveTransport {
     override val speaking = MutableStateFlow(false)
 
     var startResult: Result<Unit> = Result.success(Unit)
+    var startGate: CompletableDeferred<Unit>? = null
     var channelOpen = true
     val sent = mutableListOf<JsonObject>()
     var startedWith: List<LiveHistoryMessage>? = null
@@ -31,6 +34,7 @@ internal class FakeLiveTransport : LiveTransport {
 
     override suspend fun start(history: List<LiveHistoryMessage>) {
         startedWith = history
+        startGate?.await()
         startResult.getOrThrow()
     }
 

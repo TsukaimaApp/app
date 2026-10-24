@@ -285,6 +285,15 @@ class SentenceChunker {
         return if (lineEnd >= text.length && lines < MATH_HOLD_LINES) Int.MAX_VALUE else -1
     }
 
+    /**
+     * Continues from [position] in the text (already spoken), dropping what was pending. The caller guarantees
+     * [position] is a sentence or message boundary of the text it will feed.
+     */
+    fun seek(position: Int) {
+        cursor = position.coerceAtLeast(0)
+        pending = ""
+    }
+
     /** Whatever is left, trimmed (null when blank); resets the chunker. */
     fun flush(): String? {
         val rest = pending.trim()
