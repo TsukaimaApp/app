@@ -356,7 +356,53 @@ class LiveVoiceControllerTest {
         settle()
         user(r, "never mind that, list files")
         delegate(r, "d1")
+        assertEquals("submitted once the interrupted turn ended", listOf("interrupt"), r.log)
+        assertEquals(VoicePhase.Thinking, r.state.phase)
+        r.status(AgentStatus.Idle)
+        settle()
         assertEquals(listOf("interrupt", "send:never mind that, list files"), r.log)
+        r.add(reply("a1", "Three files.", streaming = false), AgentStatus.Idle)
+        settle()
+        assertEquals(listOf("Three files."), r.says)
+        assertFalse(noResult in r.thinks)
+    }
+
+    @Test fun deferredDelegationIsSubmittedAfterTheSettleCap() = liveTest {
+        val r = rig()
+        r.status(AgentStatus.Replying)
+        settle()
+        user(r, "list files")
+        delegate(r, "d1")
+        advanceTimeBy(LiveVoiceController.INTERRUPT_SETTLE_MS - 1)
+        runCurrent()
+        assertEquals(listOf("interrupt"), r.log)
+        advanceTimeBy(1)
+        runCurrent()
+        assertEquals(listOf("interrupt", "send:list files"), r.log)
+    }
+
+    @Test fun newerDelegationReplacesADeferredOne() = liveTest {
+        val r = rig()
+        r.status(AgentStatus.Replying)
+        settle()
+        user(r, "list files")
+        delegate(r, "d1")
+        user(r, "in the home folder")
+        delegate(r, "d2")
+        r.status(AgentStatus.Idle)
+        settle()
+        advanceTimeBy(LiveVoiceController.INTERRUPT_SETTLE_MS * 2)
+        runCurrent()
+        assertEquals(1, r.sends.size)
+        assertTrue(r.log.last().startsWith("send:"))
+        assertTrue(r.log.last().contains("in the home folder"))
+    }
+
+    @Test fun closedBeforeStartedIsAStartFailure() = liveTest {
+        val r = rig(started = false)
+        event(r, LiveEvent.Closed("vendor_error", 3.0))
+        assertEquals(listOf("start_failed" to 0), r.ended)
+        assertTrue(r.transport.closed)
     }
 
     @Test fun stopPhraseEndsInsteadOfDelegating() = liveTest {

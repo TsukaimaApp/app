@@ -128,6 +128,10 @@ interface ChatBackend {
     /**
      * Whether the user allows the GPT-Live engine ([Settings.liveVoice]); it is used only when the server reports
      * `gpt-live` too ([voiceLiveStatus]). False for backends without a live path.
+     *
+     * The live members ([liveVoiceEnabled], [voiceLiveStatus], [liveTransport], [startLiveService],
+     * [stopLiveService], [liveVoiceEndRequests], [liveVoiceSeconds]) are overridden together: a backend that returns
+     * true here must provide [liveTransport] (its default throws) and a [voiceLiveStatus] that can say `gpt-live`.
      */
     val liveVoiceEnabled: Boolean get() = false
 

@@ -3,7 +3,6 @@ package app.tsukaima.domain.livevoice
 import app.tsukaima.domain.chat.AgentStatus
 import app.tsukaima.domain.chat.ChatItem
 import app.tsukaima.domain.chat.ChatState
-import app.tsukaima.domain.chat.running
 import app.tsukaima.domain.chat.turnLive
 import app.tsukaima.domain.voice.LiveInfo
 import app.tsukaima.domain.voice.SentenceChunker
@@ -18,6 +17,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -34,9 +34,11 @@ import kotlin.math.roundToInt
  * starts as quiet `session.thinking.append`, the reply sentence by sentence as `session.commentary.append`. Port of
  * the desktop's `use-voice-live-conversation.ts`.
  *
- * One delegation is active at a time; a newer one supersedes it at once (its tail is never spoken) and [interrupt]s
- * the chat's turn first when one runs. The reply is every [ChatItem.AssistantMessage] after the submit's user bubble,
- * in order (a tool-using turn shows several bubbles, often empty ones before its tools), each spoken as it streams.
+ * One delegation is active at a time; a newer one supersedes it at once (its tail is never spoken). When the chat's
+ * turn is live it [interrupt]s it first and submits only once that turn ended (at most [INTERRUPT_SETTLE_MS]); a
+ * newer delegation meanwhile replaces the waiting one. The reply is every [ChatItem.AssistantMessage] after the
+ * submit's user bubble, in order (a tool-using turn shows several bubbles, often empty ones before its tools), each
+ * spoken as it streams.
  * A spoken stop phrase (judged on the whole user utterance after [UTTERANCE_SETTLE_MS] of quiet, or as a delegation's
  * prompt) ends the session instead.
  *
@@ -91,6 +93,8 @@ class LiveVoiceController(
     private val cursors = ArrayList<ReplyCursor>() // by ordinal: the k-th assistant message since the submit
     private val handledRequests = HashSet<String>() // request card ids already announced
     private var startedAt = 0L
+    private var deferredId: String? = null // a delegation waiting for the interrupted turn to end
+    private var deferredJob: Job? = null
     private var rebuilding = false // between beginRebuild and rebased: the chat's items are not the ones fed so far
 
     /**
@@ -124,7 +128,8 @@ class LiveVoiceController(
         // Subscribed before the transport starts: a session.started arriving during start() must not be missed.
         eventsJob = scope.launch {
             transport.events.collect(::onEvent)
-            finish(CONNECTION_LOST, seconds) // the transport went away without session.closed
+            // The transport went away without session.closed: before session.started that is a failed start.
+            if (!up && !closing) finish(START_FAILED, 0) else finish(CONNECTION_LOST, seconds)
         }
         speakingJob = scope.launch { transport.speaking.collect { refresh() } }
         chatJob = scope.launch { chat.collect(::onChat) }
@@ -151,6 +156,7 @@ class LiveVoiceController(
         closing = true
         startJob?.cancel() // a stop during the start window ends with [reason], not start_failed
         clearDelegation()
+        clearDeferred()
         utteranceJob?.cancel()
         if (transport.send(buildJsonObject { put("type", "session.close") })) {
             closeJob = scope.launch {
@@ -247,6 +253,7 @@ class LiveVoiceController(
                 _state.update { it.copy(error = "Live voice: ${e.message.take(MAX_ERROR_CHARS)}") }
             }
             is LiveEvent.Closed -> {
+                if (!up && !closing) return finish(START_FAILED, 0) // closed before session.started
                 val usage = e.usageSeconds?.takeIf { it.isFinite() }?.roundToInt()?.coerceAtLeast(0)
                 finish(e.reason, usage ?: seconds)
             }
@@ -298,8 +305,28 @@ class LiveVoiceController(
         if (!up || closing) return
         val (prompt, context) = LiveText.delegationPrompt(transcript.contextWindow())
         if (prompt.isNotEmpty() && StopPhrases.isStopCommand(prompt)) return stop(STOP_PHRASE)
-        val c = chat.value
-        if (c.status.running) interrupt() // the answer spoken must be for what the user asked last
+        deferredJob?.cancel() // a delegation still waiting for the interrupted turn is replaced, never submitted
+        deferredJob = null
+        deferredId = null
+        if (!chat.value.status.turnLive) return submit(id, prompt, context)
+        // The answer spoken must be for what the user asked last: stop the running turn, and submit only once it
+        // ended (else its end would settle this delegation, and its final text could land after the new bubble).
+        clearDelegation()
+        interrupt()
+        deferredId = id
+        heard = ""
+        _state.update { it.copy(heard = "") }
+        deferredJob = scope.launch {
+            withTimeoutOrNull(INTERRUPT_SETTLE_MS) { chat.first { !it.status.turnLive } }
+            deferredJob = null
+            deferredId = null
+            submit(id, prompt, context)
+        }
+        refresh()
+    }
+
+    private fun submit(id: String, prompt: String, context: String) {
+        if (!up || closing || ended) return
         delegationId = id
         itemsAtSubmit = Int.MAX_VALUE // nothing is this turn's until send appended its user bubble
         submittedAt = now()
@@ -443,6 +470,12 @@ class LiveVoiceController(
         tickJob = null
     }
 
+    private fun clearDeferred() {
+        deferredJob?.cancel()
+        deferredJob = null
+        deferredId = null
+    }
+
     // ---- outgoing ---------------------------------------------------------------------------------
 
     private fun nextEventId(prefix: String) = "${prefix}_${++eventCounter}"
@@ -483,7 +516,8 @@ class LiveVoiceController(
         up = false
         closing = false
         delegationId = null
-        listOf(startJob, eventsJob, speakingJob, chatJob, meterJob, tickJob, utteranceJob, closeJob)
+        deferredId = null
+        listOf(startJob, eventsJob, speakingJob, chatJob, meterJob, tickJob, utteranceJob, closeJob, deferredJob)
             .forEach { it?.cancel() }
         transport.close()
         _state.update {
@@ -498,7 +532,7 @@ class LiveVoiceController(
             ended || !up -> VoicePhase.Idle
             chat.value.status.awaitingUser -> VoicePhase.Approval
             transport.speaking.value -> VoicePhase.Speaking
-            delegationId != null -> VoicePhase.Thinking
+            delegationId != null || deferredId != null -> VoicePhase.Thinking
             s.muted -> VoicePhase.Muted
             else -> VoicePhase.Listening
         }
@@ -518,6 +552,9 @@ class LiveVoiceController(
 
         /** How long an accepted delegation may sit before an idle chat without a reply counts as settled. */
         const val SUBMIT_SETTLE_GRACE_MS = 15_000L
+
+        /** The longest wait for an interrupted turn to end before a delegation is submitted anyway. */
+        const val INTERRUPT_SETTLE_MS = 5_000L
 
         /** The delegation loop's tick while a delegation is active. */
         const val TICK_MS = 200L

@@ -82,6 +82,9 @@ internal class ChatVoice(
     /** An engine is open, or a closed live session is still ending: [open] would do nothing. */
     val busy: Boolean get() = controller != null || live != null || closing != null
 
+    /** No engine is open, but a live session the user closed is still ending. */
+    val ending: Boolean get() = controller == null && live == null && closing != null
+
     /** The live engine is open (its screen may show a dropped session's reason line). */
     val liveOpen: Boolean get() = live != null
 
@@ -133,7 +136,9 @@ internal class ChatVoice(
         }
         val show: (VoiceState) -> Unit = { v ->
             state.update { it.copy(voice = v) }
-            if (engine is VoiceEngine.Live) backend.liveVoiceSeconds.value = v.live?.seconds ?: 0
+            if (engine is VoiceEngine.Live) {
+                backend.liveVoiceSeconds.value = v.live?.takeIf { it.ended == null }?.seconds ?: 0 // 0 once ended
+            }
         }
         if (history.value == ChatHistory.Loaded) {
             starting()
@@ -143,7 +148,13 @@ internal class ChatVoice(
             return
         }
         // startIndex MAX_VALUE: no transcript at all while waiting (bindResumed may already have put history in).
-        state.update { it.copy(voice = VoiceState(phase = VoicePhase.Idle, startIndex = Int.MAX_VALUE, live = info)) }
+        val waiting = VoiceState(
+            phase = VoicePhase.Idle,
+            startIndex = Int.MAX_VALUE,
+            live = info,
+            caption = if (info != null) CONNECTING else "",
+        )
+        state.update { it.copy(voice = waiting) }
         mirror = scope.launch {
             history.first { h ->
                 if (h is ChatHistory.Failed) state.update { it.copy(voice = it.voice?.copy(error = h.message)) }
@@ -274,5 +285,6 @@ internal class ChatVoice(
         const val CLOSE_REQUESTED = "close_requested"
         const val STOP_PHRASE = "stop_phrase"
         const val AUDIO_FOCUS_LOST = "audio_focus_lost"
+        const val CONNECTING = "Connecting…"
     }
 }

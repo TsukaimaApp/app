@@ -37,6 +37,8 @@ import app.tsukaima.domain.chat.ChatItem
 import app.tsukaima.domain.chat.queuesSends
 import app.tsukaima.domain.livevoice.FakeLiveTransport
 import app.tsukaima.domain.livevoice.LiveEvent
+import app.tsukaima.domain.livevoice.LiveFragment
+import app.tsukaima.domain.livevoice.LiveSpeaker
 import app.tsukaima.domain.livevoice.LiveStartException
 import app.tsukaima.domain.livevoice.LiveTransport
 import app.tsukaima.domain.voice.FakeSpeechInput
@@ -335,12 +337,13 @@ class ChatViewModelLiveVoiceTest {
         vm.openVoice() // refused while the old session is closing
         runCurrent()
         assertNull(vm.state.value.voice)
+        assertEquals(listOf("Ending live voice…"), b.toasts)
 
         t.emit(LiveEvent.Closed("close_requested", 84.0))
         runCurrent()
         assertTrue(t.closed)
         assertEquals(listOf("start", "stop"), b.service)
-        assertEquals(listOf("Live voice ended · 1:24"), b.toasts)
+        assertEquals(listOf("Ending live voice…", "Live voice ended · 1:24"), b.toasts)
         assertNull(vm.state.value.voice)
     }
 
@@ -361,6 +364,64 @@ class ChatViewModelLiveVoiceTest {
         runCurrent()
         assertNull(vm.state.value.voice)
         assertEquals(listOf("start", "stop"), b.service)
+    }
+
+    private fun FakeLiveTransport.ofType(type: String) =
+        sent.filter { it["type"]?.jsonPrimitive?.content == type }.map { it["content"]?.jsonPrimitive?.content }
+
+    private fun TestScope.say(t: FakeLiveTransport, text: String, at: Long) {
+        t.emit(LiveEvent.Transcript(LiveFragment(LiveSpeaker.User, text, at, at + 50)))
+        runCurrent()
+    }
+
+    @Test
+    fun delegationDuringARunningTurnWaitsForItsEnd() = liveTest {
+        val b = backend()
+        val vm = liveVoice(b)
+        val t = b.liveTransports.single()
+        vm.sendText("long task")
+        runCurrent()
+        say(t, "list my files", 100)
+        t.emit(LiveEvent.Delegation("d1"))
+        runCurrent()
+        assertEquals("interrupted first, not sent yet", 1, b.transport.calls.count { it.first == "prompt.submit" })
+        assertTrue(b.transport.calls.any { it.first == "session.interrupt" })
+
+        // The old turn ends with its final text and no streaming bubble.
+        b.events.emit(ev("message.complete", 1, """{"text":"old","status":"interrupted"}"""))
+        runCurrent()
+        val submit = b.transport.last("prompt.submit")
+        assertEquals("voice-live", submit["surface"]?.jsonPrimitive?.content)
+        assertEquals("list my files", submit["text"]?.jsonPrimitive?.content)
+
+        b.events.emit(ev("message.start", 2))
+        b.events.emit(ev("message.delta", 3, """{"text":"new"}"""))
+        b.events.emit(ev("message.complete", 4, """{"text":"new"}"""))
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(listOf("new"), t.ofType("session.commentary.append"))
+        assertFalse(t.ofType("session.thinking.append").any { it?.contains("without a spoken result") == true })
+    }
+
+    @Test
+    fun twoDelegationsDuringARunningTurnSubmitOnlyTheSecond() = liveTest {
+        val b = backend()
+        val vm = liveVoice(b)
+        val t = b.liveTransports.single()
+        vm.sendText("long task")
+        runCurrent()
+        say(t, "list my files", 100)
+        t.emit(LiveEvent.Delegation("d1"))
+        runCurrent()
+        say(t, "in the home folder", 200)
+        t.emit(LiveEvent.Delegation("d2"))
+        runCurrent()
+        b.events.emit(ev("message.complete", 1, """{"text":"","status":"interrupted"}"""))
+        advanceTimeBy(6_000)
+        runCurrent()
+        val submits = b.transport.calls.filter { it.first == "prompt.submit" }.map { it.second }
+        assertEquals(2, submits.size)
+        assertTrue(submits.last()["text"]?.jsonPrimitive?.content.orEmpty().contains("in the home folder"))
     }
 
     @Test

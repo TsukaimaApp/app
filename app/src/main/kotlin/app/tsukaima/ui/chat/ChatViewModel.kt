@@ -770,6 +770,7 @@ class ChatViewModel(
      * at once.
      */
     fun openVoice(mode: VoiceMode = VoiceMode.InApp, onApprovalNeeded: () -> Unit = {}, listen: Boolean = true) {
+        if (voice.ending) return backend.toast("Ending live voice…")
         if (voice.busy || voiceStart?.isActive == true) return
         if (mode == VoiceMode.Assist || !backend.liveVoiceEnabled) return voice.open(mode, onApprovalNeeded, listen)
         _state.update {
@@ -789,9 +790,15 @@ class ChatViewModel(
         }
     }
 
-    /** The server's voice engine status: cached for [LIVE_STATUS_TTL_MS]; null on timeout or any failure. */
+    /**
+     * The server's voice engine status, cached for [LIVE_STATUS_TTL_MS] ([LIVE_STATUS_FAILED_TTL_MS] when it failed);
+     * null on timeout or any failure.
+     */
     private suspend fun voiceLiveStatus(): VoiceLiveStatusDto? {
-        liveStatus?.let { (at, status) -> if (now() - at < LIVE_STATUS_TTL_MS) return status }
+        liveStatus?.let { (at, status) ->
+            val ttl = if (status != null) LIVE_STATUS_TTL_MS else LIVE_STATUS_FAILED_TTL_MS
+            if (now() - at < ttl) return status
+        }
         val status = withTimeoutOrNull(LIVE_STATUS_TIMEOUT_MS) { backend.voiceLiveStatus() }?.getOrNull()
         liveStatus = now() to status
         return status
@@ -1080,6 +1087,9 @@ class ChatViewModel(
 
         /** How long a voice engine status answer is reused. */
         const val LIVE_STATUS_TTL_MS = 60_000L
+
+        /** How long a failed or timed-out status call is remembered (the phone engine meanwhile). */
+        const val LIVE_STATUS_FAILED_TTL_MS = 10_000L
 
         /** The status `mode` of the GPT-Live engine. */
         const val GPT_LIVE = "gpt-live"
