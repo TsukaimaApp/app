@@ -456,3 +456,13 @@ Tagged as in v0.9.0: **[live]** probed, **[source]** read from the 0.22.2 source
   client must not match a purged send to a history row after a resume.
 - **The todo revision is restored from history when the agent is rebuilt** [source] (`run_agent.py` ~1032-1039:
   restored only when the history carries a newer revision), so revisions stay monotonic within a session.
+
+### Voice-live (GPT-Live) — routes and `prompt.submit` params (2026-10-24)
+
+- `GET /api/audio/voice-live/status?profile=<id>` → `{ok, mode:"chained"|"gpt-live", available, reason:string|null,
+  model, voice}`. `404` on a Hermes without the route. `available: true` is a hint, not a promise.
+- `POST /api/audio/voice-live/session {sdp, history?}` → `200 {ok, session:{id}, transport:{type:"webrtc", sdp}}`.
+  `400` blank SDP, `503` no API key, `502` vendor rejected (errors carry `{"detail": "…"}`). The SDP goes out
+  byte-exact incl. trailing CRLF; allow ~45 s.
+- `prompt.submit` takes two more optional params for delegated voice turns: `surface` (`"voice-live"`) and
+  `voice_context` (recent spoken transcript; Hermes keeps it only for that surface, capped at 6,000 chars).

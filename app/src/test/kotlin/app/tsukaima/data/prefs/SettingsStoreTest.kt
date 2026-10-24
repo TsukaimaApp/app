@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -114,6 +115,16 @@ class SettingsStoreTest {
         assertEquals("pl-PL", store.settings.first().voiceLanguage)
         store.update { it.copy(voiceLanguage = null) }
         assertNull(store.settings.first().voiceLanguage)
+    }
+
+    @Test
+    fun liveVoiceDefaultsOnAndRoundTrips() = runTest {
+        val store = store()
+        assertTrue(store.settings.first().liveVoice)
+        store.update { it.copy(liveVoice = false) }
+        assertFalse(store.settings.first().liveVoice)
+        store.update { it.copy(liveVoice = true) }
+        assertTrue(store.settings.first().liveVoice)
     }
 
     @Test

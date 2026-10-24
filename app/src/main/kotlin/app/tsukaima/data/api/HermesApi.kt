@@ -8,6 +8,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
@@ -453,6 +454,27 @@ class HermesApi(
 
     /** `GET /api/audio/voice-config`, the speech-to-text and text-to-speech parts only (see [VoiceConfigDto]). */
     suspend fun voiceConfig(): VoiceConfigDto = get("api/audio/voice-config", VoiceConfigDto.serializer(), managed = false)
+
+    /** `GET /api/audio/voice-live/status` (profile-scoped; 404 on a Hermes without the route). */
+    suspend fun voiceLiveStatus(): VoiceLiveStatusDto =
+        get("api/audio/voice-live/status", VoiceLiveStatusDto.serializer(), managed = true)
+
+    /**
+     * `POST /api/audio/voice-live/session`: the WebRTC offer [sdp] (sent byte-exact, trailing CRLF included) and
+     * optional seed [history]; answers the vendor's SDP. 400 (blank SDP), 503 (no API key) and 502 (vendor rejected)
+     * keep the server's `detail` on the [ApiException]. On [transcribeClient]: the vendor handshake takes seconds.
+     */
+    suspend fun voiceLiveSession(sdp: String, history: JsonArray?): VoiceLiveSessionDto {
+        val body = buildJsonObject {
+            put("sdp", sdp)
+            if (history != null) put("history", history)
+        }
+        val request = newRequest("POST", "api/audio/voice-live/session", body, true, true, emptyArray())
+        val response = transcribeClient.newCall(request).await()
+        return withContext(Dispatchers.IO) {
+            response.use { decode(request, it) { text -> HermesJson.decodeFromString(VoiceLiveSessionDto.serializer(), text) } }
+        }
+    }
 
     /** Audio relays ([transcribe], [speak]): 60 s, longer than the shared client's 20 s call timeout. */
     private val transcribeClient: OkHttpClient by lazy {

@@ -159,6 +159,16 @@ class GatewaySessionTest {
     }
 
     @Test
+    fun submitCarriesSurfaceAndVoiceContext() = runBlocking {
+        val t = FakeTransport(obj("""{"status":"streaming"}"""))
+        GatewaySession(t).submit("s1", "hello", surface = "voice-live", voiceContext = "User: hi")
+        val params = t.calls.single().second
+        assertEquals(setOf("session_id", "text", "surface", "voice_context"), params.keys)
+        assertEquals("voice-live", params["surface"]!!.jsonPrimitive.content)
+        assertEquals("User: hi", params["voice_context"]!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun missingSessionIdThrowsIOException() = runBlocking {
         val t = FakeTransport(obj("""{"stored_session_id":"st1","info":{},"messages":[]}"""))
         try {

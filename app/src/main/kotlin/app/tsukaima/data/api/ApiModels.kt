@@ -226,3 +226,33 @@ data class SpeechDto(
 
 /** `SessionDto.source` of a cron job's run. */
 const val CRON_SOURCE = "cron"
+
+/**
+ * `GET /api/audio/voice-live/status`: whether the server runs the GPT-Live voice engine. The engine is mounted only
+ * when [mode] is `gpt-live` and [available]; [reason] explains an unavailable engine (safe to log, never to show).
+ */
+@Serializable
+data class VoiceLiveStatusDto(
+    val ok: Boolean = true,
+    val mode: String = "chained",
+    val available: Boolean = false,
+    val reason: String? = null,
+    val model: String = "",
+    val voice: String = "",
+)
+
+/** `POST /api/audio/voice-live/session`: the vendor session ([session]) and the WebRTC answer ([transport]). */
+@Serializable
+data class VoiceLiveSessionDto(
+    val ok: Boolean,
+    val session: Session? = null,
+    val transport: Transport? = null,
+) {
+    /** The live session's server-side [id]. */
+    @Serializable
+    data class Session(val id: String = "")
+
+    /** The answer: [type] is `webrtc`, [sdp] the remote description to apply. */
+    @Serializable
+    data class Transport(val type: String = "", val sdp: String = "")
+}

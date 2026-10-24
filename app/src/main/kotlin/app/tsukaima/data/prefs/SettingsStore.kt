@@ -60,6 +60,8 @@ data class Settings(
     val voiceLanguage: String? = null,
     /** Where voice mode recognises speech and speaks replies; read when a voice session opens. */
     val voiceProcessing: VoiceProcessing = VoiceProcessing.Phone,
+    /** Use the server's GPT-Live voice engine when it reports one; off keeps the phone/server chained loop. */
+    val liveVoice: Boolean = true,
     /**
      * Stored id of the chat that last bound a stored session (cleared when that session is deleted from it): where
      * "Continue last chat" on the share card goes; null skips the card.
@@ -92,6 +94,7 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             if (next.assistSessionAt == null) prefs.remove(ASSIST_SESSION_AT) else prefs[ASSIST_SESSION_AT] = next.assistSessionAt
             prefs.putOrRemove(VOICE_LANGUAGE, next.voiceLanguage)
             prefs[VOICE_PROCESSING] = next.voiceProcessing.name
+            prefs[LIVE_VOICE] = next.liveVoice
             prefs.putOrRemove(LAST_CHAT_ID, next.lastChatId)
             prefs.remove(LEGACY_VOICE_OUTPUT) // never shipped; its choice is not carried over
         }
@@ -132,6 +135,7 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             voiceProcessing = (this[VOICE_PROCESSING] ?: this[LEGACY_VOICE_RECOGNITION])
                 ?.let { name -> VoiceProcessing.entries.firstOrNull { it.name == name } }
                 ?: defaults.voiceProcessing,
+            liveVoice = this[LIVE_VOICE] ?: defaults.liveVoice,
             lastChatId = this[LAST_CHAT_ID],
         )
     }
@@ -156,6 +160,7 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
         val ASSIST_SESSION_AT = longPreferencesKey("assist_session_at")
         val VOICE_LANGUAGE = stringPreferencesKey("voice_language")
         val VOICE_PROCESSING = stringPreferencesKey("voice_processing")
+        val LIVE_VOICE = booleanPreferencesKey("live_voice")
         val LAST_CHAT_ID = stringPreferencesKey("last_chat_id")
 
         /** 0.7.x's "Speech recognition" setting (`Phone`/`Server`): read only while [VOICE_PROCESSING] is unset. */

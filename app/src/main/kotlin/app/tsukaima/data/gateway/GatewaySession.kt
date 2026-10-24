@@ -67,6 +67,8 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
         interrupted: Boolean = false,
         truncateBeforeRowId: Long? = null,
         queued: Boolean = false,
+        surface: String? = null,
+        voiceContext: String? = null,
     ): SubmitResult {
         val result = rpc("prompt.submit", buildJsonObject {
             put("session_id", sessionId)
@@ -74,6 +76,8 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
             if (voice) put("voice_turn", true)
             if (interrupted) put("interrupted", true)
             if (queued) put("queued", true)
+            if (surface != null) put("surface", surface)
+            if (voiceContext != null) put("voice_context", voiceContext)
             if (truncateBeforeRowId != null) {
                 put("truncate_before_row_id", truncateBeforeRowId)
                 put("confirm_truncate", true)

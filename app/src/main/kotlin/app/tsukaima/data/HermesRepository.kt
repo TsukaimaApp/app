@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import app.tsukaima.data.api.AuthException
 import app.tsukaima.data.api.AuthMeDto
@@ -30,6 +31,8 @@ import app.tsukaima.data.api.ToolsetDto
 import app.tsukaima.data.api.TranscriptionDto
 import app.tsukaima.data.api.UsageDto
 import app.tsukaima.data.api.VoiceConfigDto
+import app.tsukaima.data.api.VoiceLiveSessionDto
+import app.tsukaima.data.api.VoiceLiveStatusDto
 import app.tsukaima.data.api.WorkspacesDto
 import app.tsukaima.data.prefs.CredentialStore
 import app.tsukaima.data.prefs.ServerUrl
@@ -167,6 +170,13 @@ class HermesRepository(
     suspend fun transcribe(audio: ByteArray, mime: String = "audio/wav"): Result<TranscriptionDto> =
         call { api.transcribe(audio, mime) }
     suspend fun voiceConfig(): Result<VoiceConfigDto> = call { api.voiceConfig() }
+
+    /** Whether the server runs GPT-Live voice. */
+    suspend fun voiceLiveStatus(): Result<VoiceLiveStatusDto> = call { api.voiceLiveStatus() }
+
+    /** Exchanges a WebRTC offer for the GPT-Live answer. */
+    suspend fun voiceLiveSession(sdp: String, history: JsonArray?): Result<VoiceLiveSessionDto> =
+        call { api.voiceLiveSession(sdp, history) }
 
     /** One sentence through the server's text-to-speech relay. */
     suspend fun speak(text: String): Result<SpeechDto> = call { api.speak(text) }

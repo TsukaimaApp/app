@@ -234,6 +234,38 @@ def speak_part(token):
     step(f"POST /api/audio/speak ({r.get('mime_type')}, {len(audio)} bytes, provider={r.get('provider')})")
 
 
+def voice_live_part(token):
+    try:
+        r = http_json("GET", "/api/audio/voice-live/status", token=token)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            step("voice-live status: route absent (older Hermes)")
+            return
+        fail(f"GET /api/audio/voice-live/status -> HTTP {e.code}: {e.read()[:200]!r}")
+    if not isinstance(r, dict) or r.get("ok") is not True:
+        fail(f"voice-live status not ok: {r!r}")
+    mode = r.get("mode")
+    step(f"GET /api/audio/voice-live/status (mode={mode}, available={r.get('available')})")
+    if mode != "gpt-live":
+        return
+
+    def post_session(sdp):
+        try:
+            http_json("POST", "/api/audio/voice-live/session", {"sdp": sdp}, token)
+        except urllib.error.HTTPError as e:
+            return e.code
+        return 200
+
+    code = post_session("  ")
+    if code != 400:
+        fail(f"voice-live session with blank SDP -> HTTP {code}, expected 400")
+    step("POST /api/audio/voice-live/session (blank SDP -> 400)")
+    code = post_session("v=0\r\n")
+    if code not in (502, 503):
+        fail(f"voice-live session with a junk SDP -> HTTP {code}, expected 502 or 503")
+    step(f"POST /api/audio/voice-live/session (junk SDP -> {code}, vendor/key refusal)")
+
+
 def minimal_pdf():
     """A valid one-page PDF (blank US Letter page) with a byte-exact xref table, built in code."""
     objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
@@ -401,6 +433,7 @@ def main():
     cron_part(token)
     transcribe_part(token)
     speak_part(token)
+    voice_live_part(token)
     asyncio.run(pdf_attach_part(token))
     asyncio.run(todo_part(token))
     print("PASS")
