@@ -47,6 +47,7 @@ class SharedFileStoreTest {
         val f = store.copy("../../evil.txt", null, null) { "a".byteInputStream() }
         assertEquals("evil.txt", f?.name)
         assertEquals("attachment", store.copy("  ", null, null) { "a".byteInputStream() }?.name)
+        assertEquals("attachment", store.copy(".", null, null) { "a".byteInputStream() }?.name)
     }
 
     @Test

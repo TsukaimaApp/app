@@ -13,4 +13,11 @@
         <item name="android:windowAnimationStyle">@null</item>
         <item name="android:windowIsFloating">false</item>
     </style>
+
+    <!-- The share target (ShareActivity): a see-through window over the sending app; Compose draws the scrim. -->
+    <style name="Theme.Tsukaima.Share" parent="Theme.Tsukaima">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
 </resources>

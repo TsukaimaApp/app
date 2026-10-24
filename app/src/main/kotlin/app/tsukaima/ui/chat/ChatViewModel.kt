@@ -41,6 +41,10 @@ import app.tsukaima.domain.chat.ThinkingFlair
 import app.tsukaima.domain.chat.queuesSends
 import app.tsukaima.domain.voice.VoiceLanguages
 import app.tsukaima.domain.voice.VoiceMode
+import app.tsukaima.share.ShareTarget
+import app.tsukaima.share.SharedContent
+import app.tsukaima.share.SharedFile
+import java.io.File
 
 /**
  * One chat: a new one when [storedSessionId] is null, else the stored session to resume.
@@ -99,8 +103,13 @@ class ChatViewModel(
         },
     )
 
+    /** Cached copies behind the composer's shared attachments ([attachShared]), deleted once each is released. */
+    private val sharedSources = mutableMapOf<PickedFile, SharedFile>()
+
     private val attachments = ChatAttachments(
-        session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), io, _state, ::liveSession,
+        session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), io, _state,
+        onReleased = { picked -> sharedSources.remove(picked)?.let(backend::deleteSharedFile) },
+        liveSession = ::liveSession,
     )
 
     private val edits = ChatEdits(
@@ -151,6 +160,19 @@ class ChatViewModel(
                     backend.bindSession(live, stored)
                     attachments.onLiveSession(live)
                 }
+            }
+        }
+        launch {
+            // "Continue last chat" on the share card: the chat that last bound a stored id (resumed, created, rotated).
+            _state.map { it.chat.storedSessionId }.filterNotNull().distinctUntilChanged()
+                .collect { backend.rememberLastChat(it) }
+        }
+        // A new chat takes only the share that was waiting when it was created (the one opened for it): a new chat
+        // already open would otherwise take a later one, then be replaced by the chat the share opens.
+        val shareAtStart = backend.pendingShare.value
+        launch {
+            backend.pendingShare.filterNotNull().collect { content ->
+                if (takesShare(content, shareAtStart) && backend.takeShare(content)) attachShared(content)
             }
         }
         open()
@@ -237,6 +259,27 @@ class ChatViewModel(
     }
 
     // ---- composer ---------------------------------------------------------------------------------
+
+    /** Whether [content] is this chat's: the stored session it names, or (a new chat's) the share it opened for. */
+    private fun takesShare(content: SharedContent, atStart: SharedContent?): Boolean =
+        when (val id = content.sessionId) {
+            null -> content.target == ShareTarget.NewChat && storedSessionId == null && content === atStart
+            else -> id == storedSessionId
+        }
+
+    /**
+     * A share taken off [ChatBackend.pendingShare]: its text goes into the composer (after a blank line when there
+     * is a draft already) and its cached files are attached like picked ones. Nothing is sent.
+     */
+    internal fun attachShared(content: SharedContent) {
+        if (content.text.isNotBlank()) {
+            _state.update { s ->
+                s.copy(input = if (s.input.isBlank()) content.text else s.input + "\n\n" + content.text)
+            }
+        }
+        val picked = content.files.map { f -> FilePickedFile(File(f.path), f.mime).also { sharedSources[it] = f } }
+        if (picked.isNotEmpty()) attach(picked)
+    }
 
     fun setInput(text: String) = _state.update { it.copy(input = text) }
 
@@ -705,6 +748,9 @@ class ChatViewModel(
 
     override fun onCleared() {
         closeVoice()
+        // Shared copies still in the composer (or held for a retry) go with the chat.
+        sharedSources.values.forEach(backend::deleteSharedFile)
+        sharedSources.clear()
         super.onCleared()
     }
 
@@ -880,7 +926,11 @@ class ChatViewModel(
         backend.toast(if (reasoning) "Reasoning copied" else "Message copied")
     }
 
-    fun delete() = finish("Deleted", "Couldn’t delete the chat") { backend.deleteSession(it) }
+    fun delete() = finish("Deleted", "Couldn’t delete the chat") { id ->
+        backend.deleteSession(id).onSuccess {
+            if (backend.settings.value?.lastChatId == id) backend.rememberLastChat(null)
+        }
+    }
 
     private fun finish(done: String, failed: String, action: suspend (String) -> Result<Unit>) {
         _state.update { it.copy(dialog = null, menu = null) }

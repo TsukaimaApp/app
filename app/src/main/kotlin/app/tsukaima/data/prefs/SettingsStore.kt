@@ -60,6 +60,11 @@ data class Settings(
     val voiceLanguage: String? = null,
     /** Where voice mode recognises speech and speaks replies; read when a voice session opens. */
     val voiceProcessing: VoiceProcessing = VoiceProcessing.Phone,
+    /**
+     * Stored id of the chat that last bound a stored session (cleared when that session is deleted from it): where
+     * "Continue last chat" on the share card goes; null skips the card.
+     */
+    val lastChatId: String? = null,
 )
 
 class SettingsStore(private val dataStore: DataStore<Preferences>) {
@@ -87,6 +92,7 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             if (next.assistSessionAt == null) prefs.remove(ASSIST_SESSION_AT) else prefs[ASSIST_SESSION_AT] = next.assistSessionAt
             prefs.putOrRemove(VOICE_LANGUAGE, next.voiceLanguage)
             prefs[VOICE_PROCESSING] = next.voiceProcessing.name
+            prefs.putOrRemove(LAST_CHAT_ID, next.lastChatId)
             prefs.remove(LEGACY_VOICE_OUTPUT) // never shipped; its choice is not carried over
         }
     }
@@ -126,6 +132,7 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             voiceProcessing = (this[VOICE_PROCESSING] ?: this[LEGACY_VOICE_RECOGNITION])
                 ?.let { name -> VoiceProcessing.entries.firstOrNull { it.name == name } }
                 ?: defaults.voiceProcessing,
+            lastChatId = this[LAST_CHAT_ID],
         )
     }
 
@@ -149,6 +156,7 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
         val ASSIST_SESSION_AT = longPreferencesKey("assist_session_at")
         val VOICE_LANGUAGE = stringPreferencesKey("voice_language")
         val VOICE_PROCESSING = stringPreferencesKey("voice_processing")
+        val LAST_CHAT_ID = stringPreferencesKey("last_chat_id")
 
         /** 0.7.x's "Speech recognition" setting (`Phone`/`Server`): read only while [VOICE_PROCESSING] is unset. */
         val LEGACY_VOICE_RECOGNITION = stringPreferencesKey("voice_recognition")

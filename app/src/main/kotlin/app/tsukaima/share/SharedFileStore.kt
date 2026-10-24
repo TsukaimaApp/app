@@ -14,7 +14,7 @@ class SharedFileStore(private val root: File, private val now: () -> Long = Syst
      */
     fun copy(name: String, mime: String?, size: Long?, open: () -> InputStream): SharedFile? {
         if (Attachments.tooLarge(size)) return null
-        val safe = File(name).name.takeIf { it.isNotBlank() && it != ".." } ?: "attachment"
+        val safe = File(name).name.takeIf { it.isNotBlank() && it != "." && it != ".." } ?: "attachment"
         val dir = File(root, UUID.randomUUID().toString())
         val out = File(dir, safe)
         try {
@@ -46,6 +46,7 @@ class SharedFileStore(private val root: File, private val now: () -> Long = Syst
         root.listFiles()?.forEach { if (it.lastModified() < cutoff) it.deleteRecursively() }
     }
 
+    /** Deletes [file]'s `<uuid>` folder, only when it is directly under root (never anything else on disk). */
     fun delete(file: SharedFile) {
         File(file.path).parentFile?.takeIf { it.parentFile == root }?.deleteRecursively()
     }

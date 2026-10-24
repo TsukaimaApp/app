@@ -45,6 +45,7 @@ import app.tsukaima.data.prefs.Settings
 import app.tsukaima.data.ticks
 import app.tsukaima.di.AppContainer
 import app.tsukaima.ui.components.ToastHost
+import app.tsukaima.share.ShareTarget
 import app.tsukaima.ui.drawer.DrawerViewModel
 import app.tsukaima.ui.drawer.SessionsDrawer
 import app.tsukaima.ui.navigation.Route
@@ -146,7 +147,13 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
             if (navController.currentBackStackEntry?.destination?.route == Route.Onboarding.path) return@collect
             when (request.screen) {
                 ApprovalNotifier.SCREEN_CHAT -> {
-                    val session = request.sessionId ?: container.settings.value?.lastSessionId
+                    // A share for a new chat opens one (not the last conversation): the new chat takes it.
+                    val newChatShare = container.pendingShare.value?.target == ShareTarget.NewChat
+                    val session = if (newChatShare) {
+                        null
+                    } else {
+                        request.sessionId ?: container.settings.value?.lastSessionId
+                    }
                     val entryNow = navController.currentBackStackEntry
                     val alreadyOpen = session != null && entryNow?.destination?.route == Route.Chat.path &&
                         entryNow.arguments?.getString(Route.ARG_SESSION) == session

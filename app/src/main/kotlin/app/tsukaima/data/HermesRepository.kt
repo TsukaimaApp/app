@@ -84,7 +84,7 @@ class HermesRepository(
         withContext(io) { creds.clear() }
         credsVersion.value++
         connection.signOut()
-        return attempt { settings.update { it.copy(onboarded = false, lastSessionId = null) } }
+        return attempt { settings.update { it.copy(onboarded = false, lastSessionId = null, lastChatId = null) } }
     }
 
     // ---- pass-through --------------------------------------------------------------------

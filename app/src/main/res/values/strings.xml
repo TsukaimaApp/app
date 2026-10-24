@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Tsukaima</string>
+    <!-- The share sheet target (ShareActivity). -->
+    <string name="share_label">Send to Tsukaima</string>
 </resources>

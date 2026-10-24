@@ -22,6 +22,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import app.tsukaima.data.ConnectionManager
+import app.tsukaima.share.SharedContent
+import app.tsukaima.share.SharedFileStore
+import java.io.File
 import app.tsukaima.data.HermesRepository
 import app.tsukaima.data.SessionBindings
 import app.tsukaima.data.api.AuthException
@@ -240,6 +243,15 @@ class AppContainer(context: Context) {
 
     /** A notification asked to open a screen (`chat` / `settings`); the shell navigates and clears it. */
     val openScreen = MutableStateFlow<OpenScreen?>(null)
+
+    /**
+     * A share from another app ([app.tsukaima.share.ShareActivity]) waiting for the chat it targets; that chat takes
+     * it with a compare-and-set to null ([app.tsukaima.ui.chat.ChatBackend.takeShare]).
+     */
+    val pendingShare = MutableStateFlow<SharedContent?>(null)
+
+    /** Cached copies of shared streams (`cacheDir/shared`), pruned at app start and on every share. */
+    val sharedFiles = SharedFileStore(File(appContext.cacheDir, "shared"))
 
     /** Live id of the chat on screen while it is resumed, else null (set by the chat screen). */
     val visibleLiveSessionId = MutableStateFlow<String?>(null)

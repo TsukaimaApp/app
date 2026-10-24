@@ -3,8 +3,12 @@ package app.tsukaima.ui.chat
 import android.util.Log
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -30,6 +34,8 @@ import app.tsukaima.domain.chat.ChatReducer
 import app.tsukaima.domain.voice.SpeechInput
 import app.tsukaima.domain.voice.SpeechOutput
 import app.tsukaima.domain.voice.VoiceLanguage
+import app.tsukaima.share.SharedContent
+import app.tsukaima.share.SharedFile
 import java.io.IOException
 
 /**
@@ -115,7 +121,27 @@ interface ChatBackend {
 
     /** The voice language picker's options, "System default" first (device locales, TTS languages, fallback). */
     fun voiceLanguages(): List<VoiceLanguage>
+
+    /** A share from another app waiting for its chat ([SharedContent.target]); null when none. */
+    val pendingShare: StateFlow<SharedContent?> get() = NoPendingShare
+
+    /** Takes [content] off [pendingShare] (compare-and-set to null); false when another chat already took it. */
+    fun takeShare(content: SharedContent): Boolean = false
+
+    /** Deletes the cached copy of a shared [file] once its attachment is sent or dropped (off the caller's thread). */
+    fun deleteSharedFile(file: SharedFile) = Unit
+
+    /**
+     * Records stored session [id] as the chat "Continue last chat" opens ([Settings.lastChatId]); null forgets it.
+     * Writes only on a change.
+     */
+    suspend fun rememberLastChat(id: String?) {
+        if (settings.value?.lastChatId != id) updateSettings { it.copy(lastChatId = id) }
+    }
 }
+
+/** [ChatBackend.pendingShare] for backends without a share channel. */
+private val NoPendingShare: StateFlow<SharedContent?> = MutableStateFlow<SharedContent?>(null).asStateFlow()
 
 class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override val transport: RpcTransport get() = c.gateway
@@ -159,6 +185,11 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override fun speechInput() = c.speechInput()
     override fun speechOutput() = c.speechOutput()
     override fun voiceLanguages() = c.voiceLanguages(includeEngine = true)
+    override val pendingShare get() = c.pendingShare
+    override fun takeShare(content: SharedContent) = c.pendingShare.compareAndSet(content, null)
+    override fun deleteSharedFile(file: SharedFile) {
+        c.appScope.launch(Dispatchers.IO) { c.sharedFiles.delete(file) }
+    }
 }
 
 /** Result of `session.events.since`. */

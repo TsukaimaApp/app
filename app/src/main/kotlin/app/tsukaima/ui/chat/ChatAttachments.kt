@@ -153,7 +153,8 @@ object Attachments {
 /**
  * The composer's attachments for one [ChatViewModel]: upload on pick, retry, remove, and hand-off to send.
  * Driven from the VM's single-threaded [scope]; blocking reads and base64 run on [io]. The picked file is kept
- * for a retry (re-read, never held in memory) until the attachment is sent or removed.
+ * for a retry (re-read, never held in memory) until the attachment is sent or removed, then handed to [onReleased]
+ * (also for one never attached: unreadable or too large).
  */
 internal class ChatAttachments(
     private val session: GatewaySession,
@@ -161,6 +162,8 @@ internal class ChatAttachments(
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher,
     private val state: MutableStateFlow<ChatUiState>,
+    /** A picked file the composer is done with (e.g. to delete a shared file's cached copy). */
+    private val onReleased: (PickedFile) -> Unit = {},
     /** The live session id, creating or resuming the session first if needed; null if that failed. */
     private val liveSession: suspend () -> String?,
 ) {
@@ -183,10 +186,12 @@ internal class ChatAttachments(
                     throw c
                 } catch (e: Exception) {
                     backend.toast("Couldn’t read the file: ${e.message ?: "unknown error"}")
+                    onReleased(file)
                     continue
                 }
                 if (Attachments.tooLarge(info.size)) {
                     backend.toast(Attachments.TOO_LARGE)
+                    onReleased(file)
                     continue
                 }
                 val id = "att-${++counter}"
@@ -276,7 +281,7 @@ internal class ChatAttachments(
     }
 
     /** The send went through: forget the sources of [sent]. */
-    fun sent(sent: List<PendingAttachment>) = sent.forEach { sources.remove(it.localId) }
+    fun sent(sent: List<PendingAttachment>) = sent.forEach { release(it.localId) }
 
     private fun upload(localId: String) {
         val (file, info) = sources[localId] ?: return
@@ -334,8 +339,12 @@ internal class ChatAttachments(
         }
     }
 
+    private fun release(localId: String) {
+        sources.remove(localId)?.let { (file, _) -> onReleased(file) }
+    }
+
     private fun drop(localId: String) {
-        sources.remove(localId)
+        release(localId)
         state.update { s -> s.copy(attachments = s.attachments.filterNot { it.localId == localId }) }
     }
 

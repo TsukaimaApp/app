@@ -97,6 +97,16 @@ class SettingsStoreTest {
     }
 
     @Test
+    fun lastChatIdRoundTripsAndClears() = runTest {
+        val store = store()
+        assertNull(store.settings.first().lastChatId)
+        store.update { it.copy(lastChatId = "20261024_101500_ab12cd") }
+        assertEquals("20261024_101500_ab12cd", store.settings.first().lastChatId)
+        store.update { it.copy(lastChatId = null) }
+        assertNull(store.settings.first().lastChatId)
+    }
+
+    @Test
     fun voiceLanguageDefaultsToSystemAndRoundTrips() = runTest {
         val store = store()
         assertNull(store.settings.first().voiceLanguage)
