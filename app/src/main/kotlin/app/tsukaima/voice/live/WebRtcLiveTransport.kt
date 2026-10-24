@@ -194,13 +194,20 @@ class WebRtcLiveTransport(
         block()
     }
 
+    /**
+     * Never called after [close] (the controller guards with `ended`/`closing`): [releaseNative] holds [lock] through
+     * the blocking `peer.close()`, so a late call here would wait for it on the caller's (main) thread.
+     */
     override fun send(event: JsonObject): Boolean = synchronized(lock) {
         val events = dataChannel ?: return false
         if (closed || events.state() != DataChannel.State.OPEN) return false
         events.send(DataChannel.Buffer(ByteBuffer.wrap(event.toString().toByteArray(Charsets.UTF_8)), false))
     }
 
-    /** The track only: the controller sends the `session.input_audio.mute`/`unmute` event itself. */
+    /**
+     * The track only: the controller sends the `session.input_audio.mute`/`unmute` event itself. Like [send], never
+     * called after [close] (it would wait on [lock] through `peer.close()`).
+     */
     override fun setMicMuted(muted: Boolean) {
         synchronized(lock) { micTrack?.setEnabled(!muted) }
     }

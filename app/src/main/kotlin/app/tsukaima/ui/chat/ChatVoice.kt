@@ -77,6 +77,22 @@ internal class ChatVoice(
      */
     private class LiveSession(val controller: LiveVoiceController, val transport: LiveTransport) {
         var started = false
+
+        /** The [ChatBackend.startLiveService] token while this session's service runs. */
+        var service: Long? = null
+
+        /** Why the app ended it ([close]); wins over the server's `session.closed` reason. */
+        var endReason: String? = null
+    }
+
+    /** Stops [session]'s service (once); the live flag drops only when no newer session's service took over. */
+    private fun stopService(session: LiveSession) {
+        val generation = session.service ?: return
+        session.service = null
+        if (backend.stopLiveService(generation)) {
+            backend.liveVoiceOpen.value = false
+            backend.liveVoiceSeconds.value = 0
+        }
     }
 
     /** An engine is open, or a closed live session is still ending: [open] would do nothing. */
@@ -123,10 +139,13 @@ internal class ChatVoice(
                 val session = openLive(engine.voice, onLiveStartFailed)
                 live = session
                 starting = start@{
-                    if (!backend.startLiveService()) { // refused: no session without the service
+                    val service = backend.startLiveService()
+                    if (service == null) { // refused: no session without the service
                         session.transport.close()
                         return@start startFailed(session, onLiveStartFailed)
                     }
+                    session.service = service
+                    backend.liveVoiceOpen.value = true
                     session.started = true
                     // A reply still streaming is not a finished text turn.
                     val items = chat.value.items.filter { it !is ChatItem.AssistantMessage || !it.streaming }
@@ -185,17 +204,18 @@ internal class ChatVoice(
      * length; one that dropped toasts so and its screen rests on the reason line until End or Keyboard.
      */
     private fun onLiveEnded(session: LiveSession, reason: String, seconds: Int, onStartFailed: () -> Unit) {
-        backend.stopLiveService()
-        backend.liveVoiceSeconds.value = 0
+        stopService(session)
         val requested = closing === session
         if (requested) closing = null
         if (reason == START_FAILED) return startFailed(session, onStartFailed)
-        val length = "%d:%02d".format(seconds / 60, seconds % 60)
+        val length = if (seconds > 0) " · " + "%d:%02d".format(seconds / 60, seconds % 60) else ""
+        val why = session.endReason ?: reason
         backend.toast(
             when {
-                reason == AUDIO_FOCUS_LOST -> "Live voice ended · another app took the audio"
-                requested || reason == CLOSE_REQUESTED || reason == STOP_PHRASE -> "Live voice ended · $length"
-                else -> "Live voice dropped · $length"
+                why == HERMES_UNREACHABLE -> "Live voice ended · Hermes unreachable"
+                requested || why == CLOSE_REQUESTED || why == STOP_PHRASE -> "Live voice ended$length"
+                why == AUDIO_FOCUS_LOST -> "Live voice ended · another app took the audio"
+                else -> "Live voice dropped$length"
             },
         )
     }
@@ -212,9 +232,10 @@ internal class ChatVoice(
 
     /**
      * Leaves voice mode at once. The phone engine stops listening and speaking (the running turn goes on); a live
-     * session is ended gracefully (`session.close`), its controller kept until the server confirms.
+     * session is ended gracefully (`session.close`), its controller kept until the server confirms. [reason] is why
+     * the app ends it (its end toast says so: [HERMES_UNREACHABLE]).
      */
-    fun close() {
+    fun close(reason: String = CLOSE_REQUESTED) {
         val c = controller
         val l = live
         if (c == null && l == null) return
@@ -226,7 +247,8 @@ internal class ChatVoice(
         state.update { it.copy(voice = null) }
         if (l != null && l.started && l.controller.state.value.live?.ended == null) {
             closing = l
-            l.controller.stop(CLOSE_REQUESTED)
+            l.endReason = reason
+            l.controller.stop(reason)
         }
     }
 
@@ -239,8 +261,7 @@ internal class ChatVoice(
         closing?.let { session ->
             closing = null
             session.transport.close()
-            backend.stopLiveService()
-            backend.liveVoiceSeconds.value = 0
+            stopService(session)
         }
     }
 
@@ -284,11 +305,13 @@ internal class ChatVoice(
         private fun ChatUiState.voiceChat(): ChatState = if (chat.status == status) chat else chat.copy(status = status)
     }
 
-    private companion object {
-        const val START_FAILED = "start_failed"
-        const val CLOSE_REQUESTED = "close_requested"
-        const val STOP_PHRASE = "stop_phrase"
-        const val AUDIO_FOCUS_LOST = "audio_focus_lost"
-        const val CONNECTING = "Connecting…"
+    companion object {
+        /** [close] reason: Hermes stayed unreachable while the live session ran. */
+        const val HERMES_UNREACHABLE = "hermes_unreachable"
+        private const val START_FAILED = "start_failed"
+        private const val CLOSE_REQUESTED = "close_requested"
+        private const val STOP_PHRASE = "stop_phrase"
+        private const val AUDIO_FOCUS_LOST = "audio_focus_lost"
+        private const val CONNECTING = "Connecting…"
     }
 }

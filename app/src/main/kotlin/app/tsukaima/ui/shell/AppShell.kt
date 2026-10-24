@@ -58,7 +58,10 @@ import app.tsukaima.ui.theme.windowWidth
 import app.tsukaima.ui.theme.Motion
 import app.tsukaima.ui.theme.tsukaima
 import app.tsukaima.notifications.ApprovalNotifier
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.getAndUpdate
+import kotlinx.coroutines.launch
 
 /**
  * The frame every screen lives in (HANDOFF §4, §8).
@@ -155,7 +158,13 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
         // settings the pairing list.
         container.openScreen.filterNotNull().collect { request ->
             container.openScreen.value = null
-            if (navController.currentBackStackEntry?.destination?.route == Route.Onboarding.path) return@collect
+            if (navController.currentBackStackEntry?.destination?.route == Route.Onboarding.path) {
+                // Not set up yet: no chat can take a share, so it goes (with its cached copies).
+                container.pendingShare.getAndUpdate { null }?.let { dropped ->
+                    container.appScope.launch(Dispatchers.IO) { dropped.files.forEach(container.sharedFiles::delete) }
+                }
+                return@collect
+            }
             when (request.screen) {
                 ApprovalNotifier.SCREEN_CHAT -> {
                     // A share for a new chat opens one (not the last conversation): the new chat takes it.

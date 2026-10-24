@@ -6,14 +6,20 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -69,7 +75,7 @@ class ChatViewModel(
      * False for the device-assistant sheet.
      */
     private val sharing: Boolean = true,
-    /** The clock (milliseconds, monotonic): the voice engine status cache and the live voice meter. */
+    /** The clock (milliseconds, monotonic) of the live voice meter. */
     private val now: () -> Long = { System.nanoTime() / 1_000_000 },
 ) : ViewModel() {
     private val session = GatewaySession(backend.transport) { backend.settings.value?.profile }
@@ -156,8 +162,12 @@ class ChatViewModel(
     /** The Mic tap's status call in flight ([openVoice]). */
     private var voiceStart: Job? = null
 
-    /** The last voice engine status and when it came (`now()`), reused for [LIVE_STATUS_TTL_MS]. */
-    private var liveStatus: Pair<Long, VoiceLiveStatusDto?>? = null
+    /** The server's voice engine status (null: not GPT-Live, or the probe failed), once [liveProbed]. */
+    private var liveStatus: VoiceLiveStatusDto? = null
+
+    /** A probe has answered (positively or not); its verdict is kept for the VM's lifetime ([probeLive]). */
+    private var liveProbed = false
+    private var liveProbe: Deferred<VoiceLiveStatusDto?>? = null
 
     private val chat get() = _state.value.chat
     private fun setChat(block: (ChatState) -> ChatState) = _state.update { it.copy(chat = block(it.chat)) }
@@ -176,6 +186,29 @@ class ChatViewModel(
         }
         // The live voice notification's End: only a chat with the live engine open answers it.
         launch { backend.liveVoiceEndRequests.collect { if (voice.liveOpen) closeVoice() } }
+        // The voice engine is asked once the connection is up, again on every reconnect and when the setting flips
+        // on, so a Mic tap rarely waits for it.
+        launch {
+            backend.connection.collect { c ->
+                if (c == ConnectionState.Connected && backend.liveVoiceEnabled) probeLive()
+            }
+        }
+        launch {
+            backend.settings.map { it?.liveVoice == true }.distinctUntilChanged().drop(1).collect { on ->
+                if (on && backend.connection.value == ConnectionState.Connected) probeLive()
+            }
+        }
+        // A live session whose Hermes stays unreachable would only apologise: it ends after the grace (a reconnect
+        // flap does not).
+        launch {
+            val liveUp = _state.map { s -> s.voice?.live?.let { it.ended == null } == true }
+            val down = combine(backend.connection, liveUp) { c, up -> c != ConnectionState.Connected && up }
+            down.distinctUntilChanged().collectLatest { isDown ->
+                if (!isDown) return@collectLatest
+                delay(LIVE_OFFLINE_GRACE_MS)
+                if (voice.liveOpen) voice.close(ChatVoice.HERMES_UNREACHABLE)
+            }
+        }
         launch {
             backend.settings.filterNotNull().map { it.voiceLanguage }.distinctUntilChanged().collect { tag ->
                 _state.update { it.copy(voiceLanguage = tag) }
@@ -763,7 +796,7 @@ class ChatViewModel(
     /**
      * Opens voice mode on this chat (no-op while open, or while a closed live session is still ending); see
      * [ChatVoice]. Needs `RECORD_AUDIO`, asked by the screen. In the app with the live voice setting on, the server
-     * is asked first (at most [LIVE_STATUS_TIMEOUT_MS], the answer reused for [LIVE_STATUS_TTL_MS]) while the voice
+     * is asked first ([probeLive]; a tap waits only for a first probe still in flight) while the voice
      * screen shows Connecting…: `gpt-live` and available opens the GPT-Live engine, anything else the phone engine,
      * which a live start failure also falls back to (with a toast). A resumed chat starts voice only once its history
      * is in, so nothing said before is spoken; [listen] false waits for a tap on the indicator instead of listening
@@ -773,36 +806,38 @@ class ChatViewModel(
         if (voice.ending) return backend.toast("Ending live voice…")
         if (voice.busy || voiceStart?.isActive == true) return
         if (mode == VoiceMode.Assist || !backend.liveVoiceEnabled) return voice.open(mode, onApprovalNeeded, listen)
+        if (liveProbed) return openVoiceOn(liveStatus, mode, onApprovalNeeded, listen)
         _state.update {
             it.copy(voice = VoiceState(phase = VoicePhase.Idle, caption = CONNECTING, startIndex = it.chat.items.size))
         }
-        voiceStart = launch {
-            val status = voiceLiveStatus()
-            val engine = if (status != null && status.mode == GPT_LIVE && status.available) {
-                VoiceEngine.Live(status.voice.ifBlank { "live" })
-            } else {
-                VoiceEngine.Chained
-            }
-            voice.open(mode, onApprovalNeeded, listen, engine) {
-                backend.toast("Live voice couldn’t start — using phone voice")
-                voice.open(mode, onApprovalNeeded, listen, VoiceEngine.Chained)
-            }
+        voiceStart = launch { openVoiceOn(probeLive().await(), mode, onApprovalNeeded, listen) }
+    }
+
+    private fun openVoiceOn(
+        status: VoiceLiveStatusDto?, mode: VoiceMode, onApprovalNeeded: () -> Unit, listen: Boolean,
+    ) {
+        val engine = if (status != null && status.mode == GPT_LIVE && status.available) {
+            VoiceEngine.Live(status.voice.ifBlank { "live" })
+        } else {
+            VoiceEngine.Chained
+        }
+        voice.open(mode, onApprovalNeeded, listen, engine) {
+            backend.toast("Live voice couldn’t start — using phone voice")
+            voice.open(mode, onApprovalNeeded, listen, VoiceEngine.Chained)
         }
     }
 
     /**
-     * The server's voice engine status, cached for [LIVE_STATUS_TTL_MS] ([LIVE_STATUS_FAILED_TTL_MS] when it failed);
-     * null on timeout or any failure.
+     * Asks the server's voice engine (at most [LIVE_STATUS_TIMEOUT_MS]; null on timeout or any failure) unless a
+     * probe is in flight already; the answer becomes the verdict [openVoice] uses from then on.
      */
-    private suspend fun voiceLiveStatus(): VoiceLiveStatusDto? {
-        liveStatus?.let { (at, status) ->
-            val ttl = if (status != null) LIVE_STATUS_TTL_MS else LIVE_STATUS_FAILED_TTL_MS
-            if (now() - at < ttl) return status
-        }
-        val status = withTimeoutOrNull(LIVE_STATUS_TIMEOUT_MS) { backend.voiceLiveStatus() }?.getOrNull()
-        liveStatus = now() to status
-        return status
-    }
+    private fun probeLive(): Deferred<VoiceLiveStatusDto?> = liveProbe?.takeIf { it.isActive }
+        ?: viewModelScope.async(dispatcher) {
+            val status = withTimeoutOrNull(LIVE_STATUS_TIMEOUT_MS) { backend.voiceLiveStatus() }?.getOrNull()
+            liveStatus = status
+            liveProbed = true
+            status
+        }.also { liveProbe = it }
 
     /** Leaves voice mode: listening and speech stop (a live session ends), the running turn goes on. */
     fun closeVoice() {
@@ -1085,11 +1120,8 @@ class ChatViewModel(
         /** The Mic tap's budget for the voice engine status call. */
         const val LIVE_STATUS_TIMEOUT_MS = 4_000L
 
-        /** How long a voice engine status answer is reused. */
-        const val LIVE_STATUS_TTL_MS = 60_000L
-
-        /** How long a failed or timed-out status call is remembered (the phone engine meanwhile). */
-        const val LIVE_STATUS_FAILED_TTL_MS = 10_000L
+        /** How long Hermes may stay unreachable before an open live session is ended. */
+        const val LIVE_OFFLINE_GRACE_MS = 10_000L
 
         /** The status `mode` of the GPT-Live engine. */
         const val GPT_LIVE = "gpt-live"

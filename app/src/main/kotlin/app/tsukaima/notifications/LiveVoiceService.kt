@@ -169,36 +169,41 @@ class LiveVoiceService : Service() {
         private fun isCurrent(generation: Long) = generation == latestStart && generation > stoppedGeneration
 
         /**
-         * Starts the service for a new session (or refreshes its notification when it runs). Returns false, starting
-         * nothing, without the mic grant (a microphone service would be refused) or when the system refused the start.
+         * Starts the service for a new session (or refreshes its notification when it runs) and returns the start's
+         * generation, the token its [stop] takes. Null, starting nothing, without the mic grant (a microphone service
+         * would be refused) or when the system refused the start.
          */
         @MainThread
-        fun start(context: Context): Boolean {
+        fun start(context: Context): Long? {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PERMISSION_GRANTED) {
                 Log.w(TAG, "live voice service: no RECORD_AUDIO grant")
-                return false
+                return null
             }
             val generation = latestStart + 1
             val intent = Intent(context, LiveVoiceService::class.java).putExtra(EXTRA_GENERATION, generation)
             return try {
                 ContextCompat.startForegroundService(context, intent)
                 latestStart = generation // only now: a refused start leaves a running service's generation current
-                true
+                generation
             } catch (e: RuntimeException) {
                 Log.w(TAG, "live voice service: start refused", e)
-                false
+                null
             }
         }
 
         /**
-         * Ends the latest session's service; a no-op when none runs. `stopService` only once that start has gone
-         * foreground (stopping a service started with `startForegroundService` before its `startForeground` crashes
-         * the app); otherwise its start command goes foreground and then stops itself.
+         * Ends the service of the session [start] returned [generation] for. A no-op returning false unless that is
+         * still the latest start: an older session ending late (its close takes up to 15 s) must not stop a newer
+         * one's service. `stopService` only once that start has gone foreground (stopping a service started with
+         * `startForegroundService` before its `startForeground` crashes the app); otherwise its start command goes
+         * foreground and then stops itself.
          */
         @MainThread
-        fun stop(context: Context) {
+        fun stop(context: Context, generation: Long): Boolean {
+            if (generation != latestStart) return false
             stoppedGeneration = latestStart
             if (foregroundGeneration == latestStart) context.stopService(Intent(context, LiveVoiceService::class.java))
+            return true
         }
     }
 }

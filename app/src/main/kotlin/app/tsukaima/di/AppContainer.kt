@@ -247,11 +247,20 @@ class AppContainer(context: Context) {
     /** Seconds of the live voice session running now (0 when none); the notification shows them. */
     val liveVoiceSeconds = MutableStateFlow(0)
 
-    /** Starts [LiveVoiceService] for a live session; false when it was refused (the session must not start). */
-    fun startLiveService(): Boolean = LiveVoiceService.start(appContext)
+    /**
+     * A live voice session is open (written by the chat): the background hand-off then keeps the Hermes connection
+     * up whatever the notification policy says, or every delegation would find Hermes unreachable.
+     */
+    val liveVoiceOpen = MutableStateFlow(false)
 
-    /** Stops [LiveVoiceService]; a no-op when it is not running. */
-    fun stopLiveService() = LiveVoiceService.stop(appContext)
+    /**
+     * Starts [LiveVoiceService] for a live session; its generation (for [stopLiveService]), or null when it was
+     * refused (the session must not start).
+     */
+    fun startLiveService(): Long? = LiveVoiceService.start(appContext)
+
+    /** Stops the [generation] session's [LiveVoiceService]; false (nothing done) when a newer session started since. */
+    fun stopLiveService(generation: Long): Boolean = LiveVoiceService.stop(appContext, generation)
 
     fun openFile(uri: String, mime: String): Boolean = viewFile(appContext, uri, mime)
 
@@ -324,6 +333,7 @@ class AppContainer(context: Context) {
                 authRequired = connection.authRequired.value,
                 notificationsPermitted = NotificationManagerCompat.from(appContext).areNotificationsEnabled(),
                 foreground = inForeground.value,
+                liveVoiceOpen = liveVoiceOpen.value,
             )
         },
         startService = { GatewayService.start(appContext) },
@@ -338,6 +348,8 @@ class AppContainer(context: Context) {
             settings.filterNotNull().map { it.notifications.anyOn }.distinctUntilChanged().drop(1)
                 .collect { background.reevaluate() }
         }
+        // A live voice session ended in the background: the hand-off it kept may no longer be allowed.
+        appScope.launch { liveVoiceOpen.drop(1).collect { background.reevaluate() } }
     }
 
     /**

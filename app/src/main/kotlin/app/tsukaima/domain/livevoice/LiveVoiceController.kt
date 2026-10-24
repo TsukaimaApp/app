@@ -281,6 +281,7 @@ class LiveVoiceController(
         transcript.append(f)
         when (f.speaker) {
             LiveSpeaker.User -> {
+                if (_state.value.error != null) _state.update { it.copy(error = null) } // a vendor error is stale now
                 utterance.append(f.text)
                 heard = (heard + f.text).takeLast(MAX_HEARD_CHARS)
                 voiceLine = ""
@@ -305,6 +306,7 @@ class LiveVoiceController(
         if (!up || closing) return
         val (prompt, context) = LiveText.delegationPrompt(transcript.contextWindow())
         if (prompt.isNotEmpty() && StopPhrases.isStopCommand(prompt)) return stop(STOP_PHRASE)
+        if (prompt.isBlank()) return speak(id, EMPTY_PROMPT) // nothing heard to delegate: the running turn goes on
         deferredJob?.cancel() // a delegation still waiting for the interrupted turn is replaced, never submitted
         deferredJob = null
         deferredId = null
@@ -337,7 +339,7 @@ class LiveVoiceController(
         heard = ""
         _state.update { it.copy(heard = "") }
         if (!send(prompt, context)) {
-            speak(id, SUBMIT_FAILED)
+            speak(id, NOT_SENT)
             clearDelegation()
             refresh()
             return
@@ -398,6 +400,11 @@ class LiveVoiceController(
                 speak(id, WAITING_SAY)
                 think(id, WAITING_THINK)
             }
+        }
+        if ((c.items.getOrNull(itemsAtSubmit - 1) as? ChatItem.UserMessage)?.failed == true) {
+            speak(id, SUBMIT_FAILED) // the submit RPC failed after the bubble went in: no turn will come
+            clearDelegation()
+            return
         }
         if (!live && !streaming && (turnObserved || now() - submittedAt > SUBMIT_SETTLE_GRACE_MS)) {
             // Settled; nothing spoken means a tool-only, failed or interrupted turn.
@@ -565,7 +572,9 @@ class LiveVoiceController(
         private const val STOP_PHRASE = "stop_phrase"
         private const val CONNECTION_LOST = "connection_lost"
         private const val IGNORED_ERROR = "context_injection_incomplete"
-        private const val SUBMIT_FAILED = "Sorry, I could not reach Hermes for that request."
+        private const val NOT_SENT = "Sorry, I could not reach Hermes for that request."
+        private const val SUBMIT_FAILED = "Sorry, that request did not reach Hermes."
+        private const val EMPTY_PROMPT = "Sorry, I did not catch that."
         private const val WAITING_SAY = "Hermes needs you to answer something on screen."
         private const val WAITING_THINK = "Hermes is waiting for the user to answer a request in the app."
         private const val NO_RESULT = "Hermes finished that request without a spoken result."

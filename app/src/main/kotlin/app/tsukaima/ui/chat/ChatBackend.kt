@@ -130,8 +130,9 @@ interface ChatBackend {
      * `gpt-live` too ([voiceLiveStatus]). False for backends without a live path.
      *
      * The live members ([liveVoiceEnabled], [voiceLiveStatus], [liveTransport], [startLiveService],
-     * [stopLiveService], [liveVoiceEndRequests], [liveVoiceSeconds]) are overridden together: a backend that returns
-     * true here must provide [liveTransport] (its default throws) and a [voiceLiveStatus] that can say `gpt-live`.
+     * [stopLiveService], [liveVoiceEndRequests], [liveVoiceSeconds], [liveVoiceOpen]) are overridden together: a
+     * backend that returns true here must provide [liveTransport] (its default throws) and a [voiceLiveStatus] that
+     * can say `gpt-live`.
      */
     val liveVoiceEnabled: Boolean get() = false
 
@@ -142,13 +143,20 @@ interface ChatBackend {
     fun liveTransport(): LiveTransport = error("no live voice")
 
     /**
-     * A live voice session is starting: keep mic and connection alive while the screen is off. False when the
-     * service was refused (no mic grant, background-start limits); the session then fails to start.
+     * A live voice session is starting: keep mic and connection alive while the screen is off. Returns the token
+     * its [stopLiveService] takes, or null when the service was refused (no mic grant, background-start limits); the
+     * session then fails to start.
      */
-    fun startLiveService(): Boolean = true
+    fun startLiveService(): Long? = 0L
 
-    /** The live voice session ended. */
-    fun stopLiveService() = Unit
+    /**
+     * The live voice session whose [startLiveService] returned [generation] ended. False, doing nothing, when a newer
+     * session's service started since (that one keeps running).
+     */
+    fun stopLiveService(generation: Long): Boolean = true
+
+    /** A live voice session is open (the chat writes it): the app keeps Hermes connected in the background. */
+    val liveVoiceOpen: MutableStateFlow<Boolean> get() = MutableStateFlow(false) // no live path: goes nowhere
 
     /** The live voice notification's End action: the chat with a live session open closes it. */
     val liveVoiceEndRequests: Flow<Unit> get() = emptyFlow()
@@ -223,7 +231,8 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override suspend fun voiceLiveStatus() = c.repository.voiceLiveStatus()
     override fun liveTransport() = c.liveTransport()
     override fun startLiveService() = c.startLiveService()
-    override fun stopLiveService() = c.stopLiveService()
+    override fun stopLiveService(generation: Long) = c.stopLiveService(generation)
+    override val liveVoiceOpen get() = c.liveVoiceOpen
     override val liveVoiceEndRequests get() = c.liveVoiceEndRequests
     override val liveVoiceSeconds get() = c.liveVoiceSeconds
     override val pendingShare get() = c.pendingShare

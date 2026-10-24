@@ -1,7 +1,11 @@
 package app.tsukaima.ui.chat
 
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -132,15 +136,18 @@ class ChatViewModelLiveVoiceTest {
 
         /** "start" and "stop", in call order. */
         val service = mutableListOf<String>()
-        /** What [startLiveService] answers (false: the system refused the service). */
+        /** Whether [startLiveService] succeeds (false: the system refused the service). */
         var serviceAllowed = true
-        override fun startLiveService(): Boolean {
+        private var latestService = 0L
+        override fun startLiveService(): Long? {
             service += "start"
-            return serviceAllowed
+            return if (serviceAllowed) ++latestService else null
         }
-        override fun stopLiveService() {
+        override fun stopLiveService(generation: Long): Boolean {
             service += "stop"
+            return generation == latestService
         }
+        override val liveVoiceOpen = MutableStateFlow(false)
         override val liveVoiceEndRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
         override val liveVoiceSeconds = MutableStateFlow(0)
     }
@@ -173,6 +180,8 @@ class ChatViewModelLiveVoiceTest {
             mapOf(
                 "session.create" to
                     obj("""{"session_id":"$live","stored_session_id":"s-1","info":{},"messages":[]}"""),
+                "session.resume" to
+                    obj("""{"session_id":"$live","stored_session_id":"s-1","running":false,"messages":[]}"""),
             ),
         ),
     )
@@ -204,11 +213,11 @@ class ChatViewModelLiveVoiceTest {
     fun liveEngineWhenServerSaysGptLiveAndAvailable() = liveTest {
         val b = backend()
         b.status = gptLive()
-        b.statusGate = CompletableDeferred()
+        b.statusGate = CompletableDeferred() // the probe the chat started is still in flight at the tap
         val vm = vm(b)
-        advanceUntilIdle()
+        runCurrent() // not advanceUntilIdle: the probe's 4 s budget would run out
         vm.sendText("what kernel?")
-        advanceUntilIdle()
+        runCurrent()
 
         vm.openVoice()
         runCurrent()
@@ -276,7 +285,7 @@ class ChatViewModelLiveVoiceTest {
         advanceUntilIdle()
         vm.openVoice(VoiceMode.Assist)
         advanceUntilIdle()
-        assertEquals(0, b.statusCalls)
+        assertTrue(b.liveTransports.isEmpty())
         assertEquals(1, b.speechInputs)
     }
 
@@ -445,6 +454,110 @@ class ChatViewModelLiveVoiceTest {
         val submits = b.transport.calls.filter { it.first == "prompt.submit" }.map { it.second }
         assertEquals(2, submits.size)
         assertTrue(submits.last()["text"]?.jsonPrimitive?.content.orEmpty().contains("in the home folder"))
+    }
+
+    @Test
+    fun hermesUnreachableForTheGraceEndsTheLiveSession() = liveTest {
+        val b = backend()
+        val vm = liveVoice(b)
+        val t = b.liveTransports.single()
+        advanceTimeBy(30_100)
+        runCurrent()
+        assertTrue(b.liveVoiceOpen.value)
+
+        b.connection.value = ConnectionState.Reconnecting // a flap shorter than the grace changes nothing
+        advanceTimeBy(9_000)
+        runCurrent()
+        b.connection.value = ConnectionState.Connected
+        runCurrent()
+        b.connection.value = ConnectionState.Disconnected
+        advanceTimeBy(9_999) // LIVE_OFFLINE_GRACE_MS is 10 s
+        runCurrent()
+        assertFalse(t.sentTypes.contains("session.close"))
+        advanceTimeBy(1)
+        runCurrent()
+        assertEquals("session.close", t.sentTypes.last())
+        assertNull(vm.state.value.voice)
+
+        t.emit(LiveEvent.Closed("close_requested", 49.0))
+        runCurrent()
+        assertTrue(t.closed)
+        assertEquals(listOf("start", "stop"), b.service)
+        assertFalse(b.liveVoiceOpen.value)
+        assertEquals(listOf("Live voice ended · Hermes unreachable"), b.toasts)
+    }
+
+    @Test
+    fun clearingTheViewModelEndsTheLiveSession() = liveTest {
+        val b = backend()
+        b.status = gptLive()
+        val store = ViewModelStore()
+        val factory = viewModelFactory {
+            initializer {
+                ChatViewModel(
+                    b, null, dispatcher = dispatcher, io = dispatcher, flair = { "flair" },
+                    now = { dispatcher.scheduler.currentTime },
+                )
+            }
+        }
+        val vm = ViewModelProvider.create(store, factory)[ChatViewModel::class].also { created += it }
+        advanceUntilIdle()
+        vm.openVoice()
+        runCurrent()
+        val t = b.liveTransports.single()
+        t.emit(LiveEvent.Started("ls-1"))
+        advanceTimeBy(5_100)
+        runCurrent()
+        assertTrue(b.liveVoiceOpen.value)
+        assertEquals(5, b.liveVoiceSeconds.value)
+
+        store.clear() // the chat left the back stack
+        runCurrent()
+        assertEquals("session.close", t.sentTypes.last())
+        assertTrue(t.closed)
+        assertEquals(listOf("start", "stop"), b.service)
+        assertEquals(0, b.liveVoiceSeconds.value)
+        assertFalse(b.liveVoiceOpen.value)
+    }
+
+    @Test
+    fun theStatusIsAskedOnceUpFrontSoATapIsInstant() = liveTest {
+        val b = backend()
+        b.status = gptLive()
+        val vm = vm(b)
+        advanceUntilIdle()
+        assertEquals("asked when the chat started", 1, b.statusCalls)
+        vm.openVoice()
+        assertEquals("no wait on the tap", 1, b.liveTransports.size)
+        assertEquals(1, b.statusCalls)
+        runCurrent()
+        vm.closeVoice()
+        b.liveTransports.single().emit(LiveEvent.Closed("close_requested", 0.0))
+        runCurrent()
+        assertEquals("a session that never ran has no clock", listOf("Live voice ended"), b.toasts)
+
+        b.status = Result.success(VoiceLiveStatusDto(mode = "chained", available = true))
+        b.connection.value = ConnectionState.Reconnecting
+        runCurrent()
+        b.connection.value = ConnectionState.Connected // back up: asked again in the background
+        advanceUntilIdle()
+        assertEquals(2, b.statusCalls)
+        vm.openVoice()
+        runCurrent()
+        assertEquals("the new verdict: phone voice", 1, b.speechInputs)
+    }
+
+    @Test
+    fun aUserCloseRacingAFocusLossSaysEnded() = liveTest {
+        val b = backend()
+        val vm = liveVoice(b)
+        val t = b.liveTransports.single()
+        advanceTimeBy(2_100)
+        runCurrent()
+        vm.closeVoice()
+        t.emit(LiveEvent.Closed("audio_focus_lost", 2.0))
+        runCurrent()
+        assertEquals(listOf("Live voice ended · 0:02"), b.toasts)
     }
 
     @Test

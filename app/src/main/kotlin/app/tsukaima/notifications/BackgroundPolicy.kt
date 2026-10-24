@@ -9,7 +9,8 @@ object BackgroundPolicy {
      * (server URL and stored password, no pending re-login) that may post notifications, and only if the
      * user has not already come back, and only while at least one notification kind is switched on (with every
      * kind off nothing would be posted, so a foreground service would only hold a socket open). Otherwise the
-     * app just goes quiet in the background.
+     * app just goes quiet in the background — except while a live voice session is open ([liveVoiceOpen]): its
+     * delegations need Hermes, so the connection is handed off regardless.
      */
     fun shouldStartService(
         settings: Settings?,
@@ -17,9 +18,12 @@ object BackgroundPolicy {
         authRequired: Boolean,
         notificationsPermitted: Boolean,
         foreground: Boolean,
+        liveVoiceOpen: Boolean = false,
     ): Boolean =
-        !foreground && notificationsPermitted && !authRequired && hasPassword &&
-            settings != null && settings.serverUrl.isNotEmpty() && settings.notifications.anyOn
+        !foreground && (
+            liveVoiceOpen || notificationsPermitted && !authRequired && hasPassword &&
+                settings != null && settings.serverUrl.isNotEmpty() && settings.notifications.anyOn
+            )
 
     /** Ask for `POST_NOTIFICATIONS` once, after onboarding, on API 33+, unless it is already granted. */
     fun shouldRequestPermission(sdkInt: Int, settings: Settings?, granted: Boolean): Boolean =

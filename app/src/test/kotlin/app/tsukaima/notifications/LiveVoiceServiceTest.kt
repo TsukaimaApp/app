@@ -52,9 +52,12 @@ class LiveVoiceServiceTest {
     /** [LiveVoiceService.start] as the chat calls it; returns the start the system then delivers (later). */
     private fun startIntent(): Intent {
         shadowOf(app).clearStartedServices()
-        assertTrue(LiveVoiceService.start(app))
+        generation = checkNotNull(LiveVoiceService.start(app))
         return checkNotNull(shadowOf(app).nextStartedService)
     }
+
+    /** The generation of the latest [startIntent]. */
+    private var generation = 0L
 
     private fun deliver(intent: Intent, startId: Int = 1): ServiceController<LiveVoiceService> =
         Robolectric.buildService(LiveVoiceService::class.java, intent).create().startCommand(0, startId)
@@ -127,7 +130,7 @@ class LiveVoiceServiceTest {
     @Test
     fun theAppsOwnStopDoesNotRequestAnotherEnd() {
         val controller = started()
-        LiveVoiceService.stop(app)
+        LiveVoiceService.stop(app, generation)
         assertEquals(LiveVoiceService::class.java.name, shadowOf(app).nextStoppedService?.component?.className)
         controller.destroy()
         assertEquals(0, ends.size) // a dropped session's screen keeps its reason line
@@ -136,7 +139,7 @@ class LiveVoiceServiceTest {
     @Test
     fun aStopBeforeTheServiceWentForegroundLetsItGoForegroundThenEndQuietly() {
         val intent = startIntent()
-        LiveVoiceService.stop(app) // a synchronous start failure: the start command has not run yet
+        LiveVoiceService.stop(app, generation) // a synchronous start failure: the start command has not run yet
         assertNull("no stopService before startForeground", shadowOf(app).nextStoppedService)
         val controller = deliver(intent, startId = 4)
         val shadow = shadowOf(controller.get())
@@ -149,7 +152,7 @@ class LiveVoiceServiceTest {
     @Test
     fun anOlderSessionsLateDestroyDoesNotEndTheNextOne() {
         val a = started()
-        LiveVoiceService.stop(app)
+        LiveVoiceService.stop(app, generation)
         val b = startIntent()
         a.destroy() // A's destroy lands after B's start
         assertEquals(0, ends.size)
@@ -158,10 +161,25 @@ class LiveVoiceServiceTest {
     }
 
     @Test
+    fun anOlderSessionsLateStopLeavesTheNewerServiceRunning() {
+        val a = started()
+        val genA = generation
+        val b = deliver(startIntent(), startId = 2) // chat B's session starts while A is still closing
+        shadowOf(app).clearStartedServices()
+        assertFalse(LiveVoiceService.stop(app, genA)) // A's close completes late
+        assertNull("B's service is not stopped", shadowOf(app).nextStoppedService)
+        assertNotNull(shadowOf(b.get()).lastForegroundNotification)
+        a.destroy()
+        assertEquals(0, ends.size)
+        assertTrue(LiveVoiceService.stop(app, generation))
+        assertEquals(LiveVoiceService::class.java.name, shadowOf(app).nextStoppedService?.component?.className)
+    }
+
+    @Test
     fun withoutTheMicGrantNothingStarts() {
         shadowOf(app).denyPermissions(Manifest.permission.RECORD_AUDIO)
         shadowOf(app).clearStartedServices()
-        assertFalse(LiveVoiceService.start(app))
+        assertNull(LiveVoiceService.start(app))
         assertNull(shadowOf(app).nextStartedService)
     }
 
@@ -201,11 +219,11 @@ class LiveVoiceServiceTest {
         val backend = ContainerChatBackend(container)
         val shadowApp = shadowOf(app)
         shadowApp.clearStartedServices()
-        assertTrue(backend.startLiveService())
+        val token = checkNotNull(backend.startLiveService())
         val start = checkNotNull(shadowApp.nextStartedService)
         assertEquals(LiveVoiceService::class.java.name, start.component?.className)
         deliver(start) // foreground: the stop may now stop it
-        backend.stopLiveService()
+        assertTrue(backend.stopLiveService(token))
         assertEquals(LiveVoiceService::class.java.name, shadowApp.nextStoppedService?.component?.className)
         assertEquals(0, ends.size)
     }

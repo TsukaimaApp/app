@@ -65,7 +65,7 @@ class ShareActivity : ComponentActivity() {
         )[ShareModel::class.java]
         if (!model.started) {
             model.started = true
-            val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+            val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() // styled shares put a Spanned there
             val request = ShareIntake.parse(intent.action, intent.type, text, streams(intent))
             if (request == null) {
                 toast(applicationContext, NOTHING)

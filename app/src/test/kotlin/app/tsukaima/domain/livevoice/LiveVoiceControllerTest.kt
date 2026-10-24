@@ -675,6 +675,40 @@ class LiveVoiceControllerTest {
         assertEquals(listOf("It is noon.", "In Tokyo"), r.says)
     }
 
+    @Test fun aSubmitThatFailedAfterItsBubbleIsNarratedAsSuch() = liveTest {
+        val r = rig()
+        user(r, "list files")
+        delegate(r, "d1")
+        r.status(AgentStatus.Thinking("hm"))
+        settle()
+        // The prompt.submit RPC failed: the bubble is marked failed, the status goes back to idle.
+        val bubble = r.chat.value.items.last() as ChatItem.UserMessage
+        r.replace(bubble.copy(failed = true), AgentStatus.Idle)
+        settle()
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(listOf("Sorry, that request did not reach Hermes."), r.says)
+        assertFalse(noResult in r.thinks)
+        assertEquals(VoicePhase.Listening, r.state.phase)
+    }
+
+    @Test fun aDelegationWithNothingHeardSaysSo() = liveTest {
+        val r = rig()
+        r.status(AgentStatus.Replying)
+        settle()
+        delegate(r, "d1")
+        assertEquals(listOf("Sorry, I did not catch that."), r.says)
+        assertTrue("no send, no interrupt", r.log.isEmpty())
+    }
+
+    @Test fun aVendorErrorClearsOnTheNextUserWords() = liveTest {
+        val r = rig()
+        event(r, LiveEvent.Error("rate limited", "rate_limit"))
+        assertEquals("Live voice: rate limited", r.state.error)
+        user(r, "hello")
+        assertNull(r.state.error)
+    }
+
     @Test fun stopDuringTheStartWindowEndsWithItsReason() = liveTest {
         val t = FakeLiveTransport().apply { startGate = CompletableDeferred() }
         val r = rig(started = false, transport = t)
