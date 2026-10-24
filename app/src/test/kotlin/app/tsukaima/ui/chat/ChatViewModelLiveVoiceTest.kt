@@ -132,8 +132,11 @@ class ChatViewModelLiveVoiceTest {
 
         /** "start" and "stop", in call order. */
         val service = mutableListOf<String>()
-        override fun startLiveService() {
+        /** What [startLiveService] answers (false: the system refused the service). */
+        var serviceAllowed = true
+        override fun startLiveService(): Boolean {
             service += "start"
+            return serviceAllowed
         }
         override fun stopLiveService() {
             service += "stop"
@@ -317,6 +320,26 @@ class ChatViewModelLiveVoiceTest {
         assertEquals(1, b.speechInputs)
         assertEquals(listOf("start", "stop"), b.service)
         assertTrue(b.liveTransports.single().closed)
+        assertNull(vm.state.value.voice?.live)
+        assertEquals(VoicePhase.Listening, vm.state.value.voice?.phase)
+    }
+
+    @Test
+    fun aRefusedLiveServiceFallsBackToChainedWithToast() = liveTest {
+        val b = backend()
+        b.status = gptLive()
+        b.serviceAllowed = false
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.openVoice()
+        advanceUntilIdle()
+
+        assertEquals(listOf("Live voice couldn’t start — using phone voice"), b.toasts)
+        assertEquals(1, b.speechInputs)
+        assertEquals(listOf("start"), b.service) // nothing to stop: it never ran
+        val t = b.liveTransports.single()
+        assertTrue(t.closed)
+        assertNull("never connected", t.startedWith)
         assertNull(vm.state.value.voice?.live)
         assertEquals(VoicePhase.Listening, vm.state.value.voice?.phase)
     }

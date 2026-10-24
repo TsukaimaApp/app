@@ -122,9 +122,12 @@ internal class ChatVoice(
             is VoiceEngine.Live -> {
                 val session = openLive(engine.voice, onLiveStartFailed)
                 live = session
-                starting = {
+                starting = start@{
+                    if (!backend.startLiveService()) { // refused: no session without the service
+                        session.transport.close()
+                        return@start startFailed(session, onLiveStartFailed)
+                    }
                     session.started = true
-                    backend.startLiveService()
                     // A reply still streaming is not a finished text turn.
                     val items = chat.value.items.filter { it !is ChatItem.AssistantMessage || !it.streaming }
                     session.controller.start(LiveText.liveHistory(items))
@@ -186,16 +189,7 @@ internal class ChatVoice(
         backend.liveVoiceSeconds.value = 0
         val requested = closing === session
         if (requested) closing = null
-        if (reason == START_FAILED) {
-            if (live === session) {
-                live = null
-                mirror?.cancel()
-                mirror = null
-                state.update { it.copy(voice = null) }
-                onStartFailed()
-            }
-            return
-        }
+        if (reason == START_FAILED) return startFailed(session, onStartFailed)
         val length = "%d:%02d".format(seconds / 60, seconds % 60)
         backend.toast(
             when {
@@ -204,6 +198,16 @@ internal class ChatVoice(
                 else -> "Live voice dropped · $length"
             },
         )
+    }
+
+    /** [session] could not start: it goes, and [onStartFailed] takes over (the VM falls back to the phone engine). */
+    private fun startFailed(session: LiveSession, onStartFailed: () -> Unit) {
+        if (live !== session) return
+        live = null
+        mirror?.cancel()
+        mirror = null
+        state.update { it.copy(voice = null) }
+        onStartFailed()
     }
 
     /**

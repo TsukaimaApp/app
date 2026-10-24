@@ -141,8 +141,11 @@ interface ChatBackend {
     /** A fresh transport for one live voice session. Only called when [liveVoiceEnabled]. */
     fun liveTransport(): LiveTransport = error("no live voice")
 
-    /** A live voice session started: keep mic and connection alive while the screen is off. */
-    fun startLiveService() = Unit
+    /**
+     * A live voice session is starting: keep mic and connection alive while the screen is off. False when the
+     * service was refused (no mic grant, background-start limits); the session then fails to start.
+     */
+    fun startLiveService(): Boolean = true
 
     /** The live voice session ended. */
     fun stopLiveService() = Unit

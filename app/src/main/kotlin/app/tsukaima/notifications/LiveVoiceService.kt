@@ -1,15 +1,18 @@
 package app.tsukaima.notifications
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager.PERMISSION_GRANTED
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import androidx.annotation.MainThread
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
@@ -41,20 +44,35 @@ class LiveVoiceService : Service() {
     private val container get() = (application as TsukaimaApp).container
     private var scope: CoroutineScope? = null
 
-    /** An end request already went out for this instance; [onDestroy] does not repeat it. */
-    private var endRequested = false
+    /** The [start] generation this instance serves now; 0 before its first start command. */
+    private var generation = 0L
+
+    /** The generation an end request already went out for; [onDestroy] does not repeat it. */
+    private var endRequestedFor = -1L
+
+    /** This instance called `startForeground` successfully. */
+    private var foreground = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_END) {
             requestEnd() // the chat's close ends the session, then stops this service
+            if (!foreground) stopSelf(startId) // nothing to keep alive (a tap after the process was restarted)
             return START_NOT_STICKY
         }
+        generation = intent?.getLongExtra(EXTRA_GENERATION, 0L) ?: 0L
+        // Always, even for a start the app has already stopped: a startForegroundService() must be answered.
         try {
             val notification = build(container.liveVoiceSeconds.value)
             ServiceCompat.startForeground(this, ApprovalNotifier.LIVE_VOICE_ID, notification, type())
         } catch (e: RuntimeException) { // ForegroundServiceStartNotAllowedException, a missing mic grant, …
             Log.w(TAG, "live voice service: cannot go foreground", e)
-            requestEnd()
+            if (isCurrent(generation)) requestEnd()
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        foreground = true
+        foregroundGeneration = generation
+        if (!isCurrent(generation)) { // stopped (or superseded) before it could go foreground: end quietly
             stopSelf(startId)
             return START_NOT_STICKY
         }
@@ -73,15 +91,17 @@ class LiveVoiceService : Service() {
     override fun onDestroy() {
         scope?.cancel()
         scope = null
-        if (!stopRequested) requestEnd() // the system ended the service: the session must not run without it
+        // The system ended the service of the running session: it must not run without it. A destroy after the
+        // app's own stop, or of an older session's instance, is not an end request.
+        if (generation != 0L && isCurrent(generation)) requestEnd()
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun requestEnd() {
-        if (endRequested) return
-        endRequested = true
+        if (generation != 0L && endRequestedFor == generation) return
+        endRequestedFor = generation
         container.liveVoiceEndRequests.tryEmit(Unit)
     }
 
@@ -134,29 +154,51 @@ class LiveVoiceService : Service() {
         /** The notification's End action. */
         const val ACTION_END = "app.tsukaima.action.LIVE_VOICE_END"
 
-        /**
-         * Set by [stop], cleared by [start]: the app itself ended the service, so its [onDestroy] is not an end
-         * request (a dropped session's screen keeps its reason line until the user leaves it).
-         */
-        @Volatile private var stopRequested = false
+        private const val EXTRA_GENERATION = "generation"
+
+        /** The latest successful [start]; these generations are main-thread only, like the service's callbacks. */
+        private var latestStart = 0L
+
+        /** The latest start [stop] applied to: from then on that session's service ends without an end request. */
+        private var stoppedGeneration = 0L
+
+        /** The latest start whose service went foreground. */
+        private var foregroundGeneration = 0L
+
+        /** [generation] is the latest start and the app has not stopped it. */
+        private fun isCurrent(generation: Long) = generation == latestStart && generation > stoppedGeneration
 
         /**
-         * Starts the service (or refreshes its notification when it runs). Returns false when the system refused
-         * the start; the caller then ends the session.
+         * Starts the service for a new session (or refreshes its notification when it runs). Returns false, starting
+         * nothing, without the mic grant (a microphone service would be refused) or when the system refused the start.
          */
-        fun start(context: Context): Boolean = try {
-            stopRequested = false
-            ContextCompat.startForegroundService(context, Intent(context, LiveVoiceService::class.java))
-            true
-        } catch (e: RuntimeException) {
-            Log.w(TAG, "live voice service: start refused", e)
-            false
+        @MainThread
+        fun start(context: Context): Boolean {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PERMISSION_GRANTED) {
+                Log.w(TAG, "live voice service: no RECORD_AUDIO grant")
+                return false
+            }
+            val generation = latestStart + 1
+            val intent = Intent(context, LiveVoiceService::class.java).putExtra(EXTRA_GENERATION, generation)
+            return try {
+                ContextCompat.startForegroundService(context, intent)
+                latestStart = generation // only now: a refused start leaves a running service's generation current
+                true
+            } catch (e: RuntimeException) {
+                Log.w(TAG, "live voice service: start refused", e)
+                false
+            }
         }
 
-        /** Stops the service if it runs; a no-op otherwise. */
+        /**
+         * Ends the latest session's service; a no-op when none runs. `stopService` only once that start has gone
+         * foreground (stopping a service started with `startForegroundService` before its `startForeground` crashes
+         * the app); otherwise its start command goes foreground and then stops itself.
+         */
+        @MainThread
         fun stop(context: Context) {
-            stopRequested = true
-            context.stopService(Intent(context, LiveVoiceService::class.java))
+            stoppedGeneration = latestStart
+            if (foregroundGeneration == latestStart) context.stopService(Intent(context, LiveVoiceService::class.java))
         }
     }
 }

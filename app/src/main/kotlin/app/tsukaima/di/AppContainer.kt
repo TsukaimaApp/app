@@ -247,10 +247,8 @@ class AppContainer(context: Context) {
     /** Seconds of the live voice session running now (0 when none); the notification shows them. */
     val liveVoiceSeconds = MutableStateFlow(0)
 
-    /** Starts [LiveVoiceService] for a live session; a refused start is an end request (no unattended session). */
-    fun startLiveService() {
-        if (!LiveVoiceService.start(appContext)) liveVoiceEndRequests.tryEmit(Unit)
-    }
+    /** Starts [LiveVoiceService] for a live session; false when it was refused (the session must not start). */
+    fun startLiveService(): Boolean = LiveVoiceService.start(appContext)
 
     /** Stops [LiveVoiceService]; a no-op when it is not running. */
     fun stopLiveService() = LiveVoiceService.stop(appContext)

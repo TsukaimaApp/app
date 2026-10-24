@@ -1,8 +1,10 @@
 package app.tsukaima.notifications
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Looper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -14,6 +16,8 @@ import app.tsukaima.TsukaimaApp
 import app.tsukaima.ui.chat.ContainerChatBackend
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -39,14 +43,23 @@ class LiveVoiceServiceTest {
     fun setUp() {
         container.liveVoiceSeconds.value = 0
         collecting.launch { container.liveVoiceEndRequests.collect { ends += it } }
-        LiveVoiceService.start(app) // as the chat does: a fresh start, not a stop
+        shadowOf(app).grantPermissions(Manifest.permission.RECORD_AUDIO)
     }
 
     @After
     fun tearDown() = collecting.cancel()
 
-    private fun started(): ServiceController<LiveVoiceService> =
-        Robolectric.buildService(LiveVoiceService::class.java).create().startCommand(0, 1)
+    /** [LiveVoiceService.start] as the chat calls it; returns the start the system then delivers (later). */
+    private fun startIntent(): Intent {
+        shadowOf(app).clearStartedServices()
+        assertTrue(LiveVoiceService.start(app))
+        return checkNotNull(shadowOf(app).nextStartedService)
+    }
+
+    private fun deliver(intent: Intent, startId: Int = 1): ServiceController<LiveVoiceService> =
+        Robolectric.buildService(LiveVoiceService::class.java, intent).create().startCommand(0, startId)
+
+    private fun started() = deliver(startIntent())
 
     private fun posted(): Notification {
         shadowOf(Looper.getMainLooper()).idle()
@@ -92,7 +105,7 @@ class LiveVoiceServiceTest {
     fun aRepeatedStartRefreshesTheNotification() {
         val controller = started()
         container.liveVoiceSeconds.value = 5 // same 10 s bucket: no update of its own
-        controller.startCommand(0, 2)
+        controller.withIntent(startIntent()).startCommand(0, 2)
         val n = shadowOf(controller.get()).lastForegroundNotification
         assertEquals("0:05 · tap to return", n.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
     }
@@ -115,17 +128,83 @@ class LiveVoiceServiceTest {
     fun theAppsOwnStopDoesNotRequestAnotherEnd() {
         val controller = started()
         LiveVoiceService.stop(app)
+        assertEquals(LiveVoiceService::class.java.name, shadowOf(app).nextStoppedService?.component?.className)
         controller.destroy()
         assertEquals(0, ends.size) // a dropped session's screen keeps its reason line
     }
+
+    @Test
+    fun aStopBeforeTheServiceWentForegroundLetsItGoForegroundThenEndQuietly() {
+        val intent = startIntent()
+        LiveVoiceService.stop(app) // a synchronous start failure: the start command has not run yet
+        assertNull("no stopService before startForeground", shadowOf(app).nextStoppedService)
+        val controller = deliver(intent, startId = 4)
+        val shadow = shadowOf(controller.get())
+        assertNotNull("startForeground answered the start", shadow.lastForegroundNotification)
+        assertEquals(4, shadow.stopSelfId)
+        controller.destroy()
+        assertEquals(0, ends.size)
+    }
+
+    @Test
+    fun anOlderSessionsLateDestroyDoesNotEndTheNextOne() {
+        val a = started()
+        LiveVoiceService.stop(app)
+        val b = startIntent()
+        a.destroy() // A's destroy lands after B's start
+        assertEquals(0, ends.size)
+        deliver(b).destroy() // B is current: the system ending it is an end request
+        assertEquals(1, ends.size)
+    }
+
+    @Test
+    fun withoutTheMicGrantNothingStarts() {
+        shadowOf(app).denyPermissions(Manifest.permission.RECORD_AUDIO)
+        shadowOf(app).clearStartedServices()
+        assertFalse(LiveVoiceService.start(app))
+        assertNull(shadowOf(app).nextStartedService)
+    }
+
+    @Test
+    fun endOnAnInstanceThatNeverWentForegroundRequestsTheEndAndStops() {
+        val end = Intent(app, LiveVoiceService::class.java).setAction(LiveVoiceService.ACTION_END)
+        val controller = Robolectric.buildService(LiveVoiceService::class.java, end).create().startCommand(0, 3)
+        assertEquals(1, ends.size)
+        assertNull(shadowOf(controller.get()).lastForegroundNotification)
+        assertEquals(3, shadowOf(controller.get()).stopSelfId)
+    }
+
+    @Test
+    fun aFailedStartForegroundRequestsTheEndOnceAndStops() {
+        val controller = Robolectric.buildService(LiveVoiceService::class.java, startIntent()).create()
+        shadowOf(controller.get()).setThrowInStartForeground(IllegalStateException("not allowed"))
+        controller.startCommand(0, 2)
+        assertEquals(1, ends.size)
+        assertEquals(2, shadowOf(controller.get()).stopSelfId)
+        controller.destroy()
+        assertEquals(1, ends.size)
+    }
+
+    @Test
+    fun theTypesAreMicrophoneAndMediaPlayback() = assertEquals(
+        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
+        started().get().foregroundServiceType,
+    )
+
+    @Test
+    @Config(sdk = [29])
+    fun api29HasNoMicrophoneTypeSoMediaPlaybackAlone() =
+        assertEquals(ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK, started().get().foregroundServiceType)
 
     @Test
     fun theChatBackendStartsAndStopsTheService() {
         val backend = ContainerChatBackend(container)
         val shadowApp = shadowOf(app)
         shadowApp.clearStartedServices()
-        backend.startLiveService()
-        assertEquals(LiveVoiceService::class.java.name, shadowApp.nextStartedService?.component?.className)
+        assertTrue(backend.startLiveService())
+        val start = checkNotNull(shadowApp.nextStartedService)
+        assertEquals(LiveVoiceService::class.java.name, start.component?.className)
+        deliver(start) // foreground: the stop may now stop it
         backend.stopLiveService()
         assertEquals(LiveVoiceService::class.java.name, shadowApp.nextStoppedService?.component?.className)
         assertEquals(0, ends.size)
