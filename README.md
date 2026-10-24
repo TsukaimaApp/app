@@ -3,7 +3,7 @@
 Native Android client (Kotlin + Jetpack Compose) for a self-hosted [Hermes Agent](https://github.com/NousResearch/hermes-agent).
 Chat with your agent, browse sessions, manage cron jobs, and get actionable notifications from your phone.
 
-Version **0.9.3** (versionCode 23). Changes per release: [`CHANGELOG.md`](CHANGELOG.md).
+Version **0.10.0** (versionCode 24). Changes per release: [`CHANGELOG.md`](CHANGELOG.md).
 
 Runs on Android 10+ phones and tablets with a 64-bit ARM processor (arm64-v8a only: the live voice engine’s native
 WebRTC library would add 7–25 MB per extra ABI, and every Android 10+ phone is 64-bit ARM). The APK is about 18 MB.

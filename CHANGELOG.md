@@ -3,7 +3,7 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
-## Unreleased
+## 0.10.0 — 2026-10-24 (versionCode 24)
 
 ### Added
 - Send to Tsukaima: share a link, text, screenshots, photos or a PDF from any app’s share sheet. A small "Send to

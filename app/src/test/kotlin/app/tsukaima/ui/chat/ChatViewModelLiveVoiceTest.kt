@@ -466,12 +466,12 @@ class ChatViewModelLiveVoiceTest {
         assertTrue(b.liveVoiceOpen.value)
 
         b.connection.value = ConnectionState.Reconnecting // a flap shorter than the grace changes nothing
-        advanceTimeBy(9_000)
+        advanceTimeBy(29_000)
         runCurrent()
         b.connection.value = ConnectionState.Connected
         runCurrent()
         b.connection.value = ConnectionState.Disconnected
-        advanceTimeBy(9_999) // LIVE_OFFLINE_GRACE_MS is 10 s
+        advanceTimeBy(29_999) // LIVE_OFFLINE_GRACE_MS is 30 s
         runCurrent()
         assertFalse(t.sentTypes.contains("session.close"))
         advanceTimeBy(1)

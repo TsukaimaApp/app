@@ -190,12 +190,12 @@ class ChatViewModel(
         // on, so a Mic tap rarely waits for it.
         launch {
             backend.connection.collect { c ->
-                if (c == ConnectionState.Connected && backend.liveVoiceEnabled) probeLive()
+                if (c == ConnectionState.Connected && backend.liveVoiceEnabled && sharing) probeLive()
             }
         }
         launch {
             backend.settings.map { it?.liveVoice == true }.distinctUntilChanged().drop(1).collect { on ->
-                if (on && backend.connection.value == ConnectionState.Connected) probeLive()
+                if (on && sharing && backend.connection.value == ConnectionState.Connected) probeLive()
             }
         }
         // A live session whose Hermes stays unreachable would only apologise: it ends after the grace (a reconnect
@@ -1120,8 +1120,11 @@ class ChatViewModel(
         /** The Mic tap's budget for the voice engine status call. */
         const val LIVE_STATUS_TIMEOUT_MS = 4_000L
 
-        /** How long Hermes may stay unreachable before an open live session is ended. */
-        const val LIVE_OFFLINE_GRACE_MS = 10_000L
+        /**
+         * How long Hermes may stay unreachable before an open live session is ended: longer than a full reconnect
+         * cycle (1/2/5/10 s backoff plus the ticket round trip), so a network handoff does not end the conversation.
+         */
+        const val LIVE_OFFLINE_GRACE_MS = 30_000L
 
         /** The status `mode` of the GPT-Live engine. */
         const val GPT_LIVE = "gpt-live"
