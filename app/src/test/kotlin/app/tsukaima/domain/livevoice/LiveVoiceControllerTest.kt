@@ -3,6 +3,7 @@ package app.tsukaima.domain.livevoice
 import app.tsukaima.domain.chat.AgentStatus
 import app.tsukaima.domain.chat.ChatItem
 import app.tsukaima.domain.chat.ChatState
+import app.tsukaima.domain.chat.ToolStatus
 import app.tsukaima.domain.voice.LiveInfo
 import app.tsukaima.domain.voice.VoicePhase
 import kotlinx.coroutines.CoroutineScope
@@ -12,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -69,12 +71,16 @@ class LiveVoiceControllerTest {
         sendResult: Boolean = true,
         transport: FakeLiveTransport = FakeLiveTransport(),
         history: List<ChatItem> = listOf(ChatItem.UserMessage("u0", "earlier")),
+        unconfined: Boolean = false,
     ): Rig {
         val chat = MutableStateFlow(ChatState(items = history))
         val log = mutableListOf<String>()
         val sends = mutableListOf<Pair<String, String>>()
         val ended = mutableListOf<Pair<String, Int>>()
-        val scope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()).also { scopes += it }
+        // unconfined: collectors resume inline inside the chat update, as on the app's Main.immediate.
+        val dispatcher =
+            if (unconfined) UnconfinedTestDispatcher(testScheduler) else StandardTestDispatcher(testScheduler)
+        val scope = CoroutineScope(dispatcher + SupervisorJob()).also { scopes += it }
         var n = 0
         val c = LiveVoiceController(
             transport = transport,
@@ -116,8 +122,26 @@ class LiveVoiceControllerTest {
 
     private fun TestScope.settle() = runCurrent()
 
-    private fun reply(id: String, text: String, streaming: Boolean) =
-        ChatItem.AssistantMessage(id, text, streaming, null)
+    private fun reply(id: String, text: String, streaming: Boolean, reasoning: String? = null) =
+        ChatItem.AssistantMessage(id, text, streaming, reasoning)
+
+    private fun tool(id: String, status: ToolStatus) =
+        ChatItem.ToolCall(id, "terminal", null, null, status, null, null, null)
+
+    private fun approval(id: String, answered: Boolean = false) =
+        ChatItem.Approval(id, id, "rm -rf logs", "terminal", answered)
+
+    /** One tool round of a v0.9.3 turn: an empty reasoning bubble, then its tool row. */
+    private fun TestScope.toolRound(r: Rig, n: Int, text: String = "") {
+        r.add(reply("b$n", text, streaming = true, reasoning = "hm"), AgentStatus.Thinking("hm"))
+        settle()
+        r.replace(reply("b$n", text, streaming = false, reasoning = "hm"))
+        settle()
+        r.add(tool("t$n", ToolStatus.Running), AgentStatus.Tool("terminal"))
+        settle()
+        r.replace(tool("t$n", ToolStatus.Done), AgentStatus.Thinking("hm"))
+        settle()
+    }
 
     @Test fun startWithoutStartedTimesOutAndClosesTransport() = liveTest {
         val r = rig(started = false)
@@ -244,18 +268,85 @@ class LiveVoiceControllerTest {
         user(r, "what time is it")
         delegate(r, "d1")
         voice(r, "Checking.")
+        r.add(reply("a1", "It is noon. In", streaming = true), AgentStatus.Replying)
+        settle()
+        assertEquals(listOf("It is noon."), r.says)
+        r.status(AgentStatus.Idle) // the old turn was cut short, still streaming its bubble
+        settle()
         user(r, "in Tokyo")
         delegate(r, "d2")
         assertEquals(listOf("send:what time is it", "send:in Tokyo"), r.log) // idle: nothing interrupted
-        r.add(reply("a1", "It is noon. Done", streaming = true), AgentStatus.Replying)
+        val d1Says = r.sayEvents.count { it["delegation_id"] == JsonPrimitive("d1") }
+        r.replace(reply("a1", "It is noon. In Paris. Also", streaming = true), AgentStatus.Replying)
         settle()
-        r.replace(reply("a1", "It is noon. Done", streaming = false), AgentStatus.Idle)
+        r.replace(reply("a1", "It is noon. In Paris. Also rain.", streaming = false))
+        settle()
+        r.add(reply("a2", "Tokyo is at nine. Late", streaming = true))
+        settle()
+        r.replace(reply("a2", "Tokyo is at nine. Late", streaming = false), AgentStatus.Idle)
         settle()
         advanceTimeBy(1_000)
         runCurrent()
-        assertEquals(listOf("It is noon.", "Done"), r.says)
-        assertTrue(r.sayEvents.all { it["delegation_id"] == JsonPrimitive("d2") })
+        assertEquals(1, d1Says)
+        assertEquals(d1Says, r.sayEvents.count { it["delegation_id"] == JsonPrimitive("d1") })
+        assertEquals(listOf("It is noon.", "Tokyo is at nine.", "Late"), r.says)
         assertTrue(r.thinks.isEmpty())
+    }
+
+    @Test fun toolTurnSpeaksTheReplyAfterEmptyBubbles() = liveTest {
+        val r = rig()
+        user(r, "how full is the disk")
+        delegate(r, "d1")
+        toolRound(r, 1)
+        toolRound(r, 2)
+        r.add(reply("a3", "The disk is 40% full. All", streaming = true), AgentStatus.Replying)
+        settle()
+        r.replace(reply("a3", "The disk is 40% full. All good.", streaming = false), AgentStatus.Idle)
+        settle()
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(listOf("The disk is 40% full.", "All good."), r.says)
+        assertEquals(listOf("Hermes is working: terminal. Not done yet."), r.thinks)
+        assertTrue(r.sayEvents.all { it["delegation_id"] == JsonPrimitive("d1") })
+        assertEquals(VoicePhase.Listening, r.state.phase)
+    }
+
+    @Test fun toolTurnSpeaksEachBubbleInOrder() = liveTest {
+        val r = rig()
+        user(r, "how full is the disk")
+        delegate(r, "d1")
+        toolRound(r, 1, text = "Let me check. One moment")
+        assertEquals(listOf("Let me check.", "One moment"), r.says) // bubble 1's tail as soon as it stopped
+        r.add(reply("a2", "It is 40% full.", streaming = true), AgentStatus.Replying)
+        settle()
+        r.replace(reply("a2", "It is 40% full.", streaming = false), AgentStatus.Idle)
+        settle()
+        assertEquals(listOf("Let me check.", "One moment", "It is 40% full."), r.says)
+        assertFalse(noResult in r.thinks)
+    }
+
+    @Test fun toolTurnWithOnlyEmptyBubblesSaysSoQuietly() = liveTest {
+        val r = rig()
+        user(r, "restart it")
+        delegate(r, "d1")
+        toolRound(r, 1)
+        r.add(reply("b2", "", streaming = false, reasoning = "done"), AgentStatus.Idle)
+        settle()
+        assertTrue(r.says.isEmpty())
+        assertEquals(noResult, r.thinks.last())
+        assertEquals(VoicePhase.Listening, r.state.phase)
+    }
+
+    @Test fun boldSpanIsChunkedRawThenMadePlain() = liveTest {
+        val r = rig()
+        user(r, "anything to note")
+        delegate(r, "d1")
+        r.add(reply("a1", "**Note. Mo", streaming = true), AgentStatus.Replying)
+        settle()
+        assertEquals(listOf("Note."), r.says)
+        r.replace(reply("a1", "**Note. More**", streaming = false), AgentStatus.Idle)
+        settle()
+        assertEquals(listOf("Note.", "More"), r.says)
     }
 
     @Test fun delegationWhileRunningInterruptsFirst() = liveTest {
@@ -307,7 +398,7 @@ class LiveVoiceControllerTest {
         delegate(r, "d1")
         r.status(AgentStatus.Thinking("hm"))
         settle()
-        r.status(AgentStatus.Approval)
+        r.add(approval("srq-1"), AgentStatus.Approval)
         settle()
         advanceTimeBy(1_000)
         runCurrent()
@@ -454,5 +545,76 @@ class LiveVoiceControllerTest {
         assertEquals(listOf("It is noon.", "In Tokyo"), r.says)
         assertEquals(20, r.state.revealed["h3"])
         assertNull(r.state.error)
+    }
+
+    @Test fun connectionCardCountsAsWaiting() = liveTest {
+        val r = rig()
+        user(r, "connect my mail")
+        delegate(r, "d1")
+        r.status(AgentStatus.Thinking("hm"))
+        settle()
+        val card = ChatItem.ConnectionRequest("conn-1", "1", null, 0.0, emptyList(), settled = false, settledBy = null)
+        r.add(card, AgentStatus.Connection)
+        settle()
+        assertEquals(VoicePhase.Approval, r.state.phase)
+        assertEquals(listOf(waitingSay), r.says)
+        assertEquals(listOf(waitingThink), r.thinks)
+    }
+
+    @Test fun twoApprovalsInOneDelegationAreBothAnnounced() = liveTest {
+        val r = rig()
+        user(r, "clean up")
+        delegate(r, "d1")
+        r.add(approval("srq-1"), AgentStatus.Approval)
+        settle()
+        r.replace(approval("srq-1", answered = true), AgentStatus.Tool("terminal"))
+        settle()
+        r.add(approval("srq-2"), AgentStatus.Approval)
+        settle()
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(listOf(waitingSay, waitingSay), r.says)
+    }
+
+    @Test fun rebuildSeenBeforeRebasedDoesNotSpeakAgain() = liveTest {
+        val r = rig(unconfined = true)
+        user(r, "what time is it")
+        delegate(r, "d1")
+        r.add(reply("a1", "It is noon. In Tokyo", streaming = true), AgentStatus.Replying)
+        settle()
+        assertEquals(listOf("It is noon."), r.says)
+        val before = r.chat.value.items
+        // The collector sees the rebuilt items (new ids, one more old item on top) inside this update.
+        r.chat.value = r.chat.value.copy(
+            items = listOf(ChatItem.UserMessage("h0", "older"), ChatItem.UserMessage("h1", "earlier"),
+                ChatItem.UserMessage("h2", "what time is it"), reply("h3", "It is noon. In Tokyo", streaming = true)),
+        )
+        r.controller.rebased(before)
+        settle()
+        assertEquals(listOf("It is noon."), r.says)
+        r.chat.update { c ->
+            c.copy(items = c.items.dropLast(1) + reply("h3", "It is noon. In Tokyo", streaming = false),
+                status = AgentStatus.Idle)
+        }
+        settle()
+        assertEquals(listOf("It is noon.", "In Tokyo"), r.says)
+    }
+
+    @Test fun stopDuringTheStartWindowEndsWithItsReason() = liveTest {
+        val r = rig(started = false)
+        r.transport.channelOpen = false
+        r.controller.stop("left_chat")
+        advanceTimeBy(LiveVoiceController.START_TIMEOUT_MS * 2)
+        runCurrent()
+        assertEquals(listOf("left_chat" to 0), r.ended)
+        assertTrue(r.transport.closed)
+    }
+
+    @Test fun delegationBeforeStartedIsIgnored() = liveTest {
+        val r = rig(started = false)
+        user(r, "what time is it")
+        delegate(r, "d1")
+        assertTrue(r.sends.isEmpty())
+        assertEquals(VoicePhase.Idle, r.state.phase)
     }
 }

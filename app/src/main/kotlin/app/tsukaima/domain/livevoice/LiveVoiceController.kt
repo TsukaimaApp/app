@@ -10,7 +10,6 @@ import app.tsukaima.domain.voice.SentenceChunker
 import app.tsukaima.domain.voice.SpeechText
 import app.tsukaima.domain.voice.VoicePhase
 import app.tsukaima.domain.voice.VoiceState
-import app.tsukaima.domain.voice.waiting
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -36,7 +35,8 @@ import kotlin.math.roundToInt
  * the desktop's `use-voice-live-conversation.ts`.
  *
  * One delegation is active at a time; a newer one supersedes it at once (its tail is never spoken) and [interrupt]s
- * the chat's turn first when one runs. The reply is the first [ChatItem.AssistantMessage] appended after the submit.
+ * the chat's turn first when one runs. The reply is every [ChatItem.AssistantMessage] after the submit's user bubble,
+ * in order (a tool-using turn shows several bubbles, often empty ones before its tools), each spoken as it streams.
  * A spoken stop phrase (judged on the whole user utterance after [UTTERANCE_SETTLE_MS] of quiet, or as a delegation's
  * prompt) ends the session instead.
  *
@@ -87,10 +87,19 @@ class LiveVoiceController(
     private var submittedAt = 0L
     private var turnObserved = false
     private var lastToolLabel: String? = null
-    private var spokenResponseId: String? = null
-    private var spokenLength = 0 // chars of SpeechText.plain(reply) handed to the voice
-    private var chunker = SentenceChunker()
-    private val handledRequests = HashSet<String>() // "<delegation id>|<status label>": waiting cards announced
+    private var spokeAny = false // a reply sentence of the active delegation reached the voice
+    private val cursors = ArrayList<ReplyCursor>() // by ordinal: the k-th assistant message since the submit
+    private val handledRequests = HashSet<String>() // request card ids already announced
+    private var startedAt = 0L
+
+    /**
+     * How far one assistant message of the active delegation was spoken. Keyed by ordinal, not id, so a history
+     * rebuild (new ids, same messages) does not speak it again.
+     */
+    private class ReplyCursor {
+        val chunker = SentenceChunker()
+        var flushed = false
+    }
 
     private val seconds get() = _state.value.live?.seconds ?: 0
 
@@ -136,6 +145,7 @@ class LiveVoiceController(
         if (ended || closing) return
         if (!launched) return finish(reason, 0)
         closing = true
+        startJob?.cancel() // a stop during the start window ends with [reason], not start_failed
         clearDelegation()
         utteranceJob?.cancel()
         if (transport.send(buildJsonObject { put("type", "session.close") })) {
@@ -180,7 +190,7 @@ class LiveVoiceController(
      * The chat's transcript was replaced (a reconnect rebuilt it from stored history, so every item has a new id);
      * [itemsBeforeRebuild] is the transcript just before. Call it right after the rebuild (same thread). The voice
      * transcript keeps as many trailing items as it showed before, the active delegation's submit point moves the
-     * same way, and a reply already being spoken keeps its cursor under its new id (it is not spoken again).
+     * same way; reply cursors are per ordinal, so a reply already spoken is not spoken again.
      */
     fun rebased(itemsBeforeRebuild: List<ChatItem>) {
         if (!launched || ended) return
@@ -188,10 +198,7 @@ class LiveVoiceController(
         fun moved(index: Int) =
             (items.size - (itemsBeforeRebuild.size - index).coerceAtLeast(0)).coerceIn(0, items.size)
         val startIndex = moved(_state.value.startIndex)
-        if (delegationId != null) {
-            itemsAtSubmit = moved(itemsAtSubmit)
-            if (spokenResponseId != null) pendingReply(items)?.let { spokenResponseId = it.id }
-        }
+        if (delegationId != null) itemsAtSubmit = moved(itemsAtSubmit)
         _state.update { it.copy(startIndex = startIndex) }
         onChat(chat.value)
     }
@@ -219,11 +226,13 @@ class LiveVoiceController(
         startedSignal.complete(Unit)
         if (up || closing) return
         up = true
+        startedAt = now()
         _state.update { it.copy(caption = "") }
         meterJob = scope.launch {
             while (true) {
                 delay(1_000)
-                _state.update { s -> s.copy(live = s.live?.let { it.copy(seconds = it.seconds + 1) }) }
+                val elapsed = ((now() - startedAt) / 1_000).toInt().coerceAtLeast(0)
+                _state.update { s -> s.copy(live = s.live?.copy(seconds = elapsed)) }
             }
         }
         refresh()
@@ -254,19 +263,18 @@ class LiveVoiceController(
     }
 
     private fun onDelegation(id: String) {
-        if (closing) return
+        if (!up || closing) return
         val (prompt, context) = LiveText.delegationPrompt(transcript.contextWindow())
         if (prompt.isNotEmpty() && StopPhrases.isStopCommand(prompt)) return stop(STOP_PHRASE)
         val c = chat.value
         if (c.status.running) interrupt() // the answer spoken must be for what the user asked last
         delegationId = id
-        itemsAtSubmit = c.items.size
+        itemsAtSubmit = Int.MAX_VALUE // nothing is this turn's until send appended its user bubble
         submittedAt = now()
         turnObserved = false
         lastToolLabel = null
-        spokenResponseId = null
-        spokenLength = 0
-        chunker = SentenceChunker()
+        spokeAny = false
+        cursors.clear()
         heard = ""
         _state.update { it.copy(heard = "") }
         if (!send(prompt, context)) {
@@ -275,7 +283,8 @@ class LiveVoiceController(
             refresh()
             return
         }
-        if (delegationId != id) return // send updated the chat synchronously and the reply already settled
+        if (delegationId != id) return // superseded or stopped from inside send
+        itemsAtSubmit = chat.value.items.size // send appends the user bubble synchronously: what follows is the turn
         tickJob?.cancel()
         tickJob = scope.launch {
             while (true) {
@@ -305,57 +314,76 @@ class LiveVoiceController(
         refresh()
     }
 
-    /** The active delegation's reply: the first assistant message at or after the submit point. */
-    private fun pendingReply(items: List<ChatItem>): ChatItem.AssistantMessage? {
-        for (i in itemsAtSubmit until items.size) (items[i] as? ChatItem.AssistantMessage)?.let { return it }
-        return null
-    }
-
     /** One step of the delegation loop; idempotent (called on every chat change and every [TICK_MS]). */
     private fun feed() {
         val id = delegationId ?: return
         if (ended) return
         val c = chat.value
         val status = c.status
-        // turnLive, not running: a turn paused on an approval card is not finished.
+        // turnLive, not running: a turn paused on a request card is not finished.
         val live = status.turnLive
         if (live) turnObserved = true
         if (status is AgentStatus.Tool && status.name != lastToolLabel) {
             lastToolLabel = status.name
             think(id, "Hermes is working: ${status.name}. Not done yet.")
         }
-        if (status.waiting && handledRequests.add("$id|${status.label}")) {
-            speak(id, WAITING_SAY)
-            think(id, WAITING_THINK)
-        }
-        val reply = pendingReply(c.items)
-        if (reply != null) {
-            turnObserved = true
-            if (spokenResponseId != reply.id) {
-                spokenResponseId = reply.id
-                spokenLength = 0
-                chunker = SentenceChunker()
+        var ordinal = 0
+        var streaming = false
+        for (i in itemsAtSubmit.coerceAtMost(c.items.size) until c.items.size) {
+            val item = c.items[i]
+            if (item is ChatItem.AssistantMessage) {
+                turnObserved = true
+                streaming = streaming || item.streaming
+                feedReply(id, cursorAt(ordinal++), item)
+            } else if (item.pendingRequest && handledRequests.add(item.id)) {
+                speak(id, WAITING_SAY)
+                think(id, WAITING_THINK)
             }
-            val plain = SpeechText.plain(reply.text)
-            if (reply.streaming || live) {
-                for (chunk in chunker.feedPositions(plain)) {
-                    speak(id, chunk.text)
-                    spokenLength = chunk.end
-                }
-                return
-            }
-            val tail = plain.substring(spokenLength.coerceAtMost(plain.length)).trim()
-            if (tail.isNotEmpty()) speak(id, tail)
-            spokenLength = plain.length
-            clearDelegation()
-            return
         }
-        if (!live && (turnObserved || now() - submittedAt > SUBMIT_SETTLE_GRACE_MS)) {
-            // Settled without a speakable reply (tool-only, error, interrupted).
-            if (spokenLength == 0) think(id, NO_RESULT)
+        if (!live && !streaming && (turnObserved || now() - submittedAt > SUBMIT_SETTLE_GRACE_MS)) {
+            // Settled; nothing spoken means a tool-only, failed or interrupted turn.
+            if (!spokeAny) think(id, NO_RESULT)
             clearDelegation()
         }
     }
+
+    private fun cursorAt(ordinal: Int): ReplyCursor {
+        while (cursors.size <= ordinal) cursors.add(ReplyCursor())
+        return cursors[ordinal]
+    }
+
+    /** Speaks [m]'s new complete sentences (raw text chunked, then made plain), and its tail once it stopped. */
+    private fun feedReply(id: String, cursor: ReplyCursor, m: ChatItem.AssistantMessage) {
+        if (cursor.flushed) return
+        for (chunk in cursor.chunker.feed(m.text)) speakReply(id, chunk)
+        if (!m.streaming) {
+            cursor.chunker.flush()?.let { speakReply(id, it) }
+            cursor.flushed = true
+        }
+    }
+
+    private fun speakReply(id: String, raw: String) {
+        // A sentence boundary inside a bold span leaves its markers unpaired in each chunk, which plain() keeps.
+        val text = SpeechText.plain(raw).replace(STRAY_EMPHASIS, "").trim()
+        if (text.isEmpty()) return
+        spokeAny = true
+        speak(id, text)
+    }
+
+    /** A request card still waiting for the user (approval, clarify, masked prompt, connection). */
+    private val ChatItem.pendingRequest: Boolean
+        get() = when (this) {
+            is ChatItem.Approval -> !answered
+            is ChatItem.Clarify -> !answered
+            is ChatItem.SecretPrompt -> !answered
+            is ChatItem.ConnectionRequest -> !settled
+            else -> false
+        }
+
+    /** The chat waits for the user; unlike the phone engine's helper, a connection card counts too. */
+    private val AgentStatus.awaitingUser: Boolean
+        get() = this == AgentStatus.Approval || this == AgentStatus.Question || this is AgentStatus.Secret ||
+            this == AgentStatus.Connection
 
     private fun clearDelegation() {
         delegationId = null
@@ -416,7 +444,7 @@ class LiveVoiceController(
         val s = _state.value
         val phase = when {
             ended || !up -> VoicePhase.Idle
-            chat.value.status.waiting -> VoicePhase.Approval
+            chat.value.status.awaitingUser -> VoicePhase.Approval
             transport.speaking.value -> VoicePhase.Speaking
             delegationId != null -> VoicePhase.Thinking
             s.muted -> VoicePhase.Muted
@@ -458,5 +486,6 @@ class LiveVoiceController(
         private const val MAX_HEARD_CHARS = 2_000
         private const val APPEND_CHAR_LIMIT = 1_400
         private val WHITESPACE = Regex("\\s+")
+        private val STRAY_EMPHASIS = Regex("\\*\\*|__|~~")
     }
 }
