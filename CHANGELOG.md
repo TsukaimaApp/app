@@ -3,7 +3,7 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
-## Unreleased
+## 0.10.1 — 2026-11-09 (versionCode 25)
 
 ### Added
 - Server notices in the transcript: Hermes’ warning lines (`status.update` kind `warn`, or a lifecycle line marked
