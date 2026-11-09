@@ -72,7 +72,8 @@ data class ChatUiState(
     val answeringConnections: Set<String> = emptySet(),
 ) {
     /** What the status line shows. */
-    val status: AgentStatus get() = gatewayStatus ?: if (compacting && chat.status != AgentStatus.Offline) AgentStatus.Compacting else chat.status
+    val status: AgentStatus
+        get() = gatewayStatus ?: if ((compacting || chat.compacting) && chat.status != AgentStatus.Offline) AgentStatus.Compacting else chat.status
 
     /** Server unreachable or socket down: history stays visible, the composer is disabled. */
     val offline: Boolean get() = gatewayStatus == AgentStatus.Offline || chat.status == AgentStatus.Offline

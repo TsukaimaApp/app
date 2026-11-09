@@ -3,6 +3,21 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## Unreleased
+
+### Added
+- Server notices in the transcript: Hermes’ warning lines (`status.update` kind `warn`, or a lifecycle line marked
+  ⚠️) now appear as a quiet system line between bubbles, so a model fallback ("Model fallback: claude-opus-5-5 via
+  anthropic unavailable (rate limit); using … via synthetic") is visible on the phone instead of silently dropped.
+  Nothing to dismiss; a chat rebuilt after a reconnect keeps them.
+- Automatic context compaction shows "Compacting context…" in the status line while the server compresses the
+  session on its own, and a "Context compression complete" line when it finishes, so the wait does not look like a
+  hung turn.
+
+### Fixed
+- A provider control-token fragment leaked at the start of a reply (`ep|>`, `<|im_end|>`, a Synthetic/Kimi stream
+  artefact) is stripped from streamed, completed and history replies.
+
 ## 0.10.0 — 2026-10-24 (versionCode 24)
 
 ### Added

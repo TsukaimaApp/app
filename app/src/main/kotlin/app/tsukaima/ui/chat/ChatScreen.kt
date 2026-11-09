@@ -81,6 +81,7 @@ import app.tsukaima.ui.chat.components.Composer
 import app.tsukaima.ui.chat.components.MediaHost
 import app.tsukaima.ui.chat.components.SecretCard
 import app.tsukaima.ui.chat.components.ConnectionCard
+import app.tsukaima.ui.chat.components.NoticeLine
 import app.tsukaima.ui.chat.components.SideNoteCard
 import app.tsukaima.ui.chat.components.StatusLine
 import app.tsukaima.ui.chat.components.TodoCard
@@ -490,6 +491,7 @@ internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatAct
             answering = item.opId in state.answeringConnections,
         )
         is ChatItem.SideNote -> SideNoteCard(item, media = media)
+        is ChatItem.Notice -> NoticeLine(item)
         is ChatItem.Todos -> TodoCard(item)
         is ChatItem.Thinking -> Spacer(Modifier.height(0.dp))
     }

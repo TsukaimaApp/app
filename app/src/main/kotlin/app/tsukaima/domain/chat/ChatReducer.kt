@@ -43,6 +43,19 @@ object ChatReducer {
     private const val INTERRUPT_MARKER = "[Command interrupted]"
     private const val INTERRUPTED_EXIT = 130
 
+    /** `status.update` kinds that mean a server-side context compression is running / has a completion line. */
+    private val COMPACTING_KINDS = setOf("compacting", "compressing")
+    /** `status.update` kinds whose warning lines are shown ([ChatItem.Notice]); `warn` always, `lifecycle` when marked. */
+    private val NOTICE_KINDS = setOf("lifecycle", "warn")
+    private const val WARNING_MARK = "\u26a0" // ⚠, usually followed by U+FE0F
+    private const val DONE_MARK = "\u2713" // ✓
+
+    /**
+     * A provider control token (or its tail) leaked at the very start of a reply: `<|im_end|>`, `<|eot|>`, or a
+     * fragment such as `ep|>` (Synthetic / Kimi stream artefact, seen 2026-11-09). Only matched at offset 0.
+     */
+    private val LEADING_CONTROL_TOKEN = Regex("""^\s*(?:<\|[^|<>\s]{0,24}\|>|[A-Za-z_]{0,12}\|>)\s*""")
+
     /** The first event of a turn (observed: `message.start` right after the previous `message.complete`). */
     private val QUEUED_TURN_STARTS = setOf("message.start", "message.delta", "reasoning.delta", "tool.start", "message.complete")
 
@@ -66,7 +79,7 @@ object ChatReducer {
                 // A row with reasoning but no text is the thinking before a tool call: kept, in its place above the tool.
                 "assistant" ->
                     if (m.text.isBlank() && m.reasoning.isNullOrBlank()) null
-                    else ChatItem.AssistantMessage(id, m.text, streaming = false, reasoning = m.reasoning?.takeIf { it.isNotBlank() }, rowId = m.rowId)
+                    else ChatItem.AssistantMessage(id, stripControlToken(m.text), streaming = false, reasoning = m.reasoning?.takeIf { it.isNotBlank() }, rowId = m.rowId)
                 "tool" -> {
                     val note = (m.content as? JsonPrimitive)?.takeIf { it.isString }?.content?.let(::orphanNote)
                     ChatItem.ToolCall(
@@ -220,7 +233,7 @@ object ChatReducer {
      */
     fun onSessionBound(state: ChatState, liveId: String, storedId: String?): ChatState {
         val ids = state.copy(liveSessionId = liveId, storedSessionId = storedId ?: state.storedSessionId)
-        return if (state.liveSessionId == liveId) ids else ids.copy(lastSeq = NO_SEQ, localCounter = 0, stopRequested = false, todoRevision = -1)
+        return if (state.liveSessionId == liveId) ids else ids.copy(lastSeq = NO_SEQ, localCounter = 0, stopRequested = false, todoRevision = -1, compacting = false)
     }
 
     fun onConnectionLost(state: ChatState): ChatState =
@@ -265,8 +278,9 @@ object ChatReducer {
             "tool.start" -> onToolStart(s, p)
             "tool.complete" -> onToolComplete(s, p, flair)
             "message.delta" -> {
-                val text = p.string("text").orEmpty()
                 val (withItem, current) = ensureStreamingAssistant(s, ev.seq)
+                val raw = p.string("text").orEmpty()
+                val text = if (current.text.isEmpty()) stripControlToken(raw) else raw
                 withItem.copy(
                     items = withItem.items.replace(current) { current.copy(text = current.text + text) },
                     status = AgentStatus.Replying,
@@ -282,6 +296,7 @@ object ChatReducer {
                 p["usage"],
             )
             "session.usage" -> withUsage(s, p["usage"])
+            "status.update" -> onStatusUpdate(s, p, ev.seq)
             "session.info" -> onSessionInfo(s, p)
             "tool.output_risk" -> onOutputRisk(s, p)
             "session.resume_progress" -> s.copy(resumeProgress = resumeProgressText(p) ?: s.resumeProgress)
@@ -339,8 +354,39 @@ object ChatReducer {
                 else -> it
             }
         }
-        return s.copy(items = items, stopRequested = false, queuedTurnNext = items.any { it is ChatItem.UserMessage && it.queued })
+        return s.copy(items = items, stopRequested = false, compacting = false, queuedTurnNext = items.any { it is ChatItem.UserMessage && it.queued })
     }
+
+    /**
+     * `status.update {kind, text}` — Hermes' transient status line. The TUI prints every kind; the phone keeps only what
+     * changes the user's reading of the chat: a compaction's start / completion ([ChatState.compacting], and a quiet
+     * [ChatItem.Notice] when it completes), and a warning (kind `warn`, or a `lifecycle` line starting with ⚠️, which
+     * is how `_emit_diagnostic_status` marks a model fallback) as a warning notice. `ready` ends a compaction. Goal,
+     * loop, heartbeat, process and plain lifecycle lines are dropped.
+     */
+    private fun onStatusUpdate(s: ChatState, p: JsonObject, seq: Long?): ChatState {
+        val kind = p.string("kind").orEmpty()
+        val text = p.string("text").orEmpty().trim()
+        return when {
+            kind in COMPACTING_KINDS -> {
+                val done = text.startsWith(DONE_MARK) || text.contains("complete", ignoreCase = true)
+                if (!done) s.copy(compacting = true)
+                else notice(s.copy(compacting = false), seq, text.removePrefix(DONE_MARK).trim().ifEmpty { "Context compacted" }, warning = false)
+            }
+            kind == "ready" -> if (s.compacting) s.copy(compacting = false) else s
+            kind in NOTICE_KINDS && text.isNotEmpty() && (kind == "warn" || text.startsWith(WARNING_MARK)) ->
+                notice(s, seq, text.removePrefix(WARNING_MARK).removePrefix("\uFE0F").trim(), warning = true)
+            else -> s
+        }
+    }
+
+    private fun notice(s: ChatState, seq: Long?, text: String, warning: Boolean): ChatState {
+        val (counted, id) = nextId(s, seq, "n")
+        return counted.copy(items = counted.items + ChatItem.Notice(id, text, warning))
+    }
+
+    /** [LEADING_CONTROL_TOKEN] removed from the start of a reply's text. */
+    private fun stripControlToken(text: String): String = LEADING_CONTROL_TOKEN.replaceFirst(text, "")
 
     /**
      * A transcript rebuilt from history ([rebuilt]) keeps the "Not sent" mark of the queued sends Stop purged: the
@@ -670,7 +716,7 @@ object ChatReducer {
     }
 
     private fun onMessageComplete(s: ChatState, p: JsonObject, seq: Long?): ChatState {
-        val final = p.string("text").orEmpty()
+        val final = stripControlToken(p.string("text").orEmpty())
         val current = liveAssistant(s.items)
         if (current != null) {
             val items = s.items.replace(current) { current.copy(text = final.ifEmpty { current.text }, streaming = false) }

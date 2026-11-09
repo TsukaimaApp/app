@@ -469,3 +469,23 @@ Tagged as in v0.9.0: **[live]** probed, **[source]** read from the 0.22.2 source
   byte-exact incl. trailing CRLF; allow ~45 s.
 - `prompt.submit` takes two more optional params for delegated voice turns: `surface` (`"voice-live"`) and
   `voice_context` (recent spoken transcript; Hermes keeps it only for that surface, capped at 6,000 chars).
+
+### `status.update` — what the app shows (2026-11-09, from the Hermes 0.23.0 gateway review)
+
+`status.update {kind, text}` (`tui_gateway/server.py::_status_update`) is Hermes’ transient status line; kinds seen:
+`lifecycle` (diagnostics from `agent/status_output.py::_emit_diagnostic_status`, a warning carries a leading ⚠️),
+`warn`, `compacting` / `compressing` (server-side context compression; the completion line is "✓ Context compression
+complete"), `ready`, `process`, `goal`, `loop`, `heartbeat`, and a bare `status`. Diagnostics respect
+`display.suppress_warning_notifications`. The app keeps: `warn` and marked `lifecycle` lines → `ChatItem.Notice`
+(warning); `compacting`/`compressing` → `ChatState.compacting` until the completion line (a quiet notice), `ready`
+or the turn end. Everything else is dropped. The fallback notice reads `⚠️ Model fallback: <model> via <provider>
+unavailable (<reason>); using <model> via <provider>. Primary retry eligible in ~60 s; recovery is not guaranteed.`
+(`hermes_cli/fallback_config.py`); a config-time fallback arrives once on the session’s first successful reply, a
+mid-turn one when the fallback call succeeds. `message.complete` does **not** carry the serving model: the only
+per-turn truth is the server log (`agent.conversation_loop: API call #N: model=… provider=…`).
+
+`source: "tsukaima"` is stored verbatim and unvalidated. It is not in `agent/session_source.py`
+`UI_TRANSPORT_SOURCES` (`tui`, `desktop`), so Tsukaima sessions are hidden from the TUI/dashboard resume pickers and
+`hermes -c`; toolsets fall back to `platform_toolsets.cli`. The surface description the model gets is the operator’s
+`platform_hints.tsukaima` config entry (`hermes config get platform_hints.tsukaima`), which must track
+`domain/markdown/Markdown.kt`’s block types (it renders GFM tables, so a hint saying otherwise is stale).

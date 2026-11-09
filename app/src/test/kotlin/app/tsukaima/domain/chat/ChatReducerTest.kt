@@ -1803,4 +1803,111 @@ class ChatReducerTest {
         assertEquals(carried, ChatReducer.onTodoState(carried, null))
         assertTrue(ChatReducer.onTodoState(carried, obj(todosJson(7))).items.none { it is ChatItem.Todos })
     }
+    // ---- status.update notices (Hermes handoff 2026-11-09) ----------------------------------------
+
+    private val fallback = "\u26a0\ufe0f Model fallback: claude-opus-5-5 via anthropic unavailable (rate limit); using hf:moonshotai/Kimi-K3.1-Pro via synthetic. Primary retry eligible in ~60 s; recovery is not guaranteed."
+
+    @Test
+    fun lifecycleWarningBecomesANoticeLine() {
+        val s = live.feed(ev("status.update", """{"kind":"lifecycle","text":"$fallback"}""", seq = 7))
+        val notice = s.items.single() as ChatItem.Notice
+        assertEquals("n-7", notice.id)
+        assertTrue(notice.warning)
+        assertTrue(notice.text.startsWith("Model fallback: claude-opus-5-5"))
+        assertFalse(notice.text.contains("\u26a0"))
+        assertEquals(AgentStatus.Idle, s.status)
+    }
+
+    @Test
+    fun warnKindIsANoticeEvenWithoutTheMarker() {
+        val s = live.feed(ev("status.update", """{"kind":"warn","text":"Honcho unreachable, memory is read-only"}"""))
+        val notice = s.items.single() as ChatItem.Notice
+        assertTrue(notice.warning)
+        assertEquals("Honcho unreachable, memory is read-only", notice.text)
+    }
+
+    @Test
+    fun plainLifecycleProcessAndEmptyStatusesAreIgnored() {
+        val s = live.feed(
+            ev("status.update", """{"kind":"lifecycle","text":"Session ready"}"""),
+            ev("status.update", """{"kind":"process","text":"Subagent Task Completed: x"}"""),
+            ev("status.update", """{"kind":"heartbeat","text":"tick"}"""),
+            ev("status.update", """{"kind":"warn","text":"   "}"""),
+            ev("status.update", """{"kind":"status"}"""),
+        )
+        assertEquals(live, s)
+    }
+
+    @Test
+    fun noticeLandsMidTurnWithoutClosingTheReply() {
+        val s = live.feed(
+            ev("message.start", seq = 1),
+            ev("message.delta", """{"text":"Hel"}""", seq = 2),
+            ev("status.update", """{"kind":"lifecycle","text":"$fallback"}""", seq = 3),
+            ev("message.delta", """{"text":"lo"}""", seq = 4),
+        )
+        assertEquals(listOf("a-1", "n-3"), s.items.map { it.id })
+        val reply = s.items[0] as ChatItem.AssistantMessage
+        assertEquals("Hello", reply.text)
+        assertTrue(reply.streaming)
+        assertEquals(AgentStatus.Replying, s.status)
+    }
+
+    @Test
+    fun compactionStatusTracksServerCompression() {
+        val going = live.feed(ev("status.update", """{"kind":"compacting","text":"Compressing context…"}""", seq = 1))
+        assertTrue(going.compacting)
+        assertTrue(going.items.isEmpty())
+
+        val done = going.feed(ev("status.update", """{"kind":"compacting","text":"✓ Context compression complete"}""", seq = 2))
+        assertFalse(done.compacting)
+        val notice = done.items.single() as ChatItem.Notice
+        assertFalse(notice.warning)
+        assertEquals("Context compression complete", notice.text)
+
+        // `compressing` starts it too; `ready` and a turn end clear it without a notice.
+        assertTrue(live.feed(ev("status.update", """{"kind":"compressing","text":"…"}""")).compacting)
+        assertFalse(going.feed(ev("status.update", """{"kind":"ready","text":"ready"}""")).compacting)
+        assertFalse(going.feed(ev("message.complete", """{"text":"ok"}""", seq = 5)).compacting)
+    }
+
+    @Test
+    fun noticesSurviveANewSessionBinding() {
+        val s = live.feed(ev("status.update", """{"kind":"warn","text":"x"}""", seq = 1))
+        val rebound = ChatReducer.onSessionBound(s, "other", null)
+        assertEquals(1, rebound.items.size)
+        assertFalse(rebound.compacting)
+    }
+
+    // ---- stray provider control tokens ----------------------------------------------------------
+
+    @Test
+    fun leakedControlTokenTailIsStrippedFromTheStartOfAReply() {
+        val streamed = live.feed(
+            ev("message.start", seq = 1),
+            ev("message.delta", """{"text":"ep|> I'm Kimi"}""", seq = 2),
+            ev("message.delta", """{"text":", running on Synthetic."}""", seq = 3),
+        )
+        assertEquals("I'm Kimi, running on Synthetic.", (streamed.items.single() as ChatItem.AssistantMessage).text)
+
+        val completed = live.feed(ev("message.complete", """{"text":"<|im_end|>\nHello"}""", seq = 1))
+        assertEquals("Hello", (completed.items.single() as ChatItem.AssistantMessage).text)
+
+        // Only the very start of a message; a pipe later in the text is content.
+        val inner = live.feed(ev("message.complete", """{"text":"a | b |> c"}""", seq = 1))
+        assertEquals("a | b |> c", (inner.items.single() as ChatItem.AssistantMessage).text)
+        val mid = live.feed(
+            ev("message.start", seq = 1),
+            ev("message.delta", """{"text":"Use "}""", seq = 2),
+            ev("message.delta", """{"text":"ep|> as a flag"}""", seq = 3),
+        )
+        assertEquals("Use ep|> as a flag", (mid.items.single() as ChatItem.AssistantMessage).text)
+    }
+
+    @Test
+    fun historyRepliesAreStrippedToo() {
+        val json = """{"count":1,"messages":[{"role":"assistant","text":"ep|> Done.","row_id":4}]}"""
+        val items = ChatReducer.fromHistory(HermesJson.decodeFromString(HistoryResult.serializer(), json).messages)
+        assertEquals("Done.", (items.single() as ChatItem.AssistantMessage).text)
+    }
 }

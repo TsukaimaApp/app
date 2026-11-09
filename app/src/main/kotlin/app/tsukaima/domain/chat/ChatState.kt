@@ -184,6 +184,15 @@ sealed interface ChatItem {
 
     /** Placeholder "agent is working" row; replaced by the assistant message on `message.start`. */
     data class Thinking(override val id: String) : ChatItem
+
+    /**
+     * A server diagnostic the user must see (`status.update`): a quiet system line in the transcript, not a bubble
+     * and not a toast. [warning]: the server marked it (kind `warn`, or a lifecycle line starting with ⚠️), such as
+     * "Model fallback: … unavailable (rate limit); using … via synthetic" — the only way the phone learns the reply
+     * came from another model. A non-warning notice is a completed context compaction. Never in history: it lives
+     * for this screen's session (a rebuild carries it, see ChatReconnector).
+     */
+    data class Notice(override val id: String, val text: String, val warning: Boolean) : ChatItem
 }
 
 enum class SubagentStatus { Running, Done, Failed }
@@ -311,6 +320,12 @@ data class ChatState(
      * stale resume seed) is ignored; -1 before any. A new live session has its own counter and resets it.
      */
     val todoRevision: Int = -1,
+    /**
+     * The server is compressing this session's context on its own (`status.update {kind: compacting|compressing}`,
+     * an automatic compaction before an API call), until its completion line, `ready`, or the turn end. Shown as
+     * [AgentStatus.Compacting] so an idle-looking wait is not taken for a hung turn.
+     */
+    val compacting: Boolean = false,
 )
 
 /** [ChatState.lastSeq] before any event of the live session was applied; `session.events.since` accepts it. */

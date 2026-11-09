@@ -153,13 +153,14 @@ internal class ChatReconnector(
     }
 
     /**
-     * History never holds side notes or the todo checklist: a rebuild keeps the pending notes of [before] and its
-     * [ChatItem.Todos] at the end, since a completion event may still arrive and the resume's `todo_state` (applied
-     * after) may be absent.
+     * History never holds side notes, server notices or the todo checklist: a rebuild keeps the pending notes of
+     * [before], its [ChatItem.Notice] lines (a model fallback the user has not read yet) and its [ChatItem.Todos] at
+     * the end, since a completion event may still arrive and the resume's `todo_state` (applied after) may be absent.
      */
     private fun withCarried(items: List<ChatItem>, before: List<ChatItem>): List<ChatItem> =
         items + before.filter {
-            (it is ChatItem.SideNote && it.pending || it is ChatItem.Todos) && items.none { kept -> kept.id == it.id }
+            (it is ChatItem.SideNote && it.pending || it is ChatItem.Notice || it is ChatItem.Todos) &&
+                items.none { kept -> kept.id == it.id }
         }
 
     /**
