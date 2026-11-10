@@ -130,8 +130,8 @@ object ChatReducer {
      * A transcript rebuilt from the stored history ([history], with what the caller added to it) in place of [before]:
      * every row that was on screen keeps its id, so the list keeps its scroll anchor and each row its open state.
      * Tool rows already share their key ([fromHistory]); a user or assistant message takes the id its row had in
-     * [before] (matched by the persisted row id, or, for the message directly above a tool row, by that tool row). With [carry], rows the history never holds — pending side notes, server notices
-     * and the todo checklist — are kept where they were: after the nearest row above them that survived, else last.
+     * [before] (matched by the persisted row id, or, for the message directly above a tool row, by that tool row). With [carry], rows the history never holds — pending side notes, server notices,
+     * command outputs and the todo checklist — are kept where they were: after the nearest row above them that survived, else last.
      */
     fun rebuild(history: List<ChatItem>, before: List<ChatItem>, carry: Boolean = true): List<ChatItem> {
         val idByRow = before.mapNotNull { item -> item.persistedRow?.let { it to item.id } }.toMap()
@@ -160,7 +160,8 @@ object ChatReducer {
         if (!carry) return items
         var anchor: String? = null
         for (item in before) {
-            val carried = item is ChatItem.SideNote && item.pending || item is ChatItem.Notice || item is ChatItem.Todos
+            val carried = item is ChatItem.SideNote && item.pending || item is ChatItem.Notice || item is ChatItem.Todos ||
+                item is ChatItem.CommandNote
             when {
                 items.any { it.id == item.id } -> anchor = item.id
                 carried -> {
@@ -297,6 +298,18 @@ object ChatReducer {
         if (state.items.any { it.id == id }) return state
         return state.copy(items = state.items + ChatItem.SideNote(id, kind, question, text = "", pending = true))
     }
+
+    /** A slash command was sent ([id] its note): the note waits for the server's answer, above the queued echoes. */
+    fun onCommandStarted(state: ChatState, id: String, command: String): ChatState =
+        pinQueued(state.copy(items = state.items + ChatItem.CommandNote(id, command)))
+
+    /** The answer to command note [id]: its [output] (or, [failed], the error). */
+    fun onCommandFinished(state: ChatState, id: String, output: String, failed: Boolean = false): ChatState =
+        state.copy(items = state.items.map { if (it is ChatItem.CommandNote && it.id == id) it.copy(output = output, pending = false, failed = failed) else it })
+
+    /** Command note [id] has nothing to show (the command became a message, or text for the composer): it goes. */
+    fun onCommandDropped(state: ChatState, id: String): ChatState =
+        state.copy(items = state.items.filterNot { it is ChatItem.CommandNote && it.id == id })
 
     /** Marks approval [id] answered; idempotent so a double tap sends one answer. */
     fun onApprovalAnswered(state: ChatState, id: String, flair: () -> String = ThinkingFlair::next): ChatState {

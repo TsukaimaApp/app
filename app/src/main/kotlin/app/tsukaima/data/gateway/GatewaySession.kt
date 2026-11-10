@@ -145,6 +145,30 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
         put("subagent_id", subagentId)
     }
 
+    /** `commands.catalog`: every slash command, skill command and alias the server accepts for this session. */
+    suspend fun commandsCatalog(sessionId: String): JsonObject = rpc("commands.catalog", idParams(sessionId))
+
+    /**
+     * Runs slash command [command] (`/goal status`, as typed) with `slash.exec`. The server refuses skill and
+     * pending-input commands there with error 4018; those go to `command.dispatch {name, arg}` instead, as the
+     * desktop client does. The result is plain `output`, or a directive with a `type` (see `SlashResult`). A 4018
+     * from both calls is the command's own refusal ("no user messages to undo") and is thrown.
+     */
+    suspend fun slash(sessionId: String, command: String, name: String, arg: String): JsonObject =
+        try {
+            rpc("slash.exec", buildJsonObject {
+                put("session_id", sessionId)
+                put("command", command)
+            }, SLASH_TIMEOUT_MS)
+        } catch (e: RpcException) {
+            if (e.code != USE_DISPATCH) throw e
+            rpc("command.dispatch", buildJsonObject {
+                put("session_id", sessionId)
+                put("name", name.removePrefix("/"))
+                put("arg", arg)
+            }, SLASH_TIMEOUT_MS)
+        }
+
     /** Stops the running turn; returns the server's `status` (`interrupted` / `not_interrupted`), null if absent. */
     suspend fun interrupt(sessionId: String): String? =
         (rpc("session.interrupt", idParams(sessionId))["status"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
@@ -361,6 +385,12 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
 
         /** `compression.context_total_ceiling_seconds` (600 s by default) plus a minute of slack. */
         const val COMPRESS_TIMEOUT_MS = 660_000L
+
+        /** A slash command may start the server's command worker first (it loads the MCP servers). */
+        const val SLASH_TIMEOUT_MS = 120_000L
+
+        /** `slash.exec`: "use command.dispatch for this command". */
+        private const val USE_DISPATCH = 4018
 
         /** `pdf.attach` renders pages with `pdftoppm`, which the server allows 120 s; plus upload and queueing. */
         const val PDF_TIMEOUT_MS = 180_000L

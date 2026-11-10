@@ -444,6 +444,101 @@ class ChatViewModelTest {
         assertNull(vm.state.value.subagent)
     }
 
+    private val catalogJson = """{"pairs":[["/goal","Set a standing goal"],["/airtable","Airtable"],["/new","New session"]],
+        "canon":{"/goal":"/goal","/new":"/new","/reset":"/new"},"commands":{"/goal":{"desktop":null}},"skills":{"/airtable":{"usage":0}}}"""
+
+    @Test
+    fun aKnownSlashCommandIsRunOnTheServerAndItsOutputShown() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("commands.catalog", obj(catalogJson))
+            transport.on("slash.exec", obj("""{"output":"No active goal. Set one with /goal <text>."}"""))
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("/go")
+        advanceUntilIdle()
+        assertEquals(listOf("/goal"), vm.state.value.commandMatches.map { it.name })
+
+        vm.setInput("/goal status")
+        assertTrue("no suggestions once an argument is typed", vm.state.value.commandMatches.isEmpty())
+        vm.send()
+        advanceUntilIdle()
+
+        assertEquals("/goal status", b.transport.last("slash.exec")["command"]!!.jsonPrimitive.content)
+        assertTrue("nothing went to the model", "prompt.submit" !in b.transport.methods())
+        val note = vm.state.value.chat.items.single() as ChatItem.CommandNote
+        assertEquals("/goal status", note.command)
+        assertEquals("No active goal. Set one with /goal <text>.", note.output)
+        assertFalse(note.pending)
+        assertEquals("", vm.state.value.input)
+        assertEquals(AgentStatus.Idle, vm.state.value.chat.status)
+    }
+
+    @Test
+    fun aSkillCommandIsDispatchedAndSentAsATurnThatShowsTheCommand() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("commands.catalog", obj(catalogJson))
+            transport.rpcErrors["slash.exec"] = RpcException(4018, "skill command: use command.dispatch for /airtable")
+            transport.on("command.dispatch", obj("""{"type":"skill","message":"[skill body] cats","name":"airtable","display":"/airtable cats"}"""))
+            transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":1}"""))
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("/airtable cats")
+        advanceUntilIdle()
+        vm.send()
+        advanceUntilIdle()
+
+        val dispatch = b.transport.last("command.dispatch")
+        assertEquals("airtable", dispatch["name"]!!.jsonPrimitive.content)
+        assertEquals("cats", dispatch["arg"]!!.jsonPrimitive.content)
+        assertEquals("[skill body] cats", b.transport.last("prompt.submit")["text"]!!.jsonPrimitive.content)
+        val bubble = vm.state.value.chat.items.single() as ChatItem.UserMessage
+        assertEquals("/airtable cats", bubble.text)
+        assertEquals("[skill body] cats", bubble.promptText)
+    }
+
+    @Test
+    fun slashTextTheServerDoesNotKnowIsAMessage() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("commands.catalog", obj(catalogJson))
+            transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":1}"""))
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("/etc/hosts is empty, why?")
+        advanceUntilIdle()
+        vm.send()
+        advanceUntilIdle()
+        assertEquals("/etc/hosts is empty, why?", b.transport.last("prompt.submit")["text"]!!.jsonPrimitive.content)
+        assertTrue("slash.exec" !in b.transport.methods())
+
+        // A command the app owns is refused with a hint and stays in the composer.
+        vm.setInput("/new")
+        vm.send()
+        advanceUntilIdle()
+        assertEquals("/new", vm.state.value.input)
+        assertTrue("slash.exec" !in b.transport.methods())
+    }
+
+    @Test
+    fun aRefusedCommandShowsTheServersReason() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("commands.catalog", obj("""{"pairs":[["/undo","Undo"]],"canon":{"/undo":"/undo"}}"""))
+            transport.rpcErrors["slash.exec"] = RpcException(4018, "no user messages to undo")
+            transport.rpcErrors["command.dispatch"] = RpcException(4018, "no user messages to undo")
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("/undo")
+        advanceUntilIdle()
+        vm.send()
+        advanceUntilIdle()
+        val note = vm.state.value.chat.items.single() as ChatItem.CommandNote
+        assertTrue(note.failed)
+        assertEquals("no user messages to undo", note.output)
+    }
+
     @Test
     fun queuedBubbleBecomesSentWhenItsTurnStarts() = runTest(dispatcher) {
         val b = backend().apply {

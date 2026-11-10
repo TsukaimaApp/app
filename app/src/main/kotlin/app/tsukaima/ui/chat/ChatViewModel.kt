@@ -103,6 +103,8 @@ class ChatViewModel(
         val interrupted: Boolean = false,
         val surface: String? = null,
         val voiceContext: String? = null,
+        /** What is submitted when it is not [text] with its attachments: a slash command's expansion (a skill, `/plan`). */
+        val prompt: String? = null,
     )
 
     private val failedSends = mutableMapOf<String, FailedSend>()
@@ -138,12 +140,18 @@ class ChatViewModel(
     private val edits = ChatEdits(
         session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state, attachments, flair,
         forgetFailed = { ids -> ids.forEach(failedSends::remove) },
-        reload = ::reloadHistory,
+        reload = { reloadHistory(it) },
     ) { "u-l${++userCounter}" }
 
     private val sides = ChatSides(session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state)
 
     private val subagents = ChatSubagents(session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state)
+
+    private val commands = ChatCommands(
+        session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state,
+        reload = { live -> reloadHistory(live, carry = true) },
+        send = { live, shown, prompt -> startTurn(live, shown, emptyList(), fromComposer = false, prompt = prompt) },
+    )
 
     private val media = ChatMedia(backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), io, _state)
 
@@ -350,7 +358,10 @@ class ChatViewModel(
         if (picked.isNotEmpty()) attach(picked)
     }
 
-    fun setInput(text: String) = _state.update { it.copy(input = text) }
+    fun setInput(text: String) {
+        _state.update { it.copy(input = text) }
+        if (text.startsWith("/")) commands.load()
+    }
 
     /**
      * Sends the typed text with the ready attachments ([Attachments.promptText]); see [ChatUiState.canSend]. While
@@ -361,6 +372,8 @@ class ChatViewModel(
         val text = _state.value.input.trim()
         val live = chat.liveSessionId ?: return backend.toast("Still connecting to Hermes")
         _state.value.pendingEdit?.let { row -> return edits.send(live, text, row) }
+        // A slash command the server knows is run, not sent to the model ([ChatCommands]); anything else is a message.
+        if (_state.value.attachments.none { it.status == AttachmentStatus.Ready } && commands.run(live, text)) return
         startTurn(live, text, attachments.takeReady(), fromComposer = true)
     }
 
@@ -455,11 +468,13 @@ class ChatViewModel(
 
     /**
      * Adds the user bubble (status Thinking) and submits it; [fromComposer] also clears the typed text. While a turn
-     * runs a typed send is queued behind it (never a redirect that would end it); a voice turn is not.
+     * runs a typed send is queued behind it (never a redirect that would end it); a voice turn is not. [prompt]: what
+     * is submitted when it is not [text] (a slash command's expansion; the bubble shows the command).
      */
     private fun startTurn(
         live: String, text: String, sent: List<PendingAttachment>, fromComposer: Boolean,
         voice: Boolean = false, interrupted: Boolean = false, surface: String? = null, voiceContext: String? = null,
+        prompt: String? = null,
     ) {
         val localId = "u-l${++userCounter}"
         pruneQueuedSends()
@@ -467,11 +482,11 @@ class ChatViewModel(
         _state.update {
             val chat = ChatReducer.onSubmitted(
                 it.chat, text, localId, flair, sent.map(PendingAttachment::name),
-                promptText = Attachments.promptText(text, sent), imagesSent = sent.any { a -> a.queued }, queued = queued,
+                promptText = prompt ?: Attachments.promptText(text, sent), imagesSent = sent.any { a -> a.queued }, queued = queued,
             )
             if (fromComposer) it.copy(input = "", chat = chat) else it.copy(chat = chat)
         }
-        val request = FailedSend(text, sent, voice, interrupted, surface, voiceContext)
+        val request = FailedSend(text, sent, voice, interrupted, surface, voiceContext, prompt)
         launch { submit(live, localId, text, sent, request, queued) }
     }
 
@@ -485,7 +500,7 @@ class ChatViewModel(
     ) {
         try {
             val accepted = session.submit(
-                live, Attachments.promptText(text, sent), request.voice, request.interrupted, queued = queued,
+                live, request.prompt ?: Attachments.promptText(text, sent), request.voice, request.interrupted, queued = queued,
                 surface = request.surface, voiceContext = request.voiceContext,
             )
             attachments.sent(sent)
@@ -534,13 +549,16 @@ class ChatViewModel(
     /** The reasoning header of message [id] was tapped. */
     fun toggleReasoning(id: String) = setChat { ChatReducer.toggleReasoning(it, id) }
 
-    /** Replaces the transcript with live session [live]'s stored history (failed sends kept); a failure toasts. */
-    private suspend fun reloadHistory(live: String) {
+    /**
+     * Replaces the transcript with live session [live]'s stored history (failed sends kept); a failure toasts.
+     * [carry] keeps the rows the history never holds (notices, command outputs, the todo card).
+     */
+    private suspend fun reloadHistory(live: String, carry: Boolean = false) {
         attempt("Couldn’t reload the chat") {
             val messages = session.history(live)
             val before = chat.items
             if (chat.liveSessionId != live) return@attempt
-            setChat { it.copy(items = ChatReducer.rebuild(ChatReducer.fromHistory(messages), it.items, carry = false)) }
+            setChat { it.copy(items = ChatReducer.rebuild(ChatReducer.fromHistory(messages), it.items, carry = carry)) }
             restorePurgedSends(before, rowsKept = true)
             restoreFailedSends()
         }

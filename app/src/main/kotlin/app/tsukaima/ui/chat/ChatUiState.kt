@@ -5,6 +5,8 @@ import app.tsukaima.data.api.WorkspacesDto
 import app.tsukaima.data.gateway.ApprovalChoice
 import app.tsukaima.domain.chat.AgentStatus
 import app.tsukaima.domain.chat.ChatState
+import app.tsukaima.domain.chat.SlashCatalog
+import app.tsukaima.domain.chat.SlashCommand
 import app.tsukaima.domain.voice.VoiceLanguage
 import app.tsukaima.domain.voice.VoiceState
 
@@ -66,6 +68,8 @@ data class ChatUiState(
     val messageMenu: String? = null,
     /** The message open in the selectable view (the menu's Select text), by item id. */
     val selecting: String? = null,
+    /** The server's slash commands, once the composer first needed them ([ChatCommands]); null until loaded. */
+    val commands: SlashCatalog? = null,
     /** The subagent open in its watch page ([ChatSubagents]); null when none is. */
     val subagent: SubagentWatch? = null,
     /** The row of the user message being edited: the next send replaces it and drops what followed. */
@@ -106,6 +110,10 @@ data class ChatUiState(
             editDropsAttachments -> "Editing — attachments not included — tap to cancel"
             else -> "Editing — tap to cancel"
         }
+
+    /** The slash commands to suggest above the composer for what is typed (none while a message is being edited). */
+    val commandMatches: List<SlashCommand>
+        get() = if (pendingEdit != null || !writable) emptyList() else commands?.matches(input).orEmpty()
 
     /** A new chat with nothing in it yet (shows the working-directory picker). */
     val empty: Boolean get() = isNew && chat.items.isEmpty() && !loading

@@ -80,6 +80,8 @@ import app.tsukaima.ui.chat.components.ClarifyCard
 import app.tsukaima.ui.chat.components.Composer
 import app.tsukaima.ui.chat.components.MediaHost
 import app.tsukaima.ui.chat.components.SecretCard
+import app.tsukaima.ui.chat.components.CommandNoteCard
+import app.tsukaima.ui.chat.components.CommandSuggestions
 import app.tsukaima.ui.chat.components.SelectTextView
 import app.tsukaima.ui.chat.components.SubagentView
 import app.tsukaima.ui.chat.components.ConnectionCard
@@ -401,6 +403,7 @@ private fun ChatColumn(
             }
         }
         if (state.archived) ArchivedBanner(onUnarchive = actions.onUnarchive)
+        CommandSuggestions(state.commandMatches, onPick = { actions.onInput(it.name + " ") })
         Composer(
             value = state.input,
             onValueChange = actions.onInput,
@@ -514,6 +517,7 @@ internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatAct
         )
         is ChatItem.SideNote -> SideNoteCard(item, media = media)
         is ChatItem.Notice -> NoticeLine(item)
+        is ChatItem.CommandNote -> CommandNoteCard(item)
         is ChatItem.Todos -> TodoCard(item)
         is ChatItem.Thinking -> Spacer(Modifier.height(0.dp))
     }

@@ -206,6 +206,18 @@ sealed interface ChatItem {
         val todos: List<TodoEntry>,
     ) : ChatItem
 
+    /**
+     * A slash command run from the composer and what the server printed for it ([id] `cmd-<n>`, local to this
+     * screen: commands are not part of the history). [pending] until the answer; [failed]: [output] is the error.
+     */
+    data class CommandNote(
+        override val id: String,
+        val command: String,
+        val output: String = "",
+        val pending: Boolean = true,
+        val failed: Boolean = false,
+    ) : ChatItem
+
     /** Placeholder "agent is working" row; replaced by the assistant message on `message.start`. */
     data class Thinking(override val id: String) : ChatItem
 
