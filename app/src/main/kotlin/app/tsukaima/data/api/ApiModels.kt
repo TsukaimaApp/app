@@ -43,6 +43,9 @@ data class SystemStatsDto(
     val memory: JsonObject? = null,
 )
 
+/** The drawer's sessions as loaded so far; [more]: the server probably has older chats ([HermesApi.drawerPage]). */
+data class DrawerSessions(val sessions: List<SessionDto>, val more: Boolean)
+
 @Serializable
 data class SessionDto(
     val id: String,
@@ -58,7 +61,28 @@ data class SessionDto(
     @SerialName("profile_name") val profileName: String? = null,
     /** Search hits only: the matching text with `>>>` / `<<<` around the match. */
     val snippet: String? = null,
+    /** Kept at the top of every client's list (`PATCH … {pinned}`). */
+    val pinned: Boolean = false,
+    /** Not ended and active in the last minutes, as the server judges it: a turn is probably running. */
+    @SerialName("is_active") val isActive: Boolean = false,
+    /** Unix seconds of the latest activity in the session (across its compression chain). */
+    @SerialName("last_active") val lastActive: Double? = null,
 ) {
+    /** When the session was last used: [lastActive], else when it started. */
+    val activeAt: Double? get() = lastActive ?: startedAt
+
+    /**
+     * Where a chat that did not start in this app came from, for its drawer row ("Telegram", "TUI"); null for the
+     * app's own chats and when the source is unknown.
+     */
+    val sourceLabel: String?
+        get() = when (val s = source?.lowercase()?.takeIf { it.isNotBlank() }) {
+            null, APP_SOURCE, CRON_SOURCE -> null
+            "tui", "cli", "api" -> s.uppercase()
+            "api_server" -> "API"
+            else -> s.replace('_', ' ').replace('-', ' ').replaceFirstChar(Char::uppercase)
+        }
+
     /** A scheduled job's run (`source: "cron"`, id `cron_<job>_<time>`), listed apart from chats. */
     val isCron: Boolean get() = source == CRON_SOURCE
 }
@@ -226,6 +250,9 @@ data class SpeechDto(
 
 /** `SessionDto.source` of a cron job's run. */
 const val CRON_SOURCE = "cron"
+
+/** `source` of the chats this app starts (`session.create {source}`). */
+const val APP_SOURCE = "tsukaima"
 
 /**
  * `GET /api/audio/voice-live/status`: whether the server runs the GPT-Live voice engine. The engine is mounted only

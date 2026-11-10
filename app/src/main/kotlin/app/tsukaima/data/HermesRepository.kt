@@ -15,6 +15,7 @@ import app.tsukaima.data.api.AuthException
 import app.tsukaima.data.api.AuthMeDto
 import app.tsukaima.data.api.CronJobDto
 import app.tsukaima.data.api.DeliveryTargetDto
+import app.tsukaima.data.api.DrawerSessions
 import app.tsukaima.data.api.FileDownload
 import app.tsukaima.data.api.HealthDto
 import app.tsukaima.data.api.HermesApi
@@ -113,6 +114,8 @@ class HermesRepository(
 
     /** The drawer's list (archived included, cron runs excluded); see [HermesApi.drawerSessions]. */
     override suspend fun sessions(): Result<List<SessionDto>> = call { api.drawerSessions() }
+    override suspend fun sessionsPage(chats: Int): Result<DrawerSessions> = call { api.drawerPage(chats) }
+    override suspend fun pin(id: String, pinned: Boolean): Result<Unit> = call { api.pinSession(id, pinned) }
     override suspend fun rename(id: String, title: String): Result<Unit> = renameSession(id, title)
     override suspend fun archive(id: String, archived: Boolean): Result<Unit> = archiveSession(id, archived)
     override suspend fun delete(id: String): Result<Unit> = deleteSession(id)

@@ -294,4 +294,55 @@ class DrawerViewModelTest {
         DrawerViewModel(failing, settings, onDeleted = { deleted += it }).delete("c")
         assertEquals(listOf("b"), deleted)
     }
+
+    @Test
+    fun pinnedChatsLeadInTheirOwnSectionAndPinGoesToTheServer() = runTest {
+        val fake = FakeSessions(sessions.map { if (it.id == "c") it.copy(pinned = true) else it } + SessionDto(id = "g", title = "pinned but archived", pinned = true, archived = true))
+        val pins = mutableListOf<String>()
+        val source = object : SessionsSource by fake {
+            override suspend fun pin(id: String, pinned: Boolean): Result<Unit> {
+                pins += "$id:$pinned"
+                return Result.success(Unit)
+            }
+        }
+        val vm = DrawerViewModel(source, settings)
+        assertEquals(listOf("c"), vm.state.value.pinned.map { it.id })
+        assertTrue("not listed twice", vm.state.value.grouped.values.flatten().none { it.id == "c" })
+        vm.pin("a", true)
+        vm.pin("c", false)
+        assertEquals(listOf("a:true", "c:false"), pins)
+    }
+
+    @Test
+    fun showOlderChatsAsksForOneMorePageAndKeepsThatLengthOnRefresh() = runTest {
+        val asked = mutableListOf<Int>()
+        val source = object : SessionsSource by FakeSessions(sessions) {
+            override suspend fun sessionsPage(chats: Int): Result<app.tsukaima.data.api.DrawerSessions> {
+                asked += chats
+                return Result.success(app.tsukaima.data.api.DrawerSessions(sessions, more = chats < 200))
+            }
+        }
+        val vm = DrawerViewModel(source, settings)
+        assertEquals(listOf(PAGE), asked)
+        assertTrue(vm.state.value.hasMore)
+        vm.loadMore()
+        assertEquals(listOf(PAGE, 2 * PAGE), asked)
+        assertFalse(vm.state.value.hasMore)
+        assertFalse(vm.state.value.loadingMore)
+        vm.loadMore()
+        vm.refresh()
+        assertEquals("nothing more to ask for; a refresh re-reads the same length", listOf(PAGE, 2 * PAGE, 2 * PAGE), asked)
+    }
+
+    @Test
+    fun aChatRowSaysWhereItCameFromAndWhenItWasLastUsed() {
+        val now = 1_000_000_000L * 1000
+        val telegram = SessionDto(id = "t", source = "telegram", startedAt = now / 1000.0 - 86_400 * 3, lastActive = now / 1000.0 - 7_200)
+        assertEquals("Telegram · 2h", chatMeta(telegram, now))
+        assertEquals("3d", chatMeta(telegram.copy(source = "tsukaima", lastActive = null), now))
+        assertEquals("TUI", SessionDto(id = "x", source = "tui").sourceLabel)
+        assertEquals("API", SessionDto(id = "x", source = "api_server").sourceLabel)
+        assertNull(SessionDto(id = "x", source = "cron").sourceLabel)
+        assertNull(SessionDto(id = "x").sourceLabel)
+    }
 }

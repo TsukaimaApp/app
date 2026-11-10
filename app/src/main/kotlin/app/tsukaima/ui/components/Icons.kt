@@ -25,6 +25,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Compress
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Description
@@ -184,6 +185,9 @@ enum class IconName(val symbol: String) {
 
     /** Not in the handoff (v0.10.2): the message menu's "Select text". */
     SelectAll("select_all"),
+
+    /** Not in the handoff (v0.11.0): the drawer's Pin / Unpin. */
+    PushPin("push_pin"),
 }
 
 /** Pure lookup, safe from JVM unit tests (no Android context involved). */
@@ -198,6 +202,7 @@ fun iconFor(name: IconName): ImageVector = when (name) {
     IconName.Check -> Icons.Rounded.Check
     IconName.ContentCopy -> Icons.Rounded.ContentCopy
     IconName.SelectAll -> Icons.Rounded.SelectAll
+    IconName.PushPin -> Icons.Rounded.PushPin
     IconName.Terminal -> Icons.Rounded.Terminal
     IconName.Psychology -> Icons.Rounded.Psychology
     IconName.Error -> Icons.Rounded.Error

@@ -204,6 +204,8 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
                 },
                 onRename = drawerVm::rename,
                 onArchive = drawerVm::archive,
+                onPin = drawerVm::pin,
+                onLoadMore = drawerVm::loadMore,
                 onDelete = drawerVm::delete,
                 onSettings = { go(Route.Settings.path) },
                 onQuery = drawerVm::setQuery,

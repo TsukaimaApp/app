@@ -29,6 +29,7 @@ class IconsTest {
         "translate",
         "graphic_eq", "select_all", // v0.10.2: the message menu's Select text
         "picture_as_pdf", "broken_image", "volume_up",
+        "push_pin", // v0.11.0: the drawer's Pin / Unpin
     )
 
     @Test

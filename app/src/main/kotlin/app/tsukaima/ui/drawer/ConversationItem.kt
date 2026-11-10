@@ -17,7 +17,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -35,7 +39,8 @@ import app.tsukaima.ui.theme.tsukaima
 /**
  * Drawer row (`ConversationItem.jsx`): 44dp min, 10×12dp padding, 12dp radius, ui 14sp title with an optional
  * leading 20dp [icon] and trailing caption [meta]. [selected] fills it with `accentSelected` (ink text) and
- * suppresses the press wash. [onLongClick] fires after 480 ms; a long press does not also click.
+ * suppresses the press wash. [onLongClick] fires after 480 ms; a long press does not also click. [active] puts an
+ * accent dot before the meta: the server saw activity in the session in the last minutes.
  */
 @Composable
 fun ConversationItem(
@@ -46,6 +51,7 @@ fun ConversationItem(
     selected: Boolean = false,
     onLongClick: (() -> Unit)? = null,
     icon: IconName? = null,
+    active: Boolean = false,
 ) {
     val colors = MaterialTheme.tsukaima
     val shape = TsukaimaShapes.row
@@ -78,6 +84,15 @@ fun ConversationItem(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            if (active) {
+                Box(
+                    Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(colors.accent)
+                        .semantics { contentDescription = "Active now" },
+                )
+            }
             if (!meta.isNullOrEmpty()) {
                 Text(meta, style = TsukaimaType.caption, color = colors.ink3, maxLines = 1)
             }
@@ -96,6 +111,7 @@ private fun ConversationItemPreview(dark: Boolean) {
         ) {
             ConversationItem("New chat", icon = IconName.Add, onClick = {})
             ConversationItem("Fix the cron job", meta = "2h", selected = true, onClick = {}, onLongClick = {})
+            ConversationItem("Deploy the staging box", meta = "Telegram · now", active = true, onClick = {}, onLongClick = {})
             ConversationItem("Summarize server logs from last night's run", meta = "1d", onClick = {}, onLongClick = {})
             ConversationItem("Archived", meta = "3", icon = IconName.Archive, onClick = {})
         }

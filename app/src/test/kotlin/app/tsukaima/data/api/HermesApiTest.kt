@@ -190,18 +190,58 @@ class HermesApiTest {
 
     @Test
     fun sessionMutationsUseExpectedMethodsAndBodies() = runBlocking {
+        // A server before 0.23: its session row has no runtime_revision, so the edits go out bare.
         val api = api()
-        repeat(3) { json("""{"ok":true}""") }
+        repeat(6) { json("""{"ok":true}""") }
         api.renameSession("s 1", "New")
         api.archiveSession("s 1", true)
         api.deleteSession("s 1")
-        val rename = server.takeRequest(1, TimeUnit.SECONDS)!!
+        fun edit() = List(2) { server.takeRequest(1, TimeUnit.SECONDS)!! }.also { assertEquals("GET", it[0].method) }[1]
+        val rename = edit()
         assertEquals("PATCH", rename.method)
         assertEquals("/api/sessions/s%201", rename.target)
         assertEquals("""{"title":"New"}""", rename.body!!.utf8())
-        val archive = server.takeRequest(1, TimeUnit.SECONDS)!!
-        assertEquals("""{"archived":true}""", archive.body!!.utf8())
-        assertEquals("DELETE", server.takeRequest(1, TimeUnit.SECONDS)!!.method)
+        assertEquals("""{"archived":true}""", edit().body!!.utf8())
+        val delete = edit()
+        assertEquals("DELETE", delete.method)
+        assertEquals("/api/sessions/s%201", delete.target)
+    }
+
+    /**
+     * Hermes 0.23 answers 409 `client_upgrade_required` to a session edit without `request_id` and
+     * `expected_revision` (seen live on v0.23.1, 2026-11-10): each edit reads the row's `runtime_revision` first.
+     */
+    @Test
+    fun sessionEditsCarryARequestIdAndTheRowsRevision() = runBlocking {
+        val api = api()
+        json("""{"id":"s1","runtime_revision":4,"pinned":0}""")
+        json("""{"ok":true,"revision":5}""")
+        json("""{"id":"s1","runtime_revision":5,"runtime_generation":2}""")
+        json("""{"ok":true}""")
+        api.pinSession("s1", true)
+        api.deleteSession("s1")
+        assertEquals("/api/sessions/s1", server.takeRequest(1, TimeUnit.SECONDS)!!.target)
+        val pin = HermesJson.parseToJsonElement(server.takeRequest(1, TimeUnit.SECONDS)!!.body!!.utf8()).jsonObject
+        assertEquals(setOf("pinned", "request_id", "expected_revision"), pin.keys)
+        assertEquals("4", pin["expected_revision"].toString())
+        assertTrue(pin["request_id"]!!.jsonPrimitive.content.length >= 32)
+        server.takeRequest(1, TimeUnit.SECONDS)
+        val delete = server.takeRequest(1, TimeUnit.SECONDS)!!
+        assertEquals("DELETE", delete.method)
+        assertTrue(delete.target, Regex("""/api/sessions/s1\?request_id=[0-9a-f-]{36}&expected_revision=5&expected_generation=2""").matches(delete.target))
+    }
+
+    @Test
+    fun aRevisionConflictIsRetriedOnceWithTheNewRevision() = runBlocking {
+        val api = api()
+        json("""{"id":"s1","runtime_revision":1}""")
+        server.enqueue(MockResponse.Builder().code(409).body("""{"detail":"revision_conflict"}""").build())
+        json("""{"id":"s1","runtime_revision":2}""")
+        json("""{"ok":true}""")
+        api.renameSession("s1", "New")
+        val bodies = List(4) { server.takeRequest(1, TimeUnit.SECONDS)!! }.filter { it.method == "PATCH" }.map { HermesJson.parseToJsonElement(it.body!!.utf8()).jsonObject }
+        assertEquals(listOf("1", "2"), bodies.map { it["expected_revision"].toString() })
+        assertTrue("a new request id for the new attempt", bodies[0]["request_id"] != bodies[1]["request_id"])
     }
 
     @Test
@@ -264,6 +304,28 @@ class HermesApiTest {
     }
 
     @Test
+    fun olderChatsAreReadInPagesOfTheServersCap() = runBlocking {
+        fun rows(from: Int, n: Int) = (from until from + n).joinToString(",") { """{"id":"s$it"}""" }
+        server.dispatcher = object : mockwebserver3.Dispatcher() {
+            override fun dispatch(request: mockwebserver3.RecordedRequest): MockResponse {
+                val url = request.url
+                val body = when {
+                    url.queryParameter("source") == "cron" -> """{"sessions":[]}"""
+                    url.queryParameter("offset") == null -> """{"sessions":[${rows(0, 100)}]}"""
+                    else -> """{"sessions":[${rows(100, 30)}]}"""
+                }
+                return MockResponse.Builder().code(200).body(body).build()
+            }
+        }
+        val first = api().drawerPage(100)
+        assertEquals(100, first.sessions.size)
+        assertTrue("a full page: there may be more", first.more)
+        val second = api().drawerPage(200)
+        assertEquals(130, second.sessions.size)
+        assertFalse(second.more)
+    }
+
+    @Test
     fun drawerFetchesChatsAndCronRunsAsTwoLists() = runBlocking {
         // Two concurrent requests, each under the server's 100-row cap: chats without cron, and the cron runs.
         json("""{"sessions":[{"id":"s1","title":"chat"}]}""")
@@ -274,7 +336,7 @@ class HermesApiTest {
         val targets = List(2) { server.takeRequest(1, TimeUnit.SECONDS)!!.target }.toSet()
         assertEquals(
             setOf(
-                "/api/sessions?limit=100&archived=include&exclude_sources=cron",
+                "/api/sessions?limit=100&archived=include&exclude_sources=cron&order=recent",
                 "/api/sessions?limit=100&archived=include&source=cron",
             ),
             targets,
@@ -285,14 +347,16 @@ class HermesApiTest {
     fun patchAndPairingBodiesIncludeProfile() = runBlocking {
         settings = Settings(profile = "ops")
         val api = api()
-        repeat(4) { json("""{"ok":true}""") }
+        repeat(6) { json("""{"ok":true}""") }
         api.renameSession("s1", "New")
         api.archiveSession("s1", true)
         api.approvePairing("telegram", "r1")
         api.revokePairing("telegram", "u1")
+        assertEquals("/api/sessions/s1?profile=ops", server.takeRequest(1, TimeUnit.SECONDS)!!.target) // the revision read
         val rename = server.takeRequest(1, TimeUnit.SECONDS)!!
         assertEquals("/api/sessions/s1?profile=ops", rename.target)
         assertEquals("""{"title":"New","profile":"ops"}""", rename.body!!.utf8())
+        server.takeRequest(1, TimeUnit.SECONDS)
         assertEquals("""{"archived":true,"profile":"ops"}""", server.takeRequest(1, TimeUnit.SECONDS)!!.body!!.utf8())
         assertEquals(
             """{"platform":"telegram","request_id":"r1","profile":"ops"}""",

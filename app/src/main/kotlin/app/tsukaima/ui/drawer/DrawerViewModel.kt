@@ -42,6 +42,10 @@ data class DrawerUiState(
     val searchFailed: Boolean = false,
     /** The "Cron runs" section is unfolded (collapsed by default: runs pile up and are rarely what you came for). */
     val showCron: Boolean = false,
+    /** The server probably has older chats than the ones loaded: the list ends with "Show older chats". */
+    val hasMore: Boolean = false,
+    /** A "Show older chats" load is in flight. */
+    val loadingMore: Boolean = false,
 ) {
     /** [query] is long enough for the server search ([MIN_SEARCH] characters); shorter filters the list locally. */
     val searchActive: Boolean get() = query.trim().length >= MIN_SEARCH
@@ -58,14 +62,17 @@ data class DrawerUiState(
     }
 
     /**
-     * Unarchived sessions matching [query], grouped by [profileKey]. `default` leads; other profiles keep the
+     * Unarchived, unpinned sessions matching [query], grouped by [profileKey]. `default` leads; other profiles keep the
      * order in which they first appear in [sessions] (the server's order, most recent first).
      */
     val grouped: Map<String, List<SessionDto>> by lazy {
-        val groups = matching.filterNot { it.archived || it.isCron }.groupBy { it.profileKey }
+        val groups = matching.filterNot { it.archived || it.isCron || it.pinned }.groupBy { it.profileKey }
         val default = groups[DEFAULT_PROFILE]
         if (default == null) groups else linkedMapOf(DEFAULT_PROFILE to default) + groups
     }
+
+    /** Pinned, unarchived chats matching [query]: the section above the profile groups, in the server's order. */
+    val pinned: List<SessionDto> by lazy { matching.filter { it.pinned && !it.archived && !it.isCron } }
 
     /** Archived sessions matching [query] (the archived view); cron runs included, labelled by the row. */
     val archived: List<SessionDto> by lazy { matching.filter { it.archived } }
@@ -79,6 +86,9 @@ data class DrawerUiState(
     /** Every archived session, whatever the query: the count on the "Archived" row. */
     val archivedCount: Int by lazy { sessions.count { it.archived } }
 }
+
+/** Chats per "Show older chats" step (the server's cap for one request). */
+const val PAGE = 100
 
 /** Characters a query needs before the drawer asks the server (`/api/sessions/search`). */
 const val MIN_SEARCH = 2
@@ -125,6 +135,9 @@ class DrawerViewModel(
     private var loadFailureReported = false
 
     private var serverUrl: String = ""
+
+    /** How many chats the list asks the server for; grows by [PAGE] with each "Show older chats". */
+    private var chatLimit = PAGE
     private var refreshJob: Job? = null
     private var searchJob: Job? = null
     private val visible = MutableStateFlow(false)
@@ -138,7 +151,8 @@ class DrawerViewModel(
                     _state.update { it.copy(sessions = emptyList(), loading = false) }
                 } else {
                     // A different server: never show the old server's sessions.
-                    _state.update { it.copy(sessions = emptyList(), loading = true) }
+                    chatLimit = PAGE
+                    _state.update { it.copy(sessions = emptyList(), loading = true, hasMore = false) }
                     refresh()
                 }
             }
@@ -202,6 +216,16 @@ class DrawerViewModel(
         removes = id.takeIf { archived },
     ) { repo.archive(id, archived) }
 
+    fun pin(id: String, pinned: Boolean) = mutate(if (pinned) "Couldn't pin the session" else "Couldn't unpin the session") { repo.pin(id, pinned) }
+
+    /** "Show older chats": loads one more page of chats (the list is then re-read at that length on every refresh). */
+    fun loadMore() {
+        if (_state.value.loadingMore || !_state.value.hasMore) return
+        chatLimit += PAGE
+        _state.update { it.copy(loadingMore = true) }
+        refresh()
+    }
+
     fun delete(id: String) = mutate("Couldn't delete the session", removes = id) {
         repo.delete(id).onSuccess { onDeleted(id) }
     }
@@ -219,13 +243,13 @@ class DrawerViewModel(
     }
 
     private suspend fun load() {
-        repo.sessions()
-            .onSuccess { list ->
+        repo.sessionsPage(chatLimit)
+            .onSuccess { page ->
                 loadFailureReported = false
-                _state.update { it.copy(sessions = list, loading = false) }
+                _state.update { it.copy(sessions = page.sessions, loading = false, hasMore = page.more, loadingMore = false) }
             }
             .onFailure {
-                _state.update { it.copy(loading = false) }
+                _state.update { it.copy(loading = false, loadingMore = false) }
                 if (!loadFailureReported && isReachable()) {
                     loadFailureReported = true
                     _errors.trySend("Couldn't load sessions")

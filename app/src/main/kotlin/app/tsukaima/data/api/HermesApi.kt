@@ -103,13 +103,16 @@ class HermesApi(
 
     /**
      * `GET /api/sessions`. [limit] is clamped to the server's `0..100` (it answers 422 outside it).
-     * [archived] is `exclude` (server default) / `only` / `include`; [excludeSources] is a comma list.
+     * [archived] is `exclude` (server default) / `only` / `include`; [excludeSources] is a comma list. [offset]
+     * skips rows (paging); [order] is `created` (server default) or `recent` (latest activity first).
      */
     suspend fun sessions(
         limit: Int = MAX_SESSIONS,
         archived: String? = null,
         excludeSources: String? = null,
         source: String? = null,
+        offset: Int = 0,
+        order: String? = null,
     ): List<SessionDto> =
         get(
             "api/sessions", "sessions", SessionDto.serializer(),
@@ -117,28 +120,82 @@ class HermesApi(
             "archived" to archived,
             "exclude_sources" to excludeSources,
             "source" to source,
+            "offset" to offset.takeIf { it > 0 }?.toString(),
+            "order" to order,
         )
 
     /**
-     * The drawer's list: archived ones too (split client-side), and the cron-run sessions as their own list
+     * The drawer's first page: archived ones too (split client-side), and the cron-run sessions as their own list
      * (`source=cron`, as the dashboard does) so the 100-row cap applies to each, not to both together.
      */
-    suspend fun drawerSessions(): List<SessionDto> = coroutineScope {
-        val chats = async { sessions(MAX_SESSIONS, archived = "include", excludeSources = "cron") }
+    suspend fun drawerSessions(): List<SessionDto> = drawerPage(MAX_SESSIONS).sessions
+
+    /**
+     * The drawer's list with up to [chats] chats, most recently used first (`order=recent`, read in pages of the
+     * server's 100-row cap), and the newest cron runs. [DrawerSessions.more]: the last page came back full, so the
+     * server probably has older chats.
+     */
+    suspend fun drawerPage(chats: Int): DrawerSessions = coroutineScope {
         val cron = async { sessions(MAX_SESSIONS, archived = "include", source = "cron") }
-        chats.await() + cron.await()
+        val list = mutableListOf<SessionDto>()
+        var more = false
+        while (list.size < chats) {
+            val want = minOf(MAX_SESSIONS, chats - list.size)
+            val page = sessions(want, archived = "include", excludeSources = "cron", offset = list.size, order = "recent")
+            list += page
+            more = page.size >= want
+            if (!more) break
+        }
+        DrawerSessions(list.distinctBy { it.id } + cron.await(), more)
     }
 
-    suspend fun renameSession(id: String, title: String) {
-        sendUnit("PATCH", "api/sessions", id, body = withProfile { put("title", title) })
+    suspend fun renameSession(id: String, title: String) = editSession(id) { put("title", title) }
+
+    suspend fun archiveSession(id: String, archived: Boolean) = editSession(id) { put("archived", archived) }
+
+    /** Pins or unpins a session (`pinned`: kept at the top of every client's list, exempt from auto-archive). */
+    suspend fun pinSession(id: String, pinned: Boolean) = editSession(id) { put("pinned", pinned) }
+
+    suspend fun deleteSession(id: String) = fenced(id, generation = true) { identity ->
+        call(newRequest("DELETE", "api/sessions", null, true, true, identity.map { it.first to it.second.content }.toTypedArray(), arrayOf(id))) { }
     }
 
-    suspend fun archiveSession(id: String, archived: Boolean) {
-        sendUnit("PATCH", "api/sessions", id, body = withProfile { put("archived", archived) })
+    /** `PATCH /api/sessions/{id}` with [fields] (`title`, `archived`, `pinned`), fenced ([fenced]). */
+    private suspend fun editSession(id: String, fields: JsonObjectBuilder.() -> Unit) = fenced(id) { identity ->
+        sendUnit("PATCH", "api/sessions", id, body = withProfile {
+            fields()
+            identity.forEach { (key, value) -> put(key, value) }
+        })
     }
 
-    suspend fun deleteSession(id: String) {
-        sendUnit("DELETE", "api/sessions", id)
+    /**
+     * Runs a session edit with the identity Hermes 0.23 requires on every one: a fresh `request_id` and
+     * `expected_revision`, the row's `runtime_revision` as `GET /api/sessions/{id}` reports it. Without them that
+     * server answers 409 `client_upgrade_required`. A `revision_conflict` (another client edited the row in between)
+     * is retried once with the new revision. An older server's row has no revision; the edit is then sent bare, as
+     * that server expects. [generation]: a delete must also name the row's `runtime_generation`
+     * (`expected_generation`), or the server answers 400 `invalid_params`.
+     */
+    private suspend fun fenced(id: String, generation: Boolean = false, send: suspend (identity: List<Pair<String, JsonPrimitive>>) -> Unit) {
+        repeat(2) { attempt ->
+            val row = try {
+                call(newRequest("GET", "api/sessions", null, true, true, emptyArray(), arrayOf(id))) { HermesJson.parseToJsonElement(it) as? JsonObject }
+            } catch (e: ApiException) {
+                null // the edit itself reports what is wrong (not found, forbidden)
+            }
+            val revision = (row?.get("runtime_revision") as? JsonPrimitive)?.intOrNull
+            val identity = if (revision == null) emptyList()
+            else listOfNotNull(
+                "request_id" to JsonPrimitive(java.util.UUID.randomUUID().toString()),
+                "expected_revision" to JsonPrimitive(revision),
+                (row?.get("runtime_generation") as? JsonPrimitive)?.intOrNull?.takeIf { generation }?.let { "expected_generation" to JsonPrimitive(it) },
+            )
+            try {
+                return send(identity)
+            } catch (e: ApiException) {
+                if (attempt > 0 || e.code != 409 || e.detail != REVISION_CONFLICT) throw e
+            }
+        }
     }
 
     /**
@@ -645,6 +702,8 @@ class HermesApi(
         private val DISPOSITION_PARAM = Regex(""";\s*([^=;\s]+)\s*=\s*(\"((?:[^\"\\]|\\.)*)\"|[^;]*)""")
         private val QUOTED_PAIR = Regex("""\\(.)""")
         private val COOKIE_PREFIXES = listOf("", "__Host-", "__Secure-")
+        /** `detail` of the 409 a session edit gets when its `expected_revision` is no longer the row's. */
+        private const val REVISION_CONFLICT = "revision_conflict"
         private const val DEFAULT_PROFILE = "default"
         /** `le=100` on the server's `limit` query. */
         private const val MAX_SESSIONS = 100

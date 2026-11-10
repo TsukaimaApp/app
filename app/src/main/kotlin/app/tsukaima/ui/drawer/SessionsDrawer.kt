@@ -70,6 +70,8 @@ fun SessionsDrawer(
     onShowArchived: (Boolean) -> Unit,
     onShowCron: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    onPin: (id: String, pinned: Boolean) -> Unit = { _, _ -> },
+    onLoadMore: () -> Unit = {},
     now: Long = System.currentTimeMillis(),
 ) {
     val colors = MaterialTheme.tsukaima
@@ -126,19 +128,42 @@ fun SessionsDrawer(
                 item(key = "new") { ConversationItem("New chat", icon = IconName.Add, onClick = onNewChat) }
                 item(key = "status") { ConversationItem("Status", icon = IconName.MonitorHeart, onClick = onStatus) }
                 item(key = "cron") { ConversationItem("Cron", icon = IconName.Schedule, onClick = onCron) }
+                if (state.pinned.isNotEmpty()) {
+                    item(key = "pinned") { DrawerLabel("PINNED") }
+                    items(state.pinned, key = { "s:${it.id}" }) { s ->
+                        ConversationItem(
+                            title = s.displayTitle,
+                            meta = chatMeta(s, now),
+                            selected = s.id == state.selectedId,
+                            onClick = { onOpen(s.id) },
+                            onLongClick = { menuFor = s.id },
+                            active = s.isActive,
+                        )
+                    }
+                }
                 state.grouped.forEach { (profile, sessions) ->
                     item(key = "p:$profile") { DrawerLabel("${profile.uppercase()} PROFILE") }
                     items(sessions, key = { "s:${it.id}" }) { s ->
                         ConversationItem(
                             title = s.displayTitle,
-                            meta = ageLabel(s.startedAt, now),
+                            meta = chatMeta(s, now),
                             selected = s.id == state.selectedId,
                             onClick = { onOpen(s.id) },
                             onLongClick = { menuFor = s.id },
+                            active = s.isActive,
                         )
                     }
                 }
-                if (state.grouped.isEmpty() && !state.loading) item(key = "none") { EmptyCaption("No sessions match.") }
+                if (state.grouped.isEmpty() && state.pinned.isEmpty() && !state.loading) item(key = "none") { EmptyCaption("No sessions match.") }
+                if (state.hasMore && state.query.isBlank()) {
+                    item(key = "more") {
+                        ConversationItem(
+                            if (state.loadingMore) "Loading…" else "Show older chats",
+                            icon = IconName.ExpandMore,
+                            onClick = onLoadMore,
+                        )
+                    }
+                }
                 if (state.cronCount > 0) {
                     item(key = "cron-runs") {
                         ConversationItem(
@@ -189,6 +214,7 @@ fun SessionsDrawer(
                     renameText = s.title.orEmpty()
                     renameFor = s.id
                 },
+                if (s.pinned) MenuItem("Unpin", IconName.PushPin) { onPin(s.id, false) } else MenuItem("Pin", IconName.PushPin) { onPin(s.id, true) },
                 if (s.archived) {
                     MenuItem("Unarchive", IconName.Unarchive) { onArchive(s.id, false) }
                 } else {
@@ -229,6 +255,10 @@ fun SessionsDrawer(
         )
     }
 }
+
+/** A chat row's caption: where it came from when not this app, and when it was last used ("Telegram · 2h"). */
+internal fun chatMeta(s: SessionDto, now: Long): String =
+    listOfNotNull(s.sourceLabel, ageLabel(s.activeAt, now).takeIf { it.isNotEmpty() }).joinToString(" · ")
 
 private val SessionDto.displayTitle: String
     get() = title?.takeIf { it.isNotBlank() } ?: preview?.takeIf { it.isNotBlank() } ?: "Untitled"
