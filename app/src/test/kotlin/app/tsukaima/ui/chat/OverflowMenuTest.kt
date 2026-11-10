@@ -64,7 +64,10 @@ class OverflowMenuTest {
 
         assertEquals(sides + listOf("Reasoning", "Copy session ID"), labels("what time is it?", chat))
         // Mid-turn too: side agents run detached from the turn.
-        assertEquals(listOf("Stop") + sides, labels("x", chat.copy(status = AgentStatus.Replying)).take(3))
+        // Mid-turn too: side agents run detached from the turn. Steer now is offered only then.
+        assertEquals(listOf("Stop", "Steer now") + sides, labels("x", chat.copy(status = AgentStatus.Replying)).take(4))
+        assertTrue("Steer now" !in labels("x", chat))
+        assertTrue("Steer now" !in labels("x", chat.copy(status = AgentStatus.Replying, compacting = true)))
         assertTrue(labels(" ", chat).none { it in sides })
         assertTrue(labels("x", ChatState()).none { it in sides })
         assertTrue(labels("x", chat, archived = true).none { it in sides })
