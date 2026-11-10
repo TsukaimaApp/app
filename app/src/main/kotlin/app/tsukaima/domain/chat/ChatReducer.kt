@@ -81,8 +81,8 @@ object ChatReducer {
                 "user" -> ChatItem.UserMessage(id, m.text, rowId = m.rowId)
                 // A row with reasoning but no text is the thinking before a tool call: kept, in its place above the tool.
                 "assistant" ->
-                    if (m.text.isBlank() && m.reasoning.isNullOrBlank()) null
-                    else ChatItem.AssistantMessage(id, stripControlToken(m.text), streaming = false, reasoning = m.reasoning?.takeIf { it.isNotBlank() }, rowId = m.rowId)
+                    if (m.text.isBlank() && m.thought == null) null
+                    else ChatItem.AssistantMessage(id, stripControlToken(m.text), streaming = false, reasoning = m.thought, rowId = m.rowId)
                 "tool" -> {
                     val note = (m.content as? JsonPrimitive)?.takeIf { it.isString }?.content?.let(::orphanNote)
                     // The live row of the same call is keyed by its `tool_id`, which is this `tool_call_id`: the same
@@ -119,7 +119,7 @@ object ChatReducer {
      * A transcript rebuilt from the stored history ([history], with what the caller added to it) in place of [before]:
      * every row that was on screen keeps its id, so the list keeps its scroll anchor and each row its open state.
      * Tool rows already share their key ([fromHistory]); a user or assistant message takes the id its row had in
-     * [before] (matched by the persisted row id). With [carry], rows the history never holds — pending side notes, server notices
+     * [before] (matched by the persisted row id, or, for the message directly above a tool row, by that tool row). With [carry], rows the history never holds — pending side notes, server notices
      * and the todo checklist — are kept where they were: after the nearest row above them that survived, else last.
      */
     fun rebuild(history: List<ChatItem>, before: List<ChatItem>, carry: Boolean = true): List<ChatItem> {
@@ -134,6 +134,16 @@ object ChatReducer {
                 else -> item
             }
         }.toMutableList()
+        // The thinking (or commentary) streamed before a tool call has no row id on the live path: it is the message
+        // directly above the same tool row in both transcripts.
+        for (i in 0 until items.size - 1) {
+            val message = items[i] as? ChatItem.AssistantMessage ?: continue
+            val tool = items[i + 1] as? ChatItem.ToolCall ?: continue
+            if (before.any { it.id == message.id }) continue
+            val at = before.indexOfFirst { it.id == tool.id }
+            val old = before.getOrNull(at - 1) as? ChatItem.AssistantMessage ?: continue
+            if (old.rowId == null && items.none { it.id == old.id } && taken.add(old.id)) items[i] = message.copy(id = old.id)
+        }
         if (!carry) return items
         var anchor: String? = null
         for (item in before) {

@@ -19,7 +19,17 @@ data class TranscriptMessage(
     @SerialName("row_id") val rowId: Long? = null,
     /** A tool row's result, forwarded only for `write_file` / `patch` / `skill_manage` (where an orphan notice shows). */
     val content: JsonElement? = null,
-)
+    /**
+     * An assistant row's reasoning under the provider's other key. Hermes forwards whichever of `reasoning` and
+     * `reasoning_content` the row has; some rows have only this one. Read through [thought].
+     */
+    @SerialName("reasoning_content") val reasoningContent: JsonElement? = null,
+) {
+    /** The row's reasoning text: [reasoning], else a text [reasoningContent]; null when neither has any. */
+    val thought: String?
+        get() = reasoning?.takeIf { it.isNotBlank() }
+            ?: (reasoningContent as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
+}
 
 @Serializable
 data class SessionCreated(

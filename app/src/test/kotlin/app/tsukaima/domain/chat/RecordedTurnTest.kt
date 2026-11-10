@@ -3,6 +3,7 @@ package app.tsukaima.domain.chat
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -149,6 +150,58 @@ class RecordedTurnTest {
         val withNotice = end.toMutableList().apply { add(firstTool + 1, ChatItem.Notice("n-9", "Model fallback: …", warning = true)) }
         val rebuilt = ChatReducer.rebuild(ChatReducer.fromHistory(messages("history")), withNotice)
         assertEquals(withNotice.map { it.id }, rebuilt.map { it.id })
+    }
+
+    /**
+     * The recorded history rows before each tool call carry `reasoning_content` (blank here). Production has rows with
+     * `reasoning_content` and no `reasoning` (417 on 2026-11-10): such a row is the thinking before the tool, and is kept.
+     */
+    @Test
+    fun historyReadsReasoningContentWhenReasoningIsMissing() {
+        val rows = messages("history").map { if (it.role == "assistant" && it.text.isEmpty()) it.copy(reasoningContent = JsonPrimitive("check the host")) else it }
+        val items = ChatReducer.fromHistory(rows)
+        assertEquals(
+            listOf("UserMessage", "AssistantMessage", "ToolCall", "AssistantMessage", "ToolCall", "AssistantMessage", "ToolCall", "AssistantMessage"),
+            items.map { it::class.simpleName },
+        )
+        assertEquals("check the host", (items[1] as ChatItem.AssistantMessage).reasoning)
+        // `reasoning` wins when both are set; a blank or non-text value is no reasoning.
+        val both = TranscriptMessage(role = "assistant", text = "x", reasoning = "a", reasoningContent = JsonPrimitive("b"), rowId = 1)
+        assertEquals("a", (ChatReducer.fromHistory(listOf(both)).single() as ChatItem.AssistantMessage).reasoning)
+        val odd = TranscriptMessage(role = "assistant", text = "x", reasoningContent = HermesJson.parseToJsonElement("[1]"), rowId = 1)
+        assertNull((ChatReducer.fromHistory(listOf(odd)).single() as ChatItem.AssistantMessage).reasoning)
+    }
+
+    /**
+     * The thinking streamed before a tool call has no row id on the live path. A rebuild still keeps its id: it is the
+     * message directly above the same tool call in both transcripts.
+     */
+    @Test
+    fun aRebuildKeepsTheIdOfTheReasoningAboveATool() {
+        fun ev(type: String, payload: String, seq: Long) =
+            Frame.Event(type, live, seq, HermesJson.parseToJsonElement(payload).jsonObject)
+        val end = listOf(
+            ev("message.start", "{}", 1),
+            ev("reasoning.delta", """{"text":"look first"}""", 2),
+            ev("tool.start", """{"tool_id":"call_a","name":"terminal","context":"ls"}""", 3),
+            ev("tool.complete", """{"tool_id":"call_a","name":"terminal","result":{"output":"x","exit_code":0}}""", 4),
+            ev("reasoning.delta", """{"text":"now answer"}""", 5),
+            ev("message.delta", """{"text":"done"}""", 6),
+            ev("message.complete", """{"text":"done","persisted_turn":{"user_row_id":$userRow,"final_assistant_row_id":9}}""", 7),
+        ).fold(start()) { s, f -> ChatReducer.reduce(s, f) { "…" } }
+        assertEquals(listOf("local-1", "a-1", "call_a", "a-5"), ids(end))
+        val history = ChatReducer.fromHistory(
+            listOf(
+                TranscriptMessage(role = "user", text = "do the three things", rowId = userRow),
+                TranscriptMessage(role = "assistant", text = "", reasoning = "look first", rowId = 7),
+                TranscriptMessage(role = "tool", name = "terminal", toolCallId = "call_a"),
+                TranscriptMessage(role = "assistant", text = "done", reasoning = "now answer", rowId = 9),
+            ),
+        )
+        assertEquals(ids(end), ChatReducer.rebuild(history, end.items).map { it.id })
+        // A second rebuild (the rows now have their row ids) agrees.
+        val once = ChatReducer.rebuild(history, end.items)
+        assertEquals(ids(end), ChatReducer.rebuild(history, once).map { it.id })
     }
 
     /** A history without tool-call ids or row ids still gets distinct ids that cannot collide with a row id. */

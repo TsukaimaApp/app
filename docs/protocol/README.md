@@ -121,6 +121,37 @@ reply; when true it is ignored), `approval.cancelled`,
   every row of the turn in order. `message.complete.usage` also carries `model`.
 - A model that streams no reasoning sends `message.start`, then the tool events, then the first `message.delta`:
   the reply opened by `message.start` is still empty when the first tool row arrives.
+- History assistant rows carry whichever reasoning keys the stored row has: `reasoning`, `reasoning_content`,
+  `reasoning_details`, `codex_reasoning_items`, `codex_message_items` (`_HISTORY_ASSISTANT_DETAIL_KEYS`). A row can
+  have `reasoning_content` and no `reasoning` [production store, 2026-11-10: 417 such rows]. The app reads
+  `reasoning`, then a text `reasoning_content` (`TranscriptMessage.thought`).
+- `/api/sessions/{id}/messages` returns active rows only [source]; the store can hold a second, inactive copy of
+  a tool row (rewound or compacted) with the same `tool_call_id`. No provider id was reused inside one session in
+  the production store [2026-11-10].
+- **A dropped socket parks the live session for `dashboard.ws_orphan_reap_grace_s`, default 20 s** [source, 0.23.0,
+  as reported by the server side]; after it the session is interrupted if it runs, then reaped, and the next
+  `session.resume` answers a new live id, so the app rebuilds the transcript from history. An idle session lives
+  6 hours (`HERMES_TUI_SESSION_TTL_S`).
+
+**A fallback turn** [live, recorded 2026-11-10 on 0.23.1; fixture
+`app/src/test/resources/chat/recorded-fallback-turns.jsonl`: two turns of a session whose model does not exist,
+with `fallback_model` set]:
+
+- `status.update {kind:"lifecycle", text:"⚠️ Model fallback: <primary> via <provider> unavailable (model not
+  found); using <fallback> via <provider>."}` arrives during the turn, before `message.complete`.
+- **`message.complete.usage.model` and the turn's `session.usage.usage.model` name the fallback model.** The
+  `session.info` after the turn also names it in `model` (and `usage.model`), so the header label changes to the
+  fallback model after a fallback turn.
+- The next turn starts with `status.update {kind:"lifecycle", text:"✅ Primary model restored: <primary> via
+  <provider>; fallback <fallback> via <provider> is no longer active."}`. No `session.info` follows it, so nothing
+  tells the header the primary is back; if that turn falls back again, the ⚠️ line repeats.
+- So a per-reply model label needs no Hermes change: read `usage.model` at `message.complete`.
+
+**The server's description of the app** (`platform_hints.tsukaima` in the operator's Hermes config, appended to the
+system prompt of every Tsukaima session; text as of 2026-11-10). It must change together with
+`domain/markdown/` and the media cards:
+
+> You are chatting inside Tsukaima, the user's Android phone app for Hermes (a graphical chat surface on a small screen). Keep replies compact for a phone: short paragraphs, no ASCII layouts. Markdown in replies is rendered: headings, bold, italic, strikethrough, inline code, links, block quotes, horizontal rules, bullet and numbered lists nested up to four levels, task lists, and GFM tables. Tables are fine; a wide one scrolls sideways, so prefer a few short columns. Keep lists tight: do not put blank lines between items or a code block inside an item, and do not nest emphasis (no \*\*\*text\*\*\*). Fenced code blocks show a language label and a copy button but no syntax highlighting, and long lines scroll sideways. LaTeX math is rendered: `$...$` or `\(...\)` inline, `$$...$$` or `\[...\]` on its own lines; do not define macros. Do not use raw HTML, footnotes, or Mermaid and other diagram blocks; they appear as plain source text. To show a remote picture, put `![alt](https://...)` alone on its own line (images from hosts other than this server load only after the user taps them); never write a local file path as a Markdown image or as prose and expect it to show. To deliver any local file, write `MEDIA:/absolute/path` alone on its own line, outside code fences and list items: it becomes a download card, with a preview for PNG, JPEG, GIF, WebP and BMP images. Audio and video are delivered as download cards and do not play inside the chat, so say in words what the file contains. In voice mode the app reads your text aloud and skips code blocks, math and MEDIA lines.
 
 ### Server → client requests
 

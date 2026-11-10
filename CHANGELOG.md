@@ -3,6 +3,16 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.10.3 — 2026-11-10 (versionCode 27)
+
+### Fixed
+- Reasoning in a reopened chat: some stored replies keep their reasoning under `reasoning_content` and not
+  `reasoning`, and the app read only the second, so those reasoning rows (the thinking before a tool call) were
+  missing after the chat was loaded again. Both are read now.
+- The reasoning shown above a tool call keeps its identity when the chat is rebuilt from the server's history, like
+  the tool rows and the reply do since 0.10.2: it stays unfolded if it was, and the list does not lose its place.
+  This matters after any pause longer than about 20 seconds, when the server hands the chat a new live session.
+
 ## 0.10.2 — 2026-11-10 (versionCode 26)
 
 ### Fixed
