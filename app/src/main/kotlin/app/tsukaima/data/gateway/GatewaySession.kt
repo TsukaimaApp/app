@@ -145,6 +145,17 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
         put("subagent_id", subagentId)
     }
 
+    /**
+     * Copies live session [sessionId] into a new stored session linked to it (`session.branch`), keeping only the
+     * first [count] of its user and assistant rows that have text. Tool rows are not copied: the child's model reads
+     * what was said, not the tool results. The parent is untouched. The child also gets a live session.
+     */
+    suspend fun branch(sessionId: String, count: Int): SessionBranched =
+        decode("session.branch", rpc("session.branch", buildJsonObject {
+            put("session_id", sessionId)
+            put("count", count)
+        }))
+
     /** `commands.catalog`: every slash command, skill command and alias the server accepts for this session. */
     suspend fun commandsCatalog(sessionId: String): JsonObject = rpc("commands.catalog", idParams(sessionId))
 

@@ -68,6 +68,8 @@ data class ChatUiState(
     val messageMenu: String? = null,
     /** The message open in the selectable view (the menu's Select text), by item id. */
     val selecting: String? = null,
+    /** A branch is being made ([ChatViewModel.branch]); a second tap waits. */
+    val branching: Boolean = false,
     /** The server's slash commands, once the composer first needed them ([ChatCommands]); null until loaded. */
     val commands: SlashCatalog? = null,
     /** The subagent open in its watch page ([ChatSubagents]); null when none is. */

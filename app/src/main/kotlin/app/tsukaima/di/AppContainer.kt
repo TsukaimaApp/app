@@ -285,6 +285,9 @@ class AppContainer(context: Context) {
      */
     val pendingShare = MutableStateFlow<SharedContent?>(null)
 
+    /** Composer text waiting for a chat that is about to open, by stored session id (a branch made to edit a message). */
+    val drafts = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     /** Cached copies of shared streams (`cacheDir/shared`), pruned at app start and on every share. */
     val sharedFiles = SharedFileStore(File(appContext.cacheDir, "shared"))
 

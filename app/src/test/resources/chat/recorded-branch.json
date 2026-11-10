@@ -1,0 +1,150 @@
+{
+ "history": [
+  {
+   "role": "user",
+   "text": "Run `echo alpha` with the terminal tool and tell me the output in three words.",
+   "timestamp": 1794316735.6846797,
+   "row_id": 334
+  },
+  {
+   "role": "assistant",
+   "text": "",
+   "timestamp": 1794316741.2183516,
+   "row_id": 335,
+   "reasoning": "reme\n\n",
+   "reasoning_content": "reme\n\n"
+  },
+  {
+   "role": "tool",
+   "name": "terminal",
+   "context": "echo alpha",
+   "tool_call_id": "call_c8be4eadecd44b9eb4eb9f8b",
+   "timestamp": 1794316741.3693638,
+   "args": {
+    "command": "echo alpha"
+   }
+  },
+  {
+   "role": "assistant",
+   "text": "Output: alpha.",
+   "timestamp": 1794316742.1561255,
+   "row_id": 337
+  },
+  {
+   "role": "user",
+   "text": "Reply with exactly: beta",
+   "timestamp": 1794316743.670341,
+   "row_id": 338
+  },
+  {
+   "role": "assistant",
+   "text": "beta",
+   "timestamp": 1794316744.2813504,
+   "row_id": 339
+  },
+  {
+   "role": "user",
+   "text": "Reply with exactly: gamma",
+   "timestamp": 1794316745.793446,
+   "row_id": 340
+  },
+  {
+   "role": "assistant",
+   "text": "gamma",
+   "timestamp": 1794316747.433797,
+   "row_id": 341
+  }
+ ],
+ "branch2": {
+  "session_id": "d31c4768",
+  "stored_session_id": "20261110_141908_886282",
+  "title": "Run `echo alpha` with the terminal tool and… #2",
+  "parent": "20261110_141855_478c8d",
+  "message_count": 2,
+  "messages": [
+   {
+    "role": "user",
+    "text": "Run `echo alpha` with the terminal tool and tell me the output in three words.",
+    "timestamp": 1794316735.6846797,
+    "row_id": 342
+   },
+   {
+    "role": "assistant",
+    "text": "Output: alpha.",
+    "timestamp": 1794316742.1561255,
+    "row_id": 343
+   }
+  ]
+ },
+ "branch3": {
+  "session_id": "cc292eb5",
+  "stored_session_id": "20261110_141909_55b361",
+  "title": "Run `echo alpha` with the terminal tool and… #3",
+  "parent": "20261110_141855_478c8d",
+  "message_count": 3,
+  "messages": [
+   {
+    "role": "user",
+    "text": "Run `echo alpha` with the terminal tool and tell me the output in three words.",
+    "timestamp": 1794316735.6846797,
+    "row_id": 344
+   },
+   {
+    "role": "assistant",
+    "text": "Output: alpha.",
+    "timestamp": 1794316742.1561255,
+    "row_id": 345
+   },
+   {
+    "role": "user",
+    "text": "Reply with exactly: beta",
+    "timestamp": 1794316743.670341,
+    "row_id": 346
+   }
+  ]
+ },
+ "child_history": [
+  {
+   "role": "user",
+   "text": "Run `echo alpha` with the terminal tool and tell me the output in three words.",
+   "timestamp": 1794316735.6846797,
+   "row_id": 342
+  },
+  {
+   "role": "assistant",
+   "text": "Output: alpha.",
+   "timestamp": 1794316742.1561255,
+   "row_id": 343
+  },
+  {
+   "role": "user",
+   "text": "What was the output of the command earlier? One word.",
+   "timestamp": 1794316749.5836852,
+   "row_id": 353
+  },
+  {
+   "role": "assistant",
+   "text": "",
+   "timestamp": 1794316752.1010237,
+   "row_id": 354,
+   "reasoning": "The user asks: what was the output of the command earlier? But wait — did I actually run the command? Looking at the conversation, I claimed \"Output: alpha.\" but I don't see a terminal tool call in the history. That's a problem — I fabricated the result without actually running it.\n\nHonest answer: I didn't actually run it. But the user asks one word. The requested output of `echo alpha` would be \"alpha\". But per honesty rules, I should note I never actually executed it.\n\nActually let me check: the previous turn had no tool call shown. So I asserted output without running. The right move now: actually run it, then answer.\n\nI can run it now to verify.",
+   "reasoning_content": "The user asks: what was the output of the command earlier? But wait — did I actually run the command? Looking at the conversation, I claimed \"Output: alpha.\" but I don't see a terminal tool call in the history. That's a problem — I fabricated the result without actually running it.\n\nHonest answer: I didn't actually run it. But the user asks one word. The requested output of `echo alpha` would be \"alpha\". But per honesty rules, I should note I never actually executed it.\n\nActually let me check: the previous turn had no tool call shown. So I asserted output without running. The right move now: actually run it, then answer.\n\nI can run it now to verify."
+  },
+  {
+   "role": "tool",
+   "name": "terminal",
+   "context": "echo alpha",
+   "tool_call_id": "call_8f678a641f1e4017981a5e1c",
+   "timestamp": 1794316752.2470882,
+   "args": {
+    "command": "echo alpha"
+   }
+  },
+  {
+   "role": "assistant",
+   "text": "alpha\n\nOne correction: I never actually ran it in my earlier reply — I just asserted the answer without calling the tool. Now verified for real.",
+   "timestamp": 1794316753.3622713,
+   "row_id": 356
+  }
+ ]
+}

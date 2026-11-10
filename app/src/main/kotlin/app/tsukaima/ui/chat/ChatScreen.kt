@@ -166,6 +166,9 @@ class ChatActions(
     val onRegenerate: (String) -> Unit = {},
     val onSendAside: (SideKind) -> Unit = {},
 
+    /** "Branch from here" on a message (its item id). */
+    val onBranch: (String) -> Unit = {},
+
     /** A subagent row's "Watch" (the row id), and its page's Close, Stop and message. */
     val onSubagentOpen: (String) -> Unit = {},
     val onSubagentClose: () -> Unit = {},
@@ -189,6 +192,7 @@ fun ChatScreen(
     onStatus: () -> Unit,
     onDeleted: () -> Unit,
     visibleSession: MutableStateFlow<String?>? = null,
+    onOpenSession: (String) -> Unit = {},
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     // While resumed, this chat's live session is "on screen": its approvals show here, not as notifications.
@@ -210,6 +214,7 @@ fun ChatScreen(
         if (granted) vm.openVoice() else vm.voiceDenied()
     }
     LaunchedEffect(vm) { vm.closed.collect { onDeleted() } }
+    LaunchedEffect(vm) { vm.branched.collect { onOpenSession(it) } }
     // The phone voice ends when the chat leaves the screen (app in the background, another destination), not on
     // rotation; a live session goes on in the background (its service holds the mic) until the chat itself is left.
     val activity = LocalActivity.current
@@ -297,6 +302,7 @@ fun ChatScreen(
             onRegenerate = vm::regenerate,
             onSendAside = vm::sendAside,
             onSteer = vm::steer,
+            onBranch = vm::branch,
             onSubagentOpen = vm::openSubagent,
             onSubagentClose = vm::closeSubagent,
             onSubagentStop = vm::stopSubagent,
@@ -593,7 +599,8 @@ internal fun reasoningItems(state: ChatUiState, actions: ChatActions): List<Menu
 
 /**
  * A message's long-press menu: Copy text, plus Copy reasoning for a reply that has some; Edit on a user message the
- * server has persisted, Regenerate on a reply whose user message it has. Edit and Regenerate are left out while a
+ * server has persisted, Regenerate on a reply whose user message it has; Branch from here on a persisted message
+ * ([ChatBranch.offered]). Edit and Regenerate are left out while a
  * turn runs or Hermes is unreachable ([ChatEdits.rewindable]).
  */
 internal fun messageItems(state: ChatUiState, actions: ChatActions): List<MenuItem> {
@@ -609,6 +616,8 @@ internal fun messageItems(state: ChatUiState, actions: ChatActions): List<MenuIt
         reasoning?.let { MenuItem("Copy reasoning", IconName.Psychology) { actions.onCopyMessage(item.id, true) } },
         edit?.let { MenuItem("Edit", IconName.Edit) { actions.onEditMessage(it.id) } },
         regenerate?.let { MenuItem("Regenerate", IconName.Refresh) { actions.onRegenerate(it.id) } },
+        MenuItem("Branch from here", IconName.AccountTree) { actions.onBranch(item.id) }
+            .takeIf { state.writable && !state.branching && ChatBranch.offered(state.chat.items, item) },
     )
 }
 

@@ -15,6 +15,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -199,6 +200,11 @@ class ChatViewModelTest {
         var decoded = 0
         override fun decodePreview(bytes: ByteArray): ImageBitmap = FakeBitmap.also { decoded++ }
 
+        val drafts = mutableMapOf<String, String>()
+        override fun putDraft(storedId: String, text: String) {
+            drafts[storedId] = text
+        }
+        override fun takeDraft(storedId: String) = drafts.remove(storedId)
         override fun toast(text: String) {
             toasts += text
         }
@@ -537,6 +543,34 @@ class ChatViewModelTest {
         val note = vm.state.value.chat.items.single() as ChatItem.CommandNote
         assertTrue(note.failed)
         assertEquals("no user messages to undo", note.output)
+    }
+
+    @Test
+    fun branchingFromTheUsersMessageOpensAChildWithThatMessageAsADraft() = runTest(dispatcher) {
+        val history = """{"messages":[{"role":"user","text":"one","row_id":1},{"role":"assistant","text":"first","row_id":2},
+            {"role":"tool","name":"terminal","tool_call_id":"c1"},{"role":"user","text":"two","row_id":4},{"role":"assistant","text":"second","row_id":5}]}"""
+        val b = backend().apply {
+            transport.on("session.resume", obj("""{"session_id":"live-1","stored_session_id":"stored-1",${history.trim().drop(1)}"""))
+            transport.on("session.history", obj(history))
+            transport.on("session.branch", obj("""{"session_id":"kid-live","stored_session_id":"kid-stored","message_count":2,
+                "messages":[{"role":"user","text":"one","row_id":9},{"role":"assistant","text":"first","row_id":10}]}"""))
+        }
+        val vm = vm(b, "stored-1")
+        advanceUntilIdle()
+        val opened = mutableListOf<String>()
+        val job = launch { vm.branched.collect { opened += it } }
+        val second = vm.state.value.chat.items.first { it is ChatItem.UserMessage && (it as ChatItem.UserMessage).text == "two" }
+        assertTrue(messageItems(vm.state.value.copy(messageMenu = second.id), ChatActions()).any { it.label == "Branch from here" })
+
+        vm.branch(second.id)
+        advanceUntilIdle()
+
+        assertEquals(2, b.transport.last("session.branch")["count"]!!.jsonPrimitive.content.toInt())
+        assertEquals("the child's live session is left to its own screen", "kid-live", b.transport.last("session.close")["session_id"]!!.jsonPrimitive.content)
+        assertEquals(listOf("kid-stored"), opened)
+        assertEquals("two", b.takeDraft("kid-stored"))
+        assertFalse(vm.state.value.branching)
+        job.cancel()
     }
 
     @Test
@@ -3451,12 +3485,13 @@ class ChatViewModelTest {
         fun labels(s: ChatUiState, id: String) = messageItems(s.copy(messageMenu = id), ChatActions()).map { it.label }
 
         assertEquals(listOf("Copy text", "Select text", "Edit"), labels(idle, "h-1"))
-        assertEquals(listOf("Copy text", "Select text", "Regenerate"), labels(idle, "h-2"))
+        assertEquals(listOf("Copy text", "Select text", "Regenerate", "Branch from here"), labels(idle, "h-2"))
         assertEquals(listOf("Copy text", "Select text"), labels(idle, "u-l1"))
         assertEquals(listOf("Copy text", "Select text"), labels(idle, "a-1"))
         val running = idle.copy(chat = idle.chat.copy(status = AgentStatus.Replying))
         assertEquals(listOf("Copy text", "Select text"), labels(running, "h-1"))
-        assertEquals(listOf("Copy text", "Select text"), labels(running, "h-2"))
+        // A branch copies the stored rows and leaves this chat alone, so it does not wait for the turn.
+        assertEquals(listOf("Copy text", "Select text", "Branch from here"), labels(running, "h-2"))
         val offline = idle.copy(chat = idle.chat.copy(status = AgentStatus.Offline))
         assertEquals(listOf("Copy text", "Select text"), labels(offline, "h-2"))
     }

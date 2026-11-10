@@ -121,6 +121,7 @@ fun TsukaimaNavHost(
                 onStatus = { navController.navigateTop(Route.Status.path) },
                 onDeleted = { navController.navigateTop(Route.Chat.create()) },
                 visibleSession = container.visibleLiveSessionId,
+                onOpenSession = { navController.navigateTop(Route.Chat.create(it)) },
             )
         }
         composable(Route.Cron.path) {

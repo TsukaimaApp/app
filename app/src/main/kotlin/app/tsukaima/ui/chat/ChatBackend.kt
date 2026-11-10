@@ -110,6 +110,12 @@ interface ChatBackend {
     fun decodeToolImage(bytes: ByteArray): ImageBitmap? = decodePreview(bytes)
     fun toast(text: String)
 
+    /** Leaves [text] for the chat of stored session [storedId] to find in its composer when it opens ([takeDraft]). */
+    fun putDraft(storedId: String, text: String) {}
+
+    /** The text left for stored session [storedId], once; null when there is none. */
+    fun takeDraft(storedId: String): String? = null
+
     /** One recorded utterance (WAV) through Hermes' speech-to-text relay (`/api/audio/transcribe`). */
     suspend fun transcribe(wav: ByteArray): Result<TranscriptionDto>
 
@@ -227,6 +233,10 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override fun decodePreview(bytes: ByteArray) = ImagePreview.decode(bytes)?.asImageBitmap()
     override fun decodeToolImage(bytes: ByteArray) = ImagePreview.decode(bytes, ImagePreview.MAX_SIDE)?.asImageBitmap()
     override fun toast(text: String) = c.toastState.show(text)
+    override fun putDraft(storedId: String, text: String) {
+        c.drafts[storedId] = text
+    }
+    override fun takeDraft(storedId: String) = c.drafts.remove(storedId)
     override suspend fun transcribe(wav: ByteArray) = c.repository.transcribe(wav)
     override fun speechInput() = c.speechInput()
     override fun speechOutput() = c.speechOutput()

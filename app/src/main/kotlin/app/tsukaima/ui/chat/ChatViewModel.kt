@@ -87,6 +87,11 @@ class ChatViewModel(
     /** Emits once the session was archived or deleted from this screen. */
     val closed: Flow<Unit> = _closed.receiveAsFlow()
 
+    private val _branched = Channel<String>(Channel.CONFLATED)
+
+    /** Emits the stored id of a session this screen made and wants shown (a branch). */
+    val branched: Flow<String> = _branched.receiveAsFlow()
+
     private var opened = false
     private var opening = false
     private var lost = false
@@ -184,6 +189,7 @@ class ChatViewModel(
     private fun launch(block: suspend () -> Unit) = viewModelScope.launch(dispatcher) { block() }
 
     init {
+        storedSessionId?.let(backend::takeDraft)?.let { draft -> _state.update { it.copy(input = draft) } }
         launch { backend.hermes.collect { h -> _state.update { it.copy(gatewayStatus = h.gatewayStatus()) } } }
         launch { backend.events.collect(sync::onEvent) }
         launch { backend.serverRequests.collect(sync::onRequest) }
@@ -412,6 +418,45 @@ class ChatViewModel(
             }
         }
     }
+
+    /**
+     * "Branch from here" on message [id]: a new chat that holds this one up to that message, opened in its place;
+     * this chat stays as it is. From a reply the branch ends with that reply. From one of the user's own messages it
+     * ends before it and the message waits in the new chat's composer, to be changed and sent. Hermes counts a
+     * branch in user and assistant rows that have text ([ChatBranch.count], taken from a fresh history read, not
+     * from the screen) and does not copy tool rows.
+     */
+    fun branch(id: String) {
+        _state.update { it.copy(messageMenu = null) }
+        val item = chat.items.firstOrNull { it.id == id } ?: return
+        val row = ChatBranch.row(item) ?: return
+        if (!_state.value.writable) return backend.toast("Not connected to Hermes")
+        val live = chat.liveSessionId ?: return backend.toast("Still connecting to Hermes")
+        if (_state.value.branching) return
+        _state.update { it.copy(branching = true) }
+        launch {
+            try {
+                val cut = ChatBranch.count(session.history(live), row) ?: return@launch backend.toast("Couldn’t branch: that message is no longer in the chat")
+                val child = session.branch(live, cut.count)
+                // The new chat's screen opens its own live session.
+                runCatching { session.close(child.sessionId) }
+                if (child.messages.lastOrNull()?.rowTextMatches(cut.last) == false) {
+                    backend.deleteSession(child.storedSessionId)
+                    return@launch backend.toast("Couldn’t branch at that message")
+                }
+                cut.draft?.let { backend.putDraft(child.storedSessionId, it) }
+                _branched.trySend(child.storedSessionId)
+            } catch (c: CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                backend.toast("Couldn’t branch: ${e.message ?: "gateway error"}")
+            } finally {
+                _state.update { it.copy(branching = false) }
+            }
+        }
+    }
+
+    private fun app.tsukaima.data.gateway.TranscriptMessage.rowTextMatches(expected: String) = text.trim() == expected.trim()
 
     /** "Watch" on a subagent row: its page with the child's live transcript, Stop and a message field; see [ChatSubagents]. */
     fun openSubagent(id: String) = subagents.open(id)

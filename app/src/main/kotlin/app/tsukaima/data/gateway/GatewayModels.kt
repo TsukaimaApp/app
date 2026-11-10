@@ -49,6 +49,16 @@ data class SessionCreated(
     val messages: List<TranscriptMessage> = emptyList(),
 )
 
+/** `session.branch`: the child session, live ([sessionId]) and stored, with the rows it copied ([messages]). */
+@Serializable
+data class SessionBranched(
+    @SerialName("session_id") val sessionId: String,
+    @SerialName("stored_session_id") val storedSessionId: String,
+    val title: String? = null,
+    @SerialName("message_count") val messageCount: Int = 0,
+    val messages: List<TranscriptMessage> = emptyList(),
+)
+
 @Serializable
 data class SessionResumed(
     @SerialName("session_id") val sessionId: String,
