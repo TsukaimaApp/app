@@ -2,7 +2,7 @@
 config.set model round trip (same model, session scope), session detail `archived` flag,
 file.attach + /api/files/download round trip, cron create/list/delete, session cleanup, STT and TTS relays,
 pdf.attach, todo.updated from the todo_list tool."""
-import asyncio, base64, contextlib, http.cookiejar, json, os, sys, time, urllib.error, urllib.parse, urllib.request
+import asyncio, base64, contextlib, http.cookiejar, json, os, sys, time, urllib.error, urllib.parse, urllib.request, uuid
 
 BASE = os.environ["HERMES_TEST_URL"].rstrip("/")
 USER, PASSWORD = os.environ["HERMES_TEST_USER"], os.environ["HERMES_TEST_PASSWORD"]
@@ -96,6 +96,14 @@ async def ws_part(token):
             if "archived" not in detail:
                 fail(f"GET /api/sessions/{{id}} lacks 'archived': {sorted(detail)[:20]}")
             step(f"GET /api/sessions/{{id}} (archived={detail['archived']!r})")
+            # Session edits as the app sends them (HermesApi.fenced): Hermes 0.23 refuses one without an identity.
+            if "runtime_revision" not in detail:
+                fail(f"GET /api/sessions/{{id}} lacks 'runtime_revision': {sorted(detail)[:20]}")
+            edit = {"request_id": uuid.uuid4().hex, "expected_revision": detail["runtime_revision"]}
+            done = http_json("PATCH", f"/api/sessions/{stored}", {"pinned": True, **edit}, token=token)
+            if not (done or {}).get("ok"):
+                fail(f"fenced PATCH /api/sessions/{{id}} not ok: {done!r}")
+            step(f"PATCH /api/sessions/{{id}} with request_id + expected_revision (revision {done.get('revision')})")
             await download_part(rpc, sid, token)
         finally:
             if stored:  # session.delete takes the stored id, not the live one
@@ -161,7 +169,7 @@ async def download_part(rpc, sid, token):
 # Every REST read the app makes, with the app's exact query params (HermesApi.kt). A server-side cap or
 # param change (e.g. /api/sessions `limit` le=100) makes one of these non-2xx and fails the smoke.
 REST_CONTRACT = [
-    "/api/sessions?limit=100&archived=include&exclude_sources=cron",  # drawer
+    "/api/sessions?limit=100&archived=include&exclude_sources=cron&order=recent",  # drawer
     "/api/sessions?limit=10",  # status: last session
     "/api/model/options",
     "/api/chat/workspaces",
