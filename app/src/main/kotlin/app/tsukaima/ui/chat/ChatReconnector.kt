@@ -212,7 +212,8 @@ internal class ChatReconnector(
             return
         }
         if (ev.sessionId.isNotEmpty() && ev.sessionId != live) return
-        if (ev.type == "session.info") {
+        // While a fallback serves the session the snapshot names the fallback model, not the session's.
+        if (ev.type == "session.info" && !chat.fallback) {
             val model = (ev.payload["model"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotEmpty() }
             val provider = (ev.payload["provider"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotEmpty() }
             state.update { it.copy(model = model ?: it.model, provider = provider ?: it.provider) }

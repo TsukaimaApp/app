@@ -48,6 +48,11 @@ sealed interface ChatItem {
         val reasoningLive: Boolean = false,
         /** The persisted row (history `row_id`, or the turn's `final_assistant_row_id`); null until known. */
         val rowId: Long? = null,
+        /**
+         * The model that wrote this reply when it was not the session's own (`message.complete.usage.model`: a
+         * fallback served the turn); null otherwise, and for a reply loaded from history, which carries no model.
+         */
+        val model: String? = null,
     ) : ChatItem
 
     data class ToolCall(
@@ -201,10 +206,11 @@ sealed interface ChatItem {
      * A server diagnostic the user must see (`status.update`): a quiet system line in the transcript, not a bubble
      * and not a toast. [warning]: the server marked it (kind `warn`, or a lifecycle line starting with ⚠️), such as
      * "Model fallback: … unavailable (rate limit); using … via synthetic" — the only way the phone learns the reply
-     * came from another model. A non-warning notice is a completed context compaction. Never in history: it lives
+     * came from another model. [error]: a terminal failure line (❌: retries exhausted, credits gone). A notice that
+     * is neither is quiet: a completed context compaction, the primary model restored. Never in history: it lives
      * for this screen's session (a rebuild carries it, see ChatReconnector).
      */
-    data class Notice(override val id: String, val text: String, val warning: Boolean) : ChatItem
+    data class Notice(override val id: String, val text: String, val warning: Boolean, val error: Boolean = false) : ChatItem
 }
 
 enum class SubagentStatus { Running, Done, Failed }
@@ -333,11 +339,19 @@ data class ChatState(
      */
     val todoRevision: Int = -1,
     /**
-     * The server is compressing this session's context on its own (`status.update {kind: compacting|compressing}`,
-     * an automatic compaction before an API call), until its completion line, `ready`, or the turn end. Shown as
-     * [AgentStatus.Compacting] so an idle-looking wait is not taken for a hung turn.
+     * The server is compressing this session's context (`status.update {kind: compacting|compressing}`: an automatic
+     * compaction before an API call, or a `session.compress` from any client), until its `compacted` line, the
+     * `ready` status, the turn's next output, the turn end or a lost connection. Shown as [AgentStatus.Compacting] so
+     * an idle-looking wait is not taken for a hung turn.
      */
     val compacting: Boolean = false,
+    /** The session's own model (`session.info.model`); not the fallback's while [fallback] is set. Null until reported. */
+    val model: String? = null,
+    /**
+     * A fallback model is serving the session ("Model fallback: …" until "Primary model restored: …"). While set,
+     * `session.info` names the fallback model, which is not the session's.
+     */
+    val fallback: Boolean = false,
 )
 
 /** [ChatState.lastSeq] before any event of the live session was applied; `session.events.since` accepts it. */

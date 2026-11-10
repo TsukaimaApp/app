@@ -22,29 +22,35 @@ import app.tsukaima.ui.theme.tsukaima
 
 /**
  * A server notice ([ChatItem.Notice]) as a system line between bubbles: a small icon and caption text, warn-tinted
- * for a warning (model fallback, degraded side path), ink for a quiet one (context compacted). Plain text, not
+ * for a warning (model fallback, degraded side path), danger-tinted for an error (retries exhausted), ink for a
+ * quiet one (context compacted, primary model restored). Plain text, not
  * markdown: the server writes these as one line. Nothing to tap, nothing to dismiss.
  */
 @Composable
 fun NoticeLine(item: ChatItem.Notice, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.tsukaima
-    val tint = if (item.warning) colors.warn else colors.ink3
+    val tint = when {
+        item.error -> colors.danger
+        item.warning -> colors.warn
+        else -> colors.ink3
+    }
+    val loud = item.warning || item.error
     Row(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = Dimens.gutter, vertical = 6.dp)
-            .semantics(mergeDescendants = true) { contentDescription = (if (item.warning) "Warning: " else "Notice: ") + item.text },
+            .semantics(mergeDescendants = true) { contentDescription = (if (item.error) "Error: " else if (item.warning) "Warning: " else "Notice: ") + item.text },
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.Top,
     ) {
         TsukaimaIcon(
-            if (item.warning) IconName.Warning else IconName.Check,
+            if (item.error) IconName.Error else if (item.warning) IconName.Warning else IconName.Check,
             size = 16.dp,
             tint = tint,
             contentDescription = null,
             modifier = Modifier.padding(top = 1.dp),
         )
-        Text(item.text, style = TsukaimaType.caption, color = if (item.warning) colors.ink2 else colors.ink3)
+        Text(item.text, style = TsukaimaType.caption, color = if (loud) colors.ink2 else colors.ink3)
     }
 }
 
@@ -65,5 +71,6 @@ private fun NoticePreview(dark: Boolean) = PreviewPage(dark) {
             warning = true,
         ),
     )
-    NoticeLine(ChatItem.Notice("n-2", "Context compression complete", warning = false))
+    NoticeLine(ChatItem.Notice("n-2", "Context compacted", warning = false))
+    NoticeLine(ChatItem.Notice("n-3", "API failed after 3 retries — connection reset by peer", warning = false, error = true))
 }

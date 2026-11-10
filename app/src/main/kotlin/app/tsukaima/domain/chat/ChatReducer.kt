@@ -46,12 +46,20 @@ object ChatReducer {
     private const val INTERRUPT_MARKER = "[Command interrupted]"
     private const val INTERRUPTED_EXIT = 130
 
-    /** `status.update` kinds that mean a server-side context compression is running / has a completion line. */
+    /** `status.update` kinds that mean a server-side context compression is running. */
     private val COMPACTING_KINDS = setOf("compacting", "compressing")
-    /** `status.update` kinds whose warning lines are shown ([ChatItem.Notice]); `warn` always, `lifecycle` when marked. */
-    private val NOTICE_KINDS = setOf("lifecycle", "warn")
+    /** `status.update` kind of a finished compaction ("✓ Context compaction complete — continuing turn..."). */
+    private const val COMPACTED_KIND = "compacted"
+    /** The bare status word that ends a manual `session.compress`: sent as `{kind: "status", text: "ready"}`. */
+    private const val READY = "ready"
     private const val WARNING_MARK = "\u26a0" // ⚠, usually followed by U+FE0F
-    private const val DONE_MARK = "\u2713" // ✓
+    private const val ERROR_MARK = "\u274c" // ❌
+    private val DONE_MARKS = listOf("\u2705", "\u2713") // ✅ ✓
+    private const val FALLBACK_STARTED = "Model fallback"
+    private const val FALLBACK_ENDED = "Primary model restored"
+
+    /** Events that show the turn is producing output again: a compaction (which runs before a model call) is over. */
+    private val TURN_OUTPUT = setOf("message.delta", "reasoning.delta", "message.interim", "tool.generating", "tool.start")
 
     /**
      * A provider control token (or its tail) leaked at the very start of a reply: `<|im_end|>`, `<|eot|>`, or a
@@ -128,7 +136,9 @@ object ChatReducer {
     fun rebuild(history: List<ChatItem>, before: List<ChatItem>, carry: Boolean = true): List<ChatItem> {
         val idByRow = before.mapNotNull { item -> item.persistedRow?.let { it to item.id } }.toMap()
         val taken = mutableSetOf<String>()
-        val items = history.map { item ->
+        // History carries no model: a reply keeps the label it got live.
+        val models = before.mapNotNull { (it as? ChatItem.AssistantMessage)?.let { m -> m.rowId?.let { row -> m.model?.let { row to it } } } }.toMap()
+        val items = history.map { if (it is ChatItem.AssistantMessage && it.rowId in models) it.copy(model = models[it.rowId]) else it }.map { item ->
             val old = item.persistedRow?.let(idByRow::get)?.takeIf { it != item.id && taken.add(it) && history.none { h -> h.id == it } }
             when {
                 old == null -> item
@@ -330,11 +340,13 @@ object ChatReducer {
      */
     fun onSessionBound(state: ChatState, liveId: String, storedId: String?): ChatState {
         val ids = state.copy(liveSessionId = liveId, storedSessionId = storedId ?: state.storedSessionId)
-        return if (state.liveSessionId == liveId) ids else ids.copy(lastSeq = NO_SEQ, localCounter = 0, stopRequested = false, todoRevision = -1, compacting = false)
+        return if (state.liveSessionId == liveId) ids
+        else ids.copy(lastSeq = NO_SEQ, localCounter = 0, stopRequested = false, todoRevision = -1, compacting = false, fallback = false)
     }
 
     fun onConnectionLost(state: ChatState): ChatState =
-        state.copy(items = finalizeStreaming(state.items), status = AgentStatus.Offline)
+        // What the server compresses meanwhile is not known: the state returns with its next status line.
+        state.copy(items = finalizeStreaming(state.items), status = AgentStatus.Offline, compacting = false)
 
     fun onConnectionRestored(state: ChatState): ChatState =
         if (state.status == AgentStatus.Offline) state.copy(status = AgentStatus.Idle) else state
@@ -357,7 +369,9 @@ object ChatReducer {
         val bound = state.liveSessionId != null && ev.sessionId == state.liveSessionId
         if (bound && ev.seq != null && ev.seq <= state.lastSeq) return state
         val seen = if (bound && ev.seq != null) state.copy(lastSeq = ev.seq) else state
-        val s = if (seen.queuedTurnNext && ev.type in QUEUED_TURN_STARTS) startQueuedTurn(seen) else seen
+        val started = if (seen.queuedTurnNext && ev.type in QUEUED_TURN_STARTS) startQueuedTurn(seen) else seen
+        // A compaction the server refused or gave up sends no done line; the turn's next output is its end.
+        val s = if (started.compacting && ev.type in TURN_OUTPUT) started.copy(compacting = false) else started
         val p = ev.payload
         return afterTurnEnd(ev.type, p, when (ev.type) {
             "message.start" -> onMessageStart(s, ev.seq, flair)
@@ -388,7 +402,7 @@ object ChatReducer {
                     // A failed turn with nothing to show: end it as an error, not as a silent empty reply.
                     turnFailed(s, ev.seq, p.string("error") ?: p.string("message"))
                 } else {
-                    withPersistedTurn(onMessageComplete(s, p, ev.seq), p["persisted_turn"] as? JsonObject)
+                    withServingModel(withPersistedTurn(onMessageComplete(s, p, ev.seq), p["persisted_turn"] as? JsonObject), p["usage"])
                 },
                 p["usage"],
             )
@@ -462,31 +476,53 @@ object ChatReducer {
     }
 
     /**
-     * `status.update {kind, text}` — Hermes' transient status line. The TUI prints every kind; the phone keeps only what
-     * changes the user's reading of the chat: a compaction's start / completion ([ChatState.compacting], and a quiet
-     * [ChatItem.Notice] when it completes), and a warning (kind `warn`, or a `lifecycle` line starting with ⚠️, which
-     * is how `_emit_diagnostic_status` marks a model fallback) as a warning notice. `ready` ends a compaction. Goal,
-     * loop, heartbeat, process and plain lifecycle lines are dropped.
+     * `status.update {kind, text}` — Hermes' transient status line. The TUI prints every kind; the phone keeps what
+     * changes the user's reading of the chat (shapes recorded from Hermes v0.23.1, `recorded-compaction*.jsonl`):
+     * - a text starting with ⚠️, of any kind, or kind `warn`: a warning [ChatItem.Notice]. The gateway re-tags a
+     *   warning that mentions compression as `compacting` ("⚠️ Session compressed 2 times — …"); it is a warning all
+     *   the same and never starts the compacting state. "Model fallback: …" also sets [ChatState.fallback].
+     * - `compacting` / `compressing`: a compression runs ([ChatState.compacting]).
+     * - `compacted`: it finished; a quiet "Context compacted" notice.
+     * - `{kind: "status", text: "ready"}`: the end of a manual `session.compress` (a bare status word travels as kind
+     *   `status` with the word as its text).
+     * - a `lifecycle` line starting with ❌ (retries exhausted, credits gone): an error notice; one starting with ✅
+     *   or ✓ ("Primary model restored: …", which also clears [ChatState.fallback]): a quiet notice.
+     * Goal, loop, heartbeat, process and plain lifecycle lines are dropped.
      */
     private fun onStatusUpdate(s: ChatState, p: JsonObject, seq: Long?): ChatState {
         val kind = p.string("kind").orEmpty()
         val text = p.string("text").orEmpty().trim()
+        fun body(mark: String) = text.removePrefix(mark).removePrefix("\uFE0F").trim()
+        val done = DONE_MARKS.firstOrNull(text::startsWith)
         return when {
-            kind in COMPACTING_KINDS -> {
-                val done = text.startsWith(DONE_MARK) || text.contains("complete", ignoreCase = true)
-                if (!done) s.copy(compacting = true)
-                else notice(s.copy(compacting = false), seq, text.removePrefix(DONE_MARK).trim().ifEmpty { "Context compacted" }, warning = false)
-            }
-            kind == "ready" -> if (s.compacting) s.copy(compacting = false) else s
-            kind in NOTICE_KINDS && text.isNotEmpty() && (kind == "warn" || text.startsWith(WARNING_MARK)) ->
-                notice(s, seq, text.removePrefix(WARNING_MARK).removePrefix("\uFE0F").trim(), warning = true)
+            text.startsWith(WARNING_MARK) || kind == "warn" && text.isNotEmpty() ->
+                notice(s.copy(fallback = s.fallback || FALLBACK_STARTED in text), seq, body(WARNING_MARK), warning = true)
+            kind == COMPACTED_KIND -> notice(s.copy(compacting = false), seq, "Context compacted", warning = false)
+            kind in COMPACTING_KINDS -> s.copy(compacting = true)
+            kind == READY || kind == "status" && text == READY -> if (s.compacting) s.copy(compacting = false) else s
+            kind != "lifecycle" -> s
+            text.startsWith(ERROR_MARK) -> notice(s, seq, body(ERROR_MARK), warning = false, error = true)
+            done != null -> notice(s.copy(fallback = s.fallback && FALLBACK_ENDED !in text), seq, body(done), warning = false)
             else -> s
         }
     }
 
-    private fun notice(s: ChatState, seq: Long?, text: String, warning: Boolean): ChatState {
+    private fun notice(s: ChatState, seq: Long?, text: String, warning: Boolean, error: Boolean = false): ChatState {
         val (counted, id) = nextId(s, seq, "n")
-        return counted.copy(items = counted.items + ChatItem.Notice(id, text, warning))
+        return counted.copy(items = counted.items + ChatItem.Notice(id, text, warning, error))
+    }
+
+    /**
+     * `message.complete.usage.model` names the model the agent was on when the turn ended. When that is not the
+     * session's own ([ChatState.model]: a fallback served the turn), the turn's reply is labelled with it.
+     */
+    private fun withServingModel(s: ChatState, usage: JsonElement?): ChatState {
+        val served = (usage as? JsonObject)?.string("model")?.takeIf { it.isNotBlank() } ?: return s
+        if (s.model == null || served == s.model) return s
+        val turnStart = s.items.indexOfLast { it.isSent() } + 1
+        val index = (turnStart until s.items.size).lastOrNull { s.items[it] is ChatItem.AssistantMessage } ?: return s
+        val reply = s.items[index] as ChatItem.AssistantMessage
+        return s.copy(items = s.items.replace(reply) { reply.copy(model = served) })
     }
 
     /** [LEADING_CONTROL_TOKEN] removed from the start of a reply's text. */
@@ -585,12 +621,14 @@ object ChatReducer {
     }
 
     /**
-     * The `session.info` snapshot (event, or the `info` of `session.create` / `resume`): its token counters and
-     * reasoning effort. A lazy session's info has neither yet, which keeps what is known.
+     * The `session.info` snapshot (event, or the `info` of `session.create` / `resume`): its token counters,
+     * reasoning effort and model. A lazy session's info has neither yet, which keeps what is known.
      */
     fun onSessionInfo(state: ChatState, info: JsonObject): ChatState {
         val effort = if ("reasoning_effort" in info) info.string("reasoning_effort").orEmpty() else state.reasoningEffort
-        return withUsage(state.copy(reasoningEffort = effort), info["usage"])
+        // After a fallback turn the snapshot names the fallback model; the session's own is restored at the next turn.
+        val model = info.string("model")?.takeIf { it.isNotBlank() && !state.fallback } ?: state.model
+        return withUsage(state.copy(reasoningEffort = effort, model = model), info["usage"])
     }
 
     /** [state] with the counters of a `usage` object; an empty or absent one changes nothing. */

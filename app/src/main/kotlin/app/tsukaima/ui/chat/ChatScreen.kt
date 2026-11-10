@@ -470,6 +470,7 @@ internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatAct
                 onLongPress = { actions.onMessageMenu(item.id) }.takeIf { !streaming },
                 reasoningOpen = ChatReducer.reasoningOpen(state.chat, item),
                 onToggleReasoning = { actions.onToggleReasoning(item.id) },
+                model = item.model,
             )
         }
         is ChatItem.ToolCall -> ToolRow(item, media = media, onOpened = actions.onToolOpened)

@@ -1853,22 +1853,23 @@ class ChatReducerTest {
         assertEquals(AgentStatus.Replying, s.status)
     }
 
+    /** The shapes Hermes really sends are pinned by [RecordedStatusTest]; this covers the ends no recording has. */
     @Test
-    fun compactionStatusTracksServerCompression() {
-        val going = live.feed(ev("status.update", """{"kind":"compacting","text":"Compressing context…"}""", seq = 1))
+    fun aTurnEndOrALostConnectionEndsTheCompactingState() {
+        val going = live.feed(ev("status.update", """{"kind":"compacting","text":"🗜️ Compacting context — summarizing earlier conversation so I can continue..."}""", seq = 1))
         assertTrue(going.compacting)
         assertTrue(going.items.isEmpty())
-
-        val done = going.feed(ev("status.update", """{"kind":"compacting","text":"✓ Context compression complete"}""", seq = 2))
-        assertFalse(done.compacting)
-        val notice = done.items.single() as ChatItem.Notice
-        assertFalse(notice.warning)
-        assertEquals("Context compression complete", notice.text)
-
-        // `compressing` starts it too; `ready` and a turn end clear it without a notice.
-        assertTrue(live.feed(ev("status.update", """{"kind":"compressing","text":"…"}""")).compacting)
-        assertFalse(going.feed(ev("status.update", """{"kind":"ready","text":"ready"}""")).compacting)
         assertFalse(going.feed(ev("message.complete", """{"text":"ok"}""", seq = 5)).compacting)
+        assertFalse(ChatReducer.onConnectionLost(going).compacting)
+    }
+
+    @Test
+    fun terminalFailureLinesAreErrorNotices() {
+        val s = live.feed(ev("status.update", """{"kind":"lifecycle","text":"❌ API failed after 3 retries — connection reset"}""", seq = 4))
+        val notice = s.items.single() as ChatItem.Notice
+        assertTrue(notice.error)
+        assertFalse(notice.warning)
+        assertEquals("API failed after 3 retries — connection reset", notice.text)
     }
 
     @Test

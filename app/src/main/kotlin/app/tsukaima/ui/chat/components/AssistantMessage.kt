@@ -19,6 +19,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.tsukaima.domain.markdown.Markdown
@@ -35,6 +38,7 @@ import app.tsukaima.ui.theme.tsukaima
  * for its `MEDIA:` deliveries ([media]). [onLongPress] opens the message menu (copy). The reasoning's open state
  * is the chat's ([reasoningOpen], toggled through [onToggleReasoning]), not the composable's: a list that
  * recycles or rebuilds its items must not fold a block the reader is in the middle of.
+ * [model] is shown under the finished reply when another model than the session's wrote it (a fallback).
  * [padding] is its outer spacing (none in the assist sheet).
  */
 @Composable
@@ -47,6 +51,7 @@ fun AssistantMessage(
     onLongPress: (() -> Unit)? = null,
     reasoningOpen: Boolean = false,
     onToggleReasoning: () -> Unit = {},
+    model: String? = null,
     padding: PaddingValues = PaddingValues(horizontal = Dimens.gutter, vertical = 4.dp),
 ) {
     val colors = MaterialTheme.tsukaima
@@ -75,12 +80,23 @@ fun AssistantMessage(
             if (open) Text(reasoning, style = TsukaimaType.caption, color = colors.ink2)
         }
         MarkdownText(blocks, streaming = streaming, media = media)
+        if (model != null && !streaming) {
+            Row(
+                modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = "Answered by $model" },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                TsukaimaIcon(IconName.Memory, contentDescription = null, size = 14.dp, tint = colors.ink3)
+                Text(model, style = TsukaimaType.caption, color = colors.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
     }
 }
 
 @Composable
 private fun AssistantPreview(dark: Boolean) = PreviewPage(dark) {
     AssistantMessage("The cron job was failing because the **PATH** was empty.\n\n```bash\ncrontab -l\n```", streaming = false, reasoning = null)
+    AssistantMessage("Restarted; the unit is active again.", streaming = false, reasoning = null, model = "hf:moonshotai/Kimi-K3.1-Pro")
     AssistantMessage("Looking at the logs now and", streaming = true, reasoning = "Check the unit file, then the journal.")
 }
 
