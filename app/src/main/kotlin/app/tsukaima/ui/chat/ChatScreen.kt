@@ -424,6 +424,7 @@ private fun ChatColumn(
             running = state.chat.status.running,
             turnLive = state.chat.queuesSends,
             onStop = actions.onStop,
+            onMore = { actions.onMenu(ChatMenu.Send) },
             onVoice = actions.onVoice,
             focusRequester = composerFocus,
             editCaption = state.editCaption,
@@ -544,7 +545,7 @@ internal fun transcriptTailKey(items: List<ChatItem>): Pair<String, Int>? =
     }
 
 /**
- * The top bar's overflow entries: Stop while a turn runs, Steer now and the side entries while text is typed ([ChatSides]), then the
+ * The top bar's overflow entries: Stop while a turn runs, the side entries while text is typed between turns ([ChatSides]), then the
  * session actions once the session is stored.
  * A brand-new chat with no stored id yet offers only what works without one (Stop, and Copy session ID — the live
  * id — once a live session exists); empty disables the button rather than opening a sheet that does nothing.
@@ -559,8 +560,8 @@ internal fun overflowItems(state: ChatUiState, actions: ChatActions): List<MenuI
     // Compaction is idle-gated on the server: offered between turns only.
     val compact = MenuItem("Compact context", IconName.Compress, onClick = actions.onCompact)
         .takeIf { live && !running && !state.compacting && state.chat.items.isNotEmpty() }
-    val steer = MenuItem("Steer now", IconName.Send, onClick = actions.onSteer).takeIf { ChatSides.steerable(state) }
-    val sides = listOfNotNull(steer) + if (ChatSides.available(state)) {
+    // During the agent's turn the composer's More button holds the ways to send ([sendItems]).
+    val sides = if (ChatSides.available(state) && !state.chat.queuesSends) {
         listOf(
             MenuItem("Send as side question", IconName.Forum) { actions.onSendAside(SideKind.Question) },
             MenuItem("Send as background task", IconName.Schedule) { actions.onSendAside(SideKind.Background) },
@@ -584,6 +585,19 @@ internal fun overflowItems(state: ChatUiState, actions: ChatActions): List<MenuI
         MenuItem("Delete session", IconName.Delete, danger = true) { actions.onDialog(ChatDialog.DeleteConfirm) },
     )
 }
+
+/**
+ * The composer's More menu, shown during the agent's turn in place of Send: the ways the typed message can go.
+ * Steer now: into the running turn, read after its current tool call. Queue: a turn of its own when this one ends.
+ * Side question and background task: a detached agent answers beside the turn. Steer and the side entries need
+ * text ([ChatSides]); Queue also takes attachments ([ChatUiState.canSend]).
+ */
+internal fun sendItems(state: ChatUiState, actions: ChatActions): List<MenuItem> = listOfNotNull(
+    MenuItem("Steer now", IconName.Send, onClick = actions.onSteer).takeIf { ChatSides.steerable(state) },
+    MenuItem("Queue", IconName.Schedule, onClick = actions.onSend).takeIf { state.canSend },
+    MenuItem("Send as side question", IconName.Forum) { actions.onSendAside(SideKind.Question) }.takeIf { ChatSides.available(state) },
+    MenuItem("Send as background task", IconName.Schedule) { actions.onSendAside(SideKind.Background) }.takeIf { ChatSides.available(state) },
+)
 
 /** "Reasoning · Low"; just "Reasoning" while the effort is unknown or the provider's default. */
 internal fun reasoningMenuLabel(effort: String?): String {
@@ -628,6 +642,8 @@ private fun ChatSheets(state: ChatUiState, actions: ChatActions, overflow: List<
     MenuSheet(state.menu == ChatMenu.Workspace, dismiss, workspaceItems(state, actions))
     MenuSheet(state.menu == ChatMenu.Overflow && overflow.isNotEmpty(), dismiss, overflow)
     MenuSheet(state.menu == ChatMenu.Reasoning, dismiss, reasoningItems(state, actions))
+    val sendMenu = sendItems(state, actions)
+    MenuSheet(state.menu == ChatMenu.Send && sendMenu.isNotEmpty(), dismiss, sendMenu)
     MenuSheet(state.menu == ChatMenu.VoiceLanguage, dismiss, voiceLanguageItems(state.voiceLanguages, state.voiceLanguage, actions.onVoiceLanguage))
     val messageMenu = messageItems(state, actions)
     MenuSheet(messageMenu.isNotEmpty(), { actions.onMessageMenu(null) }, messageMenu)

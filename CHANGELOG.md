@@ -3,6 +3,15 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.11.1 — 2026-11-10 (versionCode 29)
+
+### Changed
+- During the agent's turn the composer shows **Stop** and **More** in place of Stop and "Send when done". More
+  opens the ways to send the typed message: Steer now (into the running turn), Queue (a turn of its own when this
+  one ends), Send as side question, Send as background task. In 0.11.0 Steer now was in the top bar's menu, where it
+  was easy to miss, and the send button always queued. Those entries are no longer in the top bar's menu during a
+  turn. A hardware keyboard's Enter still queues.
+
 ## 0.11.0 — 2026-11-10 (versionCode 28)
 
 Everything here was checked against recordings from Hermes v0.23.1. Nothing was checked on a phone.

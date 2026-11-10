@@ -64,10 +64,15 @@ class OverflowMenuTest {
 
         assertEquals(sides + listOf("Reasoning", "Copy session ID"), labels("what time is it?", chat))
         // Mid-turn too: side agents run detached from the turn.
-        // Mid-turn too: side agents run detached from the turn. Steer now is offered only then.
-        assertEquals(listOf("Stop", "Steer now") + sides, labels("x", chat.copy(status = AgentStatus.Replying)).take(4))
-        assertTrue("Steer now" !in labels("x", chat))
-        assertTrue("Steer now" !in labels("x", chat.copy(status = AgentStatus.Replying, compacting = true)))
+        // During the agent's turn the ways to send are in the composer's More menu, not here.
+        val running = ChatUiState(chat = chat.copy(status = AgentStatus.Replying), input = "x")
+        assertEquals(listOf("Stop", "Reasoning"), overflowItems(running, actions).map { it.label }.take(2))
+        assertEquals(listOf("Steer now", "Queue") + sides, sendItems(running, actions).map { it.label })
+        // Paused on the user, a steer still reaches the turn; while the server compacts, it would only be queued.
+        assertEquals("Steer now", sendItems(running.copy(chat = chat.copy(status = AgentStatus.Approval)), actions).first().label)
+        assertEquals(listOf("Queue") + sides, sendItems(running.copy(chat = running.chat.copy(compacting = true)), actions).map { it.label })
+        // Attachments alone can only be queued; nothing typed and nothing attached leaves no entry.
+        assertTrue(sendItems(running.copy(input = ""), actions).isEmpty())
         assertTrue(labels(" ", chat).none { it in sides })
         assertTrue(labels("x", ChatState()).none { it in sides })
         assertTrue(labels("x", chat, archived = true).none { it in sides })

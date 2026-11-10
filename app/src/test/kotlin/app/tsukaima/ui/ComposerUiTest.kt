@@ -50,21 +50,23 @@ class ComposerUiTest : ComposeUiTest() {
     }
 
     @Test
-    fun `text typed while a turn runs offers Stop and a 44dp Send when done`() {
+    fun `text typed while a turn runs offers Stop and a 44dp More and no plain Send`() {
         var sends = 0
         var stops = 0
-        setThemed { Composer("And then?", {}, { sends++ }, {}, enabled = true, running = true, onStop = { stops++ }, onVoice = {}) }
+        var mores = 0
+        setThemed { Composer("And then?", {}, { sends++ }, {}, enabled = true, running = true, onStop = { stops++ }, onMore = { mores++ }, onVoice = {}) }
 
         compose.onNodeWithContentDescription("Stop")
             .assertWidthIsAtLeast(44.dp)
             .assertHeightIsAtLeast(44.dp)
-        compose.onNodeWithContentDescription("Send when done")
+        compose.onNodeWithContentDescription("More ways to send")
             .assertIsEnabled()
             .assertWidthIsAtLeast(44.dp)
             .assertHeightIsAtLeast(44.dp)
             .performClick()
         compose.onNodeWithContentDescription("Send").assertDoesNotExist()
-        assertEquals(1, sends)
+        assertEquals("More opens the menu; it sends nothing itself", 0, sends)
+        assertEquals(1, mores)
         assertEquals(0, stops)
     }
 
@@ -80,11 +82,11 @@ class ComposerUiTest : ComposeUiTest() {
     }
 
     @Test
-    fun `text typed while the turn waits on an approval offers Send when done without Stop`() {
+    fun `text typed while the turn waits on an approval offers More without Stop`() {
         var sends = 0
-        setThemed { Composer("Also this", {}, { sends++ }, {}, enabled = true, running = false, turnLive = true, onVoice = {}) }
+        setThemed { Composer("Also this", {}, {}, {}, enabled = true, running = false, turnLive = true, onMore = { sends++ }, onVoice = {}) }
 
-        compose.onNodeWithContentDescription("Send when done")
+        compose.onNodeWithContentDescription("More ways to send")
             .assertWidthIsAtLeast(44.dp)
             .assertHeightIsAtLeast(44.dp)
             .performClick()
@@ -97,11 +99,11 @@ class ComposerUiTest : ComposeUiTest() {
         setThemed { Composer("", {}, {}, {}, enabled = true, running = true, onVoice = {}) }
 
         compose.onNodeWithContentDescription("Stop").assertExists()
-        compose.onNodeWithContentDescription("Send when done").assertDoesNotExist()
+        compose.onNodeWithContentDescription("More ways to send").assertDoesNotExist()
     }
 
     @Test
-    fun composerShowsSendWhenDoneBetweenTurns() {
+    fun composerShowsMoreBetweenTurns() {
         // The live turn ended but a queued message still waits to run: a new send queues behind it.
         val chat = ChatState(
             items = listOf(
@@ -122,7 +124,7 @@ class ComposerUiTest : ComposeUiTest() {
             )
         }
 
-        compose.onNodeWithContentDescription("Send when done")
+        compose.onNodeWithContentDescription("More ways to send")
             .assertWidthIsAtLeast(44.dp)
             .assertHeightIsAtLeast(44.dp)
         compose.onNodeWithContentDescription("Send").assertDoesNotExist()

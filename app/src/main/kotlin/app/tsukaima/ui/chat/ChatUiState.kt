@@ -10,7 +10,7 @@ import app.tsukaima.domain.chat.SlashCommand
 import app.tsukaima.domain.voice.VoiceLanguage
 import app.tsukaima.domain.voice.VoiceState
 
-enum class ChatMenu { Model, Workspace, Overflow, Reasoning, VoiceLanguage }
+enum class ChatMenu { Model, Workspace, Overflow, Reasoning, VoiceLanguage, Send }
 enum class ChatDialog { Rename, DeleteConfirm, ModelConfirm }
 
 /** A model pick the server wants confirmed (`confirm_required`) before it switches; [message] says why. */

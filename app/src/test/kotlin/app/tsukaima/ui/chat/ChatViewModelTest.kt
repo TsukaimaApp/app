@@ -371,10 +371,10 @@ class ChatViewModelTest {
         b.events.emit(ev("message.start", 1))
         b.events.emit(ev("tool.start", 2, """{"tool_id":"t1","name":"terminal"}"""))
         advanceUntilIdle()
-        assertTrue(overflowItems(vm.state.value, ChatActions()).none { it.label == "Steer now" })
+        assertTrue(sendItems(vm.state.value, ChatActions()).isEmpty())
 
         vm.setInput("only lint")
-        assertTrue(overflowItems(vm.state.value, ChatActions()).any { it.label == "Steer now" })
+        assertEquals("Steer now", sendItems(vm.state.value, ChatActions()).first().label)
         vm.steer()
         advanceUntilIdle()
 
