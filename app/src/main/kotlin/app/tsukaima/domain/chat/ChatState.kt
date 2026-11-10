@@ -98,6 +98,11 @@ sealed interface ChatItem {
         val summary: String? = null,
         /** "2/3" when the delegation ran several tasks, else null. */
         val position: String? = null,
+        /** The child's `subagent_id`: what `subagent.tail` / `steer` / `interrupt` take; null when no event named it. */
+        val subagentId: String? = null,
+        /** The child's model and how many tools it has called so far, as its events report them. */
+        val model: String? = null,
+        val toolCount: Int? = null,
     ) : ChatItem
 
     /**

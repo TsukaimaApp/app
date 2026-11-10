@@ -143,6 +143,8 @@ class ChatViewModel(
 
     private val sides = ChatSides(session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state)
 
+    private val subagents = ChatSubagents(session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state)
+
     private val media = ChatMedia(backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), io, _state)
 
     /** The chat holds its history: a new chat at once, a stored one once `session.resume` has bound it. */
@@ -397,6 +399,17 @@ class ChatViewModel(
             }
         }
     }
+
+    /** "Watch" on a subagent row: its page with the child's live transcript, Stop and a message field; see [ChatSubagents]. */
+    fun openSubagent(id: String) = subagents.open(id)
+
+    fun closeSubagent() = subagents.close()
+
+    /** Stop on the subagent page: ends that child only. */
+    fun stopSubagent() = subagents.stop()
+
+    /** The subagent page's message: goes into that child; [done] gets whether it was taken. */
+    fun steerSubagent(text: String, done: (Boolean) -> Unit) = subagents.steer(text, done)
 
     /** "Edit" on user message [id]: its text goes into the composer and the next [send] replaces it; see [ChatEdits]. */
     fun editMessage(id: String) = edits.edit(id)

@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.job
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -400,6 +401,47 @@ class ChatViewModelTest {
         val users = vm.state.value.chat.items.filterIsInstance<ChatItem.UserMessage>()
         assertEquals(listOf("run the checks", "only lint"), users.map { it.text })
         assertTrue(users.none { it.steer })
+    }
+
+    @Test
+    fun theSubagentPageReadsTheTailAndActsOnThatChildOnly() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("subagent.tail", obj("""{"available":true,"text":"14:10:09 tool     | -> terminal(sleep 25)"}"""))
+            transport.on("subagent.steer", obj("""{"status":"queued"}"""))
+            transport.on("subagent.interrupt", obj("""{"found":true}"""))
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        b.events.emit(ev("subagent.start", 1, """{"subagent_id":"sa-1","goal":"count files","task_index":0,"task_count":1}"""))
+        runCurrent()
+        vm.openSubagent("sub-sa-1")
+        runCurrent()
+        assertEquals("14:10:09 tool     | -> terminal(sleep 25)", vm.state.value.subagent?.tail)
+        assertEquals("sa-1", b.transport.last("subagent.tail")["subagent_id"]!!.jsonPrimitive.content)
+
+        advanceTimeBy(ChatSubagents.POLL_MS + 1)
+        assertEquals("it is read again while the child runs", 2, b.transport.calls.count { it.first == "subagent.tail" })
+
+        var taken: Boolean? = null
+        vm.steerSubagent(" also count folders ") { taken = it }
+        vm.stopSubagent()
+        runCurrent()
+        assertEquals(true, taken)
+        assertEquals("also count folders", b.transport.last("subagent.steer")["text"]!!.jsonPrimitive.content)
+        assertEquals("sa-1", b.transport.last("subagent.interrupt")["subagent_id"]!!.jsonPrimitive.content)
+        assertTrue("the turn itself is not stopped", "session.interrupt" !in b.transport.methods())
+
+        // The child ends: one last read, then no more; the server's empty tail does not wipe what was read.
+        b.transport.on("subagent.tail", obj("""{"available":false,"text":""}"""))
+        b.events.emit(ev("subagent.complete", 2, """{"subagent_id":"sa-1","status":"interrupted","summary":"stopped"}"""))
+        advanceTimeBy(ChatSubagents.POLL_MS * 3)
+        val reads = b.transport.calls.count { it.first == "subagent.tail" }
+        advanceTimeBy(ChatSubagents.POLL_MS * 3)
+        assertEquals(reads, b.transport.calls.count { it.first == "subagent.tail" })
+        assertEquals("14:10:09 tool     | -> terminal(sleep 25)", vm.state.value.subagent?.tail)
+
+        vm.closeSubagent()
+        assertNull(vm.state.value.subagent)
     }
 
     @Test

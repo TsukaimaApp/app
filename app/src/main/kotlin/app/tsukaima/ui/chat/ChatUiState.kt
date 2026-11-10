@@ -29,6 +29,12 @@ val REASONING_LEVELS: List<Pair<String, String>> = listOf(
     "ultra" to "Ultra",
 )
 
+/**
+ * The subagent watch page: row [id] of the transcript, and the child's live transcript as last read ([tail]; null
+ * until the first read answered, [available] false when the server has none for it).
+ */
+data class SubagentWatch(val id: String, val tail: String? = null, val available: Boolean = false)
+
 data class ChatUiState(
     val chat: ChatState = ChatState(),
     val loading: Boolean = false,
@@ -60,6 +66,8 @@ data class ChatUiState(
     val messageMenu: String? = null,
     /** The message open in the selectable view (the menu's Select text), by item id. */
     val selecting: String? = null,
+    /** The subagent open in its watch page ([ChatSubagents]); null when none is. */
+    val subagent: SubagentWatch? = null,
     /** The row of the user message being edited: the next send replaces it and drops what followed. */
     val pendingEdit: Long? = null,
     /** The message being edited was sent with attachments, which the edit does not include. */

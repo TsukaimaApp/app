@@ -33,6 +33,14 @@ data class TranscriptMessage(
             ?: (reasoningContent as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
 }
 
+/** `subagent.tail`: the end of a child's live transcript; [truncated] when older lines were cut off. */
+@Serializable
+data class SubagentTail(
+    val available: Boolean = false,
+    val text: String = "",
+    val truncated: Boolean = false,
+)
+
 @Serializable
 data class SessionCreated(
     @SerialName("session_id") val sessionId: String,

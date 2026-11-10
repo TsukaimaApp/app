@@ -696,6 +696,9 @@ object ChatReducer {
             detail = text ?: existing?.detail,
             summary = p.string("summary") ?: existing?.summary,
             position = if (count > 1) "${index + 1}/$count" else null,
+            subagentId = p.string("subagent_id") ?: existing?.subagentId,
+            model = p.string("model")?.takeIf { it.isNotBlank() } ?: existing?.model,
+            toolCount = (p["tool_count"] as? JsonPrimitive)?.intOrNull ?: existing?.toolCount,
         )
         val items = if (existing != null) s.items.replace(existing) { row } else s.items + row
         return s.copy(items = items)

@@ -81,6 +81,7 @@ import app.tsukaima.ui.chat.components.Composer
 import app.tsukaima.ui.chat.components.MediaHost
 import app.tsukaima.ui.chat.components.SecretCard
 import app.tsukaima.ui.chat.components.SelectTextView
+import app.tsukaima.ui.chat.components.SubagentView
 import app.tsukaima.ui.chat.components.ConnectionCard
 import app.tsukaima.ui.chat.components.NoticeLine
 import app.tsukaima.ui.chat.components.SideNoteCard
@@ -162,6 +163,12 @@ class ChatActions(
     val onCancelEdit: () -> Unit = {},
     val onRegenerate: (String) -> Unit = {},
     val onSendAside: (SideKind) -> Unit = {},
+
+    /** A subagent row's "Watch" (the row id), and its page's Close, Stop and message. */
+    val onSubagentOpen: (String) -> Unit = {},
+    val onSubagentClose: () -> Unit = {},
+    val onSubagentStop: () -> Unit = {},
+    val onSubagentSteer: (text: String, done: (Boolean) -> Unit) -> Unit = { _, done -> done(false) },
 
     /** Overflow "Steer now": the typed text goes into the running turn. */
     val onSteer: () -> Unit = {},
@@ -288,6 +295,10 @@ fun ChatScreen(
             onRegenerate = vm::regenerate,
             onSendAside = vm::sendAside,
             onSteer = vm::steer,
+            onSubagentOpen = vm::openSubagent,
+            onSubagentClose = vm::closeSubagent,
+            onSubagentStop = vm::stopSubagent,
+            onSubagentSteer = vm::steerSubagent,
         ),
     )
 }
@@ -474,7 +485,7 @@ internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatAct
             )
         }
         is ChatItem.ToolCall -> ToolRow(item, media = media, onOpened = actions.onToolOpened)
-        is ChatItem.Subagent -> SubagentRow(item)
+        is ChatItem.Subagent -> SubagentRow(item, onWatch = { actions.onSubagentOpen(item.id) }.takeIf { item.subagentId != null })
         is ChatItem.Approval -> ApprovalCard(
             item = item,
             onApprove = { actions.onApprove(item.id) },
@@ -608,6 +619,11 @@ private fun ChatSheets(state: ChatUiState, actions: ChatActions, overflow: List<
     val messageMenu = messageItems(state, actions)
     MenuSheet(messageMenu.isNotEmpty(), { actions.onMessageMenu(null) }, messageMenu)
     state.chat.items.firstOrNull { it.id == state.selecting }?.let { SelectTextView(it, onClose = { actions.onSelectText(null) }) }
+    state.subagent?.let { watch ->
+        (state.chat.items.firstOrNull { it.id == watch.id } as? ChatItem.Subagent)?.let { item ->
+            SubagentView(item, watch, canAct = !state.offline, onClose = actions.onSubagentClose, onStop = actions.onSubagentStop, onSteer = actions.onSubagentSteer)
+        }
+    }
     when (state.dialog) {
         ChatDialog.Rename -> {
             var name by rememberSaveable { mutableStateOf(state.chat.title.orEmpty()) }

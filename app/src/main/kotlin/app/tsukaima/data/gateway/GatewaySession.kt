@@ -121,6 +121,30 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
             put("text", text)
         })["status"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
 
+    /**
+     * The last part (16 KB) of a running child's live transcript (`subagent.tail`): plain text, one line per step.
+     * `available: false` (with empty text) before the child wrote any and once it ended.
+     */
+    suspend fun subagentTail(sessionId: String, subagentId: String): SubagentTail =
+        decode("subagent.tail", rpc("subagent.tail", subagentParams(sessionId, subagentId)))
+
+    /** Stops one child without stopping the turn (`subagent.interrupt`); false when it is no longer running. */
+    suspend fun subagentInterrupt(sessionId: String, subagentId: String): Boolean =
+        (rpc("subagent.interrupt", subagentParams(sessionId, subagentId))["found"] as? JsonPrimitive)?.booleanOrNull ?: false
+
+    /**
+     * Sends [text] to a running child (`subagent.steer`); it reads it after its current tool call. Returns the
+     * `status`: `queued` = taken, `rejected` = the child is no longer running.
+     */
+    suspend fun subagentSteer(sessionId: String, subagentId: String, text: String): String? =
+        (rpc("subagent.steer", JsonObject(subagentParams(sessionId, subagentId) + ("text" to JsonPrimitive(text))))["status"] as? JsonPrimitive)
+            ?.takeIf { it !is JsonNull }?.content
+
+    private fun subagentParams(sessionId: String, subagentId: String) = buildJsonObject {
+        put("session_id", sessionId)
+        put("subagent_id", subagentId)
+    }
+
     /** Stops the running turn; returns the server's `status` (`interrupted` / `not_interrupted`), null if absent. */
     suspend fun interrupt(sessionId: String): String? =
         (rpc("session.interrupt", idParams(sessionId))["status"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content

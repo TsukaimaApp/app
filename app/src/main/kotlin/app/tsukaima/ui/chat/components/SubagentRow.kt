@@ -34,6 +34,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.tsukaima.domain.chat.ChatItem
 import app.tsukaima.domain.chat.SubagentStatus
+import app.tsukaima.ui.components.ButtonSize
+import app.tsukaima.ui.components.GhostButton
 import app.tsukaima.ui.components.IconName
 import app.tsukaima.ui.components.TsukaimaIcon
 import app.tsukaima.ui.components.pressWash
@@ -45,10 +47,11 @@ import app.tsukaima.ui.theme.tsukaima
 
 /**
  * A delegated child agent (`subagent.*`), styled like [ToolRow]: "Subagent · goal" with its status icon; tap shows
- * its latest progress line and, once finished, its summary.
+ * its latest progress line and, once finished, its summary. [onWatch] (a row whose child the server named) opens
+ * its page: the live transcript, Stop and a message field ([SubagentView]).
  */
 @Composable
-fun SubagentRow(item: ChatItem.Subagent, modifier: Modifier = Modifier) {
+fun SubagentRow(item: ChatItem.Subagent, modifier: Modifier = Modifier, onWatch: (() -> Unit)? = null) {
     val colors = MaterialTheme.tsukaima
     var open by rememberSaveable(item.id) { mutableStateOf(false) }
     val source = remember { MutableInteractionSource() }
@@ -108,16 +111,24 @@ fun SubagentRow(item: ChatItem.Subagent, modifier: Modifier = Modifier) {
                 Text(subagentState(item), style = TsukaimaType.caption, color = colors.ink3)
                 item.detail?.let { Text(it, style = TsukaimaType.caption, color = colors.ink2) }
                 item.summary?.let { Text(it, style = TsukaimaType.caption, color = colors.ink1) }
+                if (onWatch != null) {
+                    GhostButton(if (item.status == SubagentStatus.Running) "Watch" else "Details", onWatch, size = ButtonSize.Sm, icon = IconName.Visibility)
+                }
             }
         }
     }
 }
 
-private fun subagentState(item: ChatItem.Subagent): String = when (item.status) {
-    SubagentStatus.Running -> "Running…"
-    SubagentStatus.Done -> "Finished"
-    SubagentStatus.Failed -> "Did not finish"
-}
+/** "Running… · deepseek-v4 · 3 tools". */
+internal fun subagentState(item: ChatItem.Subagent): String = listOfNotNull(
+    when (item.status) {
+        SubagentStatus.Running -> "Running…"
+        SubagentStatus.Done -> "Finished"
+        SubagentStatus.Failed -> "Did not finish"
+    },
+    item.model,
+    item.toolCount?.takeIf { it > 0 }?.let { if (it == 1) "1 tool" else "$it tools" },
+).joinToString(" · ")
 
 @Composable
 private fun SubagentPreview(dark: Boolean) = PreviewPage(dark) {
