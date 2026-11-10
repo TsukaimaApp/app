@@ -251,4 +251,36 @@ class RecordedTurnTest {
         assertFalse(asked.items.any { it is ChatItem.AssistantMessage })
         assertNull((asked.items.last() as ChatItem.Approval).takeIf { it.answered })
     }
+
+    /**
+     * The recording is from Hermes 0.22.2, which sent the final answer as `reasoning.available`. The reply must not
+     * get its own text as reasoning.
+     */
+    @Test
+    fun theAnswerSentAsReasoningIsNotShownAsReasoning() {
+        assertTrue(frames.any { (it as Frame.Event).type == "reasoning.available" })
+        assertNull((states().last().items.last() as ChatItem.AssistantMessage).reasoning)
+    }
+
+    @Test
+    fun reasoningThatWasNotStreamedIsAttachedFolded() {
+        fun ev(type: String, payload: String, seq: Long) =
+            Frame.Event(type, live, seq, HermesJson.parseToJsonElement(payload).jsonObject)
+        val base = ChatReducer.reduce(start(), ev("message.start", "{}", 1)) { "…" }
+        // Before a tool call: the thinking stays above the tool row, as the history has it.
+        val thought = ChatReducer.reduce(base, ev("reasoning.available", """{"text":"Check the unit first."}""", 2)) { "…" }
+        val tool = ChatReducer.reduce(thought, ev("tool.start", """{"tool_id":"t1","name":"terminal"}""", 3)) { "…" }
+        assertEquals(listOf("local-1", "a-1", "t1"), ids(tool))
+        val bubble = tool.items[1] as ChatItem.AssistantMessage
+        assertEquals("Check the unit first.", bubble.reasoning)
+        assertFalse("folded, like a loaded one", ChatReducer.reasoningOpen(tool, bubble))
+        // After the reply's text: it joins that reply; a second one does not replace it; streamed reasoning wins.
+        val replied = ChatReducer.reduce(base, ev("message.delta", """{"text":"Done."}""", 2)) { "…" }
+        val after = ChatReducer.reduce(replied, ev("reasoning.available", """{"text":"It was the PATH."}""", 3)) { "…" }
+        assertEquals("It was the PATH.", (after.items.last() as ChatItem.AssistantMessage).reasoning)
+        assertEquals(after, ChatReducer.reduce(after, ev("reasoning.available", """{"text":"other"}""", 4)) { "…" }.copy(lastSeq = after.lastSeq))
+        // Hermes cuts the text at 500 characters: the cut is marked.
+        val long = ChatReducer.reduce(base, ev("reasoning.available", """{"text":"${"x".repeat(500)}"}""", 2)) { "…" }
+        assertTrue((long.items.last() as ChatItem.AssistantMessage).reasoning!!.endsWith("…"))
+    }
 }

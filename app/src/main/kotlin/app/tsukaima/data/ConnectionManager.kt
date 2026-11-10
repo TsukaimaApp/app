@@ -24,6 +24,7 @@ import app.tsukaima.data.api.StatusDto
 import app.tsukaima.data.gateway.ConnectionState
 import app.tsukaima.data.gateway.Frame
 import app.tsukaima.data.gateway.GatewayClient
+import app.tsukaima.data.gateway.KnownEvents
 import app.tsukaima.data.prefs.CredentialStore
 import app.tsukaima.data.prefs.Settings
 import app.tsukaima.domain.chat.AgentStatus
@@ -169,7 +170,13 @@ class ConnectionManager(
         if (forwarding.compareAndSet(false, true)) {
             // The single collector of the gateway's requests: only approvals, questions and masked prompts reach subscribers.
             scope.launch { gateway.serverRequests.collect { if (router.route(it)) _serverRequests.emit(it) } }
-            scope.launch { gateway.events.collect(router::onEvent) }
+            scope.launch {
+                gateway.events.collect {
+                    // Once per type and process: the next gap between Hermes and the app shows in a problem report.
+                    if (KnownEvents.isNew(it.type)) logger("gateway: event type '${it.type}' is not known to this app version", null)
+                    router.onEvent(it)
+                }
+            }
         }
         synchronized(lock) {
             val faster = interval < intervalMs

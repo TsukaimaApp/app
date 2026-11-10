@@ -211,6 +211,13 @@ internal class ChatReconnector(
             if (ev.type == RESUME_PROGRESS && state.value.loading) setChat { ChatReducer.reduce(it, ev, flair) }
             return
         }
+        if (ev.type == RECLAIMED) {
+            // The server dropped this live session (idle timeout, eviction): resume now, into a new one, instead of
+            // letting the next send fail on a session that is gone.
+            val gone = (ev.payload["session_id"] as? JsonPrimitive)?.contentOrNull
+            if (gone == live && job?.isActive != true && chat.status != AgentStatus.Offline) reconnect()
+            return
+        }
         if (ev.sessionId.isNotEmpty() && ev.sessionId != live) return
         // While a fallback serves the session the snapshot names the fallback model, not the session's.
         if (ev.type == "session.info" && !chat.fallback) {
@@ -240,6 +247,9 @@ internal class ChatReconnector(
 
     private companion object {
         const val RESUME_PROGRESS = "session.resume_progress"
+
+        /** `session.reclaimed {session_id, stored_session_id, reason}`: a broadcast; `session_id` is the live id that is gone. */
+        const val RECLAIMED = "session.reclaimed"
 
         /** `notification.show {text, level, kind, key}`: an out-of-band notice (model switch dropped, slow start). */
         const val NOTIFICATION = "notification.show"

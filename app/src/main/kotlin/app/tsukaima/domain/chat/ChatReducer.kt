@@ -34,6 +34,10 @@ object ChatReducer {
     /** `prompt.submit` status of a send held until the live turn ends. */
     private const val QUEUED = "queued"
 
+    /** Hermes cuts a `reasoning.available` text to this many characters. */
+    private const val REASONING_PREVIEW = 500
+    private const val ELLIPSIS = "…"
+
     /** Events that end a turn ([afterTurnEnd]). */
     private val TURN_ENDS = setOf("message.complete", "error", "turn.error")
 
@@ -397,6 +401,7 @@ object ChatReducer {
                     status = AgentStatus.Thinking(flair()),
                 )
             }
+            "reasoning.available" -> onReasoningAvailable(s, p, ev.seq)
             "message.interim" -> onInterim(s, p, ev.seq)
             "tool.generating" -> s.copy(status = AgentStatus.Tool(humanName(p.string("name") ?: "tool")))
             "tool.start" -> onToolStart(s, p)
@@ -862,6 +867,26 @@ object ChatReducer {
             items = abortTurn(counted.items) + ChatItem.AssistantMessage(id, text, streaming = false, reasoning = null),
             status = AgentStatus.Idle,
         )
+    }
+
+    /**
+     * `reasoning.available {text}`: the reasoning of a model response whose provider did not stream it (Hermes sends
+     * it once per response, cut to [REASONING_PREVIEW] characters, and not at all when `reasoning.delta` carried it).
+     * It becomes the reasoning of the reply it belongs to, folded like a loaded one, so it is there without a reload;
+     * the full text comes with the history. Ignored when the reply already has reasoning, when the turn already
+     * shows that reasoning, and when the text is the reply itself (Hermes before 0.23 repeated streamed reasoning
+     * and forwarded the answer here; the latter is in `recorded-tool-turn.jsonl`).
+     */
+    private fun onReasoningAvailable(s: ChatState, p: JsonObject, seq: Long?): ChatState {
+        val text = p.string("text")?.trim()?.takeIf { it.isNotEmpty() } ?: return s
+        val live = liveAssistant(s.items)
+        if (live != null && (!live.reasoning.isNullOrBlank() || live.text.trim().startsWith(text))) return s
+        // An older Hermes repeats reasoning it already streamed earlier in the turn.
+        val turn = s.items.subList(s.items.indexOfLast { it.isSent() } + 1, s.items.size)
+        if (turn.any { it is ChatItem.AssistantMessage && it.reasoning?.trim()?.startsWith(text) == true }) return s
+        val (opened, bubble) = ensureStreamingAssistant(s, seq)
+        val shown = if (text.length >= REASONING_PREVIEW) text + ELLIPSIS else text
+        return opened.copy(items = opened.items.replace(bubble) { bubble.copy(reasoning = shown) })
     }
 
     /**

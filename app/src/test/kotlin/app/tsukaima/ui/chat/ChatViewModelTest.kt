@@ -574,6 +574,23 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun aReclaimedLiveSessionIsResumedAtOnce() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("session.resume", obj(resumeJson)) }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        val resumes = b.transport.calls.count { it.first == "session.resume" }
+        // Another session's reclaim is not ours.
+        b.events.emit(Frame.Event("session.reclaimed", "", null, obj("""{"session_id":"someone-else","stored_session_id":"x","reason":"lru_evict"}""")))
+        advanceUntilIdle()
+        assertEquals(resumes, b.transport.calls.count { it.first == "session.resume" })
+
+        b.events.emit(Frame.Event("session.reclaimed", "", null, obj("""{"session_id":"$live","stored_session_id":"$stored","reason":"idle_timeout"}""")))
+        advanceUntilIdle()
+        assertEquals(resumes + 1, b.transport.calls.count { it.first == "session.resume" })
+        assertEquals(stored, b.transport.last("session.resume")["session_id"]!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun queuedBubbleBecomesSentWhenItsTurnStarts() = runTest(dispatcher) {
         val b = backend().apply {
             transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":1}"""), obj("""{"status":"queued"}"""))
