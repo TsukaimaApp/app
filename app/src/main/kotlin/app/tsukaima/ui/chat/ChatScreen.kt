@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -82,6 +83,8 @@ import app.tsukaima.ui.chat.components.MediaHost
 import app.tsukaima.ui.chat.components.SecretCard
 import app.tsukaima.ui.chat.components.CommandNoteCard
 import app.tsukaima.ui.chat.components.CommandSuggestions
+import app.tsukaima.ui.chat.components.ReasoningPanel
+import app.tsukaima.ui.chat.components.ReasoningStatusLine
 import app.tsukaima.ui.chat.components.SelectTextView
 import app.tsukaima.ui.chat.components.SubagentView
 import app.tsukaima.ui.chat.components.ConnectionCard
@@ -396,7 +399,28 @@ private fun ChatColumn(
             onMore = { if (overflow.isNotEmpty()) actions.onMenu(ChatMenu.Overflow) },
             moreEnabled = overflow.isNotEmpty(),
         )
-        StatusLine(state.status, onClick = onStatus, meter = state.chat.usage?.meter)
+        // The user's turn: the status line is the reasoning picker. Any other state is the plain line, and closes it.
+        var pickingReasoning by rememberSaveable { mutableStateOf(false) }
+        if (state.reasoningPickable) {
+            ReasoningStatusLine(
+                effort = state.chat.reasoningEffort,
+                open = pickingReasoning,
+                onToggle = { pickingReasoning = !pickingReasoning },
+                onClick = onStatus,
+                meter = state.chat.usage?.shortMeter,
+            )
+        } else {
+            StatusLine(state.status, onClick = onStatus, meter = state.chat.usage?.meter)
+        }
+        ReasoningPanel(
+            open = pickingReasoning && state.reasoningPickable,
+            effort = state.chat.reasoningEffort,
+            onPick = {
+                pickingReasoning = false
+                actions.onReasoning(it)
+            },
+        )
+        if (!state.reasoningPickable && pickingReasoning) SideEffect { pickingReasoning = false }
         Box(
             Modifier
                 .weight(1f)

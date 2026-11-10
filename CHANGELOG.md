@@ -3,7 +3,16 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
-## 0.11.1 — 2026-11-10 (versionCode 29)
+## 0.12.0 — 2026-11-10 (versionCode 30)
+
+Not checked on a phone.
+
+### Added
+- Reasoning picker in the status line. While it is your turn, the line reads "Hermes is listening," followed by the
+  reasoning level as a phrase ("thinking hard"). Tap the phrase to open the eight levels, Off to Ultra, under the
+  line, and tap one to set it. A new phrase appears with a burst of sparks; Max and Ultra open with a rainbow and
+  keep a gold shimmer. With the phone's "remove animations" setting on, nothing moves. The Reasoning entry in the
+  top bar's menu is still there. Beside the picker the context meter shows the percentage only.
 
 ### Changed
 - During the agent's turn the composer shows **Stop** and **More** in place of Stop and "Send when done". More

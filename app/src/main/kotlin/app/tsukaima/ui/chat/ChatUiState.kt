@@ -113,6 +113,13 @@ data class ChatUiState(
             else -> "Editing — tap to cancel"
         }
 
+    /**
+     * It is the user's turn in a chat whose effort can be set: the status line shows "Hermes is listening," with
+     * the reasoning picker. Not while anything else is on the line (a turn, compaction, offline, gateway state).
+     */
+    val reasoningPickable: Boolean
+        get() = status == AgentStatus.Idle && writable && chat.liveSessionId != null
+
     /** The slash commands to suggest above the composer for what is typed (none while a message is being edited). */
     val commandMatches: List<SlashCommand>
         get() = if (pendingEdit != null || !writable) emptyList() else commands?.matches(input).orEmpty()

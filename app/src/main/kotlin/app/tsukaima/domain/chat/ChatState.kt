@@ -302,6 +302,11 @@ data class SessionUsage(
                 else -> null
             }
         }
+
+    /** "9% ctx" where the line has little room (beside the reasoning picker); [meter] when no percentage is known. */
+    val shortMeter: String?
+        get() = (contextPercent ?: contextUsed?.let { u -> contextMax?.takeIf { it > 0 }?.let { m -> (u * 100 / m).toInt() } })
+            ?.let { "$it% ctx" } ?: meter
 }
 
 /** 950, 12.3k, 1.2M, 1M (no trailing .0). */
