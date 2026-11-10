@@ -110,6 +110,17 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
             ?: throw IOException("$method: malformed result: no task_id")
     }
 
+    /**
+     * Sends [text] into the running turn (`session.steer`): the agent reads it after its current tool call, as a
+     * message of the user's, without a new turn. Returns the server's `status`: `queued` = taken, `rejected` = no turn
+     * is running (send it as a normal message). Error 4010 when the agent cannot be steered.
+     */
+    suspend fun steer(sessionId: String, text: String): String? =
+        (rpc("session.steer", buildJsonObject {
+            put("session_id", sessionId)
+            put("text", text)
+        })["status"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
+
     /** Stops the running turn; returns the server's `status` (`interrupted` / `not_interrupted`), null if absent. */
     suspend fun interrupt(sessionId: String): String? =
         (rpc("session.interrupt", idParams(sessionId))["status"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content

@@ -162,6 +162,9 @@ class ChatActions(
     val onCancelEdit: () -> Unit = {},
     val onRegenerate: (String) -> Unit = {},
     val onSendAside: (SideKind) -> Unit = {},
+
+    /** Overflow "Steer now": the typed text goes into the running turn. */
+    val onSteer: () -> Unit = {},
 )
 
 /**
@@ -284,6 +287,7 @@ fun ChatScreen(
             onCancelEdit = vm::cancelEdit,
             onRegenerate = vm::regenerate,
             onSendAside = vm::sendAside,
+            onSteer = vm::steer,
         ),
     )
 }
@@ -449,6 +453,7 @@ internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatAct
             attachments = item.attachments,
             failed = item.failed,
             queued = item.queued,
+            steer = item.steer,
             onRetry = { actions.onRetrySend(item.id) },
             onDismiss = { actions.onDismissFailed(item.id) },
             onLongPress = { actions.onMessageMenu(item.id) },
@@ -517,7 +522,7 @@ internal fun transcriptTailKey(items: List<ChatItem>): Pair<String, Int>? =
     }
 
 /**
- * The top bar's overflow entries: Stop while a turn runs, the side entries while text is typed ([ChatSides]), then the
+ * The top bar's overflow entries: Stop while a turn runs, Steer now and the side entries while text is typed ([ChatSides]), then the
  * session actions once the session is stored.
  * A brand-new chat with no stored id yet offers only what works without one (Stop, and Copy session ID — the live
  * id — once a live session exists); empty disables the button rather than opening a sheet that does nothing.
@@ -532,7 +537,8 @@ internal fun overflowItems(state: ChatUiState, actions: ChatActions): List<MenuI
     // Compaction is idle-gated on the server: offered between turns only.
     val compact = MenuItem("Compact context", IconName.Compress, onClick = actions.onCompact)
         .takeIf { live && !running && !state.compacting && state.chat.items.isNotEmpty() }
-    val sides = if (ChatSides.available(state)) {
+    val steer = MenuItem("Steer now", IconName.Send, onClick = actions.onSteer).takeIf { ChatSides.steerable(state) }
+    val sides = listOfNotNull(steer) + if (ChatSides.available(state)) {
         listOf(
             MenuItem("Send as side question", IconName.Forum) { actions.onSendAside(SideKind.Question) },
             MenuItem("Send as background task", IconName.Schedule) { actions.onSendAside(SideKind.Background) },
@@ -578,7 +584,8 @@ internal fun messageItems(state: ChatUiState, actions: ChatActions): List<MenuIt
     val item = state.chat.items.firstOrNull { it.id == state.messageMenu } ?: return emptyList()
     val reasoning = (item as? ChatItem.AssistantMessage)?.reasoning?.takeIf { it.isNotEmpty() }
     val rewind = ChatEdits.rewindable(state)
-    val edit = (item as? ChatItem.UserMessage)?.takeIf { rewind && it.rowId != null && !it.failed }
+    // A steer sits inside a turn: rewinding to it would cut that turn in half.
+    val edit = (item as? ChatItem.UserMessage)?.takeIf { rewind && it.rowId != null && !it.failed && !it.steer }
     val regenerate = (item as? ChatItem.AssistantMessage)?.takeIf { rewind && ChatEdits.regenerateSource(state.chat.items, it.id) != null }
     return listOfNotNull(
         MenuItem("Copy text", IconName.ContentCopy) { actions.onCopyMessage(item.id, false) },

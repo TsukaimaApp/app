@@ -159,6 +159,14 @@ class GatewaySessionTest {
     }
 
     @Test
+    fun steerSendsTheTextAndReturnsTheStatus() = runBlocking {
+        val t = FakeTransport(obj("""{"status":"queued","text":"only lint"}"""))
+        assertEquals("queued", GatewaySession(t).steer("s1", "only lint"))
+        assertEquals("session.steer", t.calls.single().first)
+        assertEquals(setOf("session_id", "text"), t.calls.single().second.keys)
+    }
+
+    @Test
     fun submitCarriesSurfaceAndVoiceContext() = runBlocking {
         val t = FakeTransport(obj("""{"status":"streaming"}"""))
         GatewaySession(t).submit("s1", "hello", surface = "voice-live", voiceContext = "User: hi")

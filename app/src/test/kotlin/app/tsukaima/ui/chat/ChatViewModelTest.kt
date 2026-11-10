@@ -352,6 +352,57 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun steerGoesIntoTheRunningTurnWithoutANewTurn() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":1}"""))
+            transport.on("session.steer", obj("""{"status":"queued","text":"only lint"}"""))
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("run the checks")
+        vm.send()
+        b.events.emit(ev("message.start", 1))
+        b.events.emit(ev("tool.start", 2, """{"tool_id":"t1","name":"terminal"}"""))
+        advanceUntilIdle()
+        assertTrue(overflowItems(vm.state.value, ChatActions()).none { it.label == "Steer now" })
+
+        vm.setInput("only lint")
+        assertTrue(overflowItems(vm.state.value, ChatActions()).any { it.label == "Steer now" })
+        vm.steer()
+        advanceUntilIdle()
+
+        assertEquals("only lint", b.transport.last("session.steer")["text"]!!.jsonPrimitive.content)
+        assertEquals("no second turn was submitted", 1, b.transport.calls.count { it.first == "prompt.submit" })
+        val s = vm.state.value
+        assertEquals("", s.input)
+        val bubble = s.chat.items.last() as ChatItem.UserMessage
+        assertTrue(bubble.steer)
+        assertEquals("the turn keeps running", AgentStatus.Tool("shell command"), s.chat.status)
+    }
+
+    @Test
+    fun aSteerThatFindsNoTurnIsSentAsAMessage() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":1}"""), obj("""{"status":"streaming","user_row_id":5}"""))
+            transport.on("session.steer", obj("""{"status":"rejected","text":"only lint"}"""))
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("run the checks")
+        vm.send()
+        b.events.emit(ev("message.start", 1))
+        advanceUntilIdle()
+        vm.setInput("only lint")
+        vm.steer()
+        advanceUntilIdle()
+
+        assertEquals("only lint", b.transport.last("prompt.submit")["text"]!!.jsonPrimitive.content)
+        val users = vm.state.value.chat.items.filterIsInstance<ChatItem.UserMessage>()
+        assertEquals(listOf("run the checks", "only lint"), users.map { it.text })
+        assertTrue(users.none { it.steer })
+    }
+
+    @Test
     fun queuedBubbleBecomesSentWhenItsTurnStarts() = runTest(dispatcher) {
         val b = backend().apply {
             transport.on("prompt.submit", obj("""{"status":"streaming","user_row_id":1}"""), obj("""{"status":"queued"}"""))

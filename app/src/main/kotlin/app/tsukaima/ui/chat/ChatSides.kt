@@ -8,6 +8,7 @@ import kotlinx.coroutines.launch
 import app.tsukaima.data.gateway.GatewaySession
 import app.tsukaima.domain.chat.ChatReducer
 import app.tsukaima.domain.chat.SideKind
+import app.tsukaima.domain.chat.turnLive
 
 /**
  * Side questions (`prompt.btw`) and background tasks (`prompt.background`) for [ChatViewModel]. The composer's text
@@ -55,5 +56,11 @@ internal class ChatSides(
          */
         fun available(s: ChatUiState): Boolean =
             s.input.isNotBlank() && s.chat.liveSessionId != null && s.writable && !s.compacting && s.pendingEdit == null
+
+        /**
+         * "Steer now" is offered with text typed while a turn is live and the server is not compressing its context
+         * (it would hold the text as a queued message instead).
+         */
+        fun steerable(s: ChatUiState): Boolean = available(s) && s.chat.status.turnLive && !s.chat.compacting
     }
 }

@@ -28,6 +28,9 @@ object ChatReducer {
     /** Terminal `subagent.complete` statuses that mean the child did not finish its goal. */
     private val SUBAGENT_FAILED = setOf("failed", "error", "timeout", "interrupted")
 
+    /** History `display_kind` of a user row sent into a running turn. */
+    private const val STEER_KIND = "steer"
+
     /** `prompt.submit` status of a send held until the live turn ends. */
     private const val QUEUED = "queued"
 
@@ -78,7 +81,7 @@ object ChatReducer {
             // marked so it can never equal a row id.
             val id = "h-${m.rowId ?: "i$index"}"
             when (m.role) {
-                "user" -> ChatItem.UserMessage(id, m.text, rowId = m.rowId)
+                "user" -> ChatItem.UserMessage(id, m.text, rowId = m.rowId, steer = m.displayKind == STEER_KIND)
                 // A row with reasoning but no text is the thinking before a tool call: kept, in its place above the tool.
                 "assistant" ->
                     if (m.text.isBlank() && m.thought == null) null
@@ -208,6 +211,18 @@ object ChatReducer {
         // A queued send waits behind the live turn: its status stays that turn's.
         status = if (queued) state.status else AgentStatus.Thinking(flair()),
     )
+
+    /**
+     * A correction sent into the running turn (`session.steer`): its bubble goes where the turn is now, above the
+     * queued echoes, and waits for the agent to read it ([ChatItem.UserMessage.steerWaiting]). The status is the
+     * turn's own.
+     */
+    fun onSteered(state: ChatState, text: String, localId: String): ChatState =
+        pinQueued(state.copy(items = state.items + ChatItem.UserMessage(localId, text, steer = true, steerWaiting = true)))
+
+    /** The steer of bubble [localId] did not reach the turn (refused, or the call failed): the bubble goes. */
+    fun onSteerDropped(state: ChatState, localId: String): ChatState =
+        state.copy(items = state.items.filterNot { it.id == localId && it is ChatItem.UserMessage && it.steer })
 
     /**
      * `prompt.submit` accepted user message [localId]: stores its persisted [userRowId] (null = not proven yet, kept
@@ -427,15 +442,22 @@ object ChatReducer {
         val stopped = s.stopRequested
         val interrupted = type == "message.complete" && p.string("status") == "interrupted"
         // The live turn starts after the last user message that is not a queued echo (those wait at the bottom).
-        val turnStart = s.items.indexOfLast { it is ChatItem.UserMessage && !it.queued } + 1
-        val items = s.items.mapIndexed { i, it ->
+        val turnStart = s.items.indexOfLast { it is ChatItem.UserMessage && !it.queued && !it.steer } + 1
+        val settled = s.items.mapIndexed { i, it ->
             when {
                 it is ChatItem.ConnectionRequest && !it.settled -> it.copy(settled = true)
                 stopped && it is ChatItem.UserMessage && it.queued -> it.copy(queued = false, failed = true)
+                // Stop drops a steer the agent has not read (Hermes `clear_interrupt`, hard cancel).
+                stopped && it is ChatItem.UserMessage && it.steerWaiting -> it.copy(steer = false, steerWaiting = false, failed = true)
                 interrupted && it is ChatItem.ToolCall && it.status == ToolStatus.Running && i >= turnStart -> it.copy(status = ToolStatus.Interrupted)
                 else -> it
             }
         }
+        // A steer the turn ended without reading: the server puts it at the end of its queue and runs it as a turn
+        // of its own (`result.pending_steer`), so its bubble becomes a queued message, after the ones already waiting.
+        val unread = settled.filter { it is ChatItem.UserMessage && it.steerWaiting }
+        val items = if (unread.isEmpty()) settled
+        else settled - unread.toSet() + unread.map { (it as ChatItem.UserMessage).copy(steer = false, steerWaiting = false, queued = true) }
         return s.copy(items = items, stopRequested = false, compacting = false, queuedTurnNext = items.any { it is ChatItem.UserMessage && it.queued })
     }
 
@@ -526,8 +548,8 @@ object ChatReducer {
         }
     }
 
-    /** A user message that went to the server: neither waiting in the queue nor failed. */
-    private fun ChatItem.isSent(): Boolean = this is ChatItem.UserMessage && !queued && !failed
+    /** A user message that started a turn on the server: neither waiting in the queue nor failed, and not a steer. */
+    private fun ChatItem.isSent(): Boolean = this is ChatItem.UserMessage && !queued && !failed && !steer
 
     /**
      * The answer to the app's Stop ([stopped]: the server took it) for live session [liveId]. The mark stays only while
@@ -820,6 +842,8 @@ object ChatReducer {
      * `user_row_id` goes to that message when it has none yet; `final_assistant_row_id` to the last assistant message
      * between it and the next sent user message (the reply of this turn by its own position, never an older one when
      * the turn ended without text). They let a live turn be edited or regenerated without reloading the history.
+     * `user_row_ids` (the turn's row, then one per steer it read) gives the steer bubbles of the turn their rows, so a
+     * rebuild from history keeps them.
      */
     private fun withPersistedTurn(s: ChatState, turn: JsonObject?): ChatState {
         if (turn == null) return s
@@ -834,6 +858,12 @@ object ChatReducer {
         val reply = replyIndex?.let { items[it] as ChatItem.AssistantMessage }
         val replyRow = long("final_assistant_row_id")
         if (reply != null && replyRow != null && !reply.streaming) items[replyIndex] = reply.copy(rowId = replyRow)
+        // `user_row_ids`: the turn's user rows in order, its own first and then each steer it read.
+        val steerRows = (turn["user_row_ids"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.longOrNull }.drop(1)
+        val steers = (userIndex + 1 until nextUser).filter { (items[it] as? ChatItem.UserMessage)?.steer == true }
+        if (steers.size == steerRows.size) {
+            steers.zip(steerRows).forEach { (i, row) -> items[i] = (items[i] as ChatItem.UserMessage).let { it.copy(rowId = it.rowId ?: row) } }
+        }
         return if (items == s.items) s else s.copy(items = items)
     }
 
@@ -940,7 +970,9 @@ object ChatReducer {
             outputPending = false,
         )
         val items = if (existing != null) s.items.replace(existing) { done } else withoutEmptyBubble(s.items) + done
-        val completed = s.copy(items = items, status = AgentStatus.Thinking(flair()))
+        // The agent reads a waiting steer after its tool calls, before it asks the model again.
+        val read = items.map { if (it is ChatItem.UserMessage && it.steerWaiting) it.copy(steerWaiting = false) else it }
+        val completed = s.copy(items = read, status = AgentStatus.Thinking(flair()))
         // The todo tool's completion mirrors the list's snapshot at the payload's top level (as `todo.updated` does).
         return if (p["todos"] is JsonArray) applyTodos(completed, p) else completed
     }

@@ -21,6 +21,10 @@ sealed interface ChatItem {
      * image placeholder); null = [text]. Regenerate replays it. [imagesSent]: the send queued images, which the turn
      * consumed on the server, so it cannot be replayed as it was. [queued]: sent while a turn ran, the server holds it
      * until that turn ends (`prompt.submit {queued: true}`); it shows "Queued" and stays below the live turn.
+     * [steer]: a correction sent into the running turn (`session.steer`; history `display_kind: "steer"`). The agent
+     * reads it after its current tool call. It sits inside the turn, where it was sent, and is never a turn's first
+     * message. [steerWaiting]: no tool has finished since it was sent, so the agent has not read it yet; a turn that
+     * ends first leaves it to the server's queue, which runs it as the next turn.
      */
     data class UserMessage(
         override val id: String,
@@ -31,6 +35,8 @@ sealed interface ChatItem {
         val promptText: String? = null,
         val imagesSent: Boolean = false,
         val queued: Boolean = false,
+        val steer: Boolean = false,
+        val steerWaiting: Boolean = false,
     ) : ChatItem
 
     data class AssistantMessage(

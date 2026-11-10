@@ -1,0 +1,68 @@
+{
+ "live": "36bb191f",
+ "user_row_id": 273,
+ "steer_after_seq": 9,
+ "steer": {
+  "status": "queued",
+  "text": "Also end your final reply with the word banana."
+ },
+ "steer_idle": {
+  "status": "rejected",
+  "text": "hello"
+ },
+ "history": [
+  {
+   "role": "user",
+   "text": "Run the shell command `sleep 6; echo first` with the terminal tool, then run `echo second`, then reply with one short sentence.",
+   "timestamp": 1794315203.4323907,
+   "row_id": 273
+  },
+  {
+   "role": "assistant",
+   "text": "",
+   "timestamp": 1794315209.48446,
+   "row_id": 274,
+   "reasoning_content": " "
+  },
+  {
+   "role": "tool",
+   "name": "terminal",
+   "context": "sleep 6 + 1 command",
+   "tool_call_id": "call_06bf698352dd49eda75c7bd6",
+   "timestamp": 1794315215.8754299,
+   "args": {
+    "command": "sleep 6; echo first"
+   }
+  },
+  {
+   "role": "user",
+   "text": "Also end your final reply with the word banana.",
+   "timestamp": 1794315216.8462055,
+   "row_id": 276,
+   "display_kind": "steer"
+  },
+  {
+   "role": "assistant",
+   "text": "",
+   "timestamp": 1794315216.8440738,
+   "row_id": 277,
+   "reasoning_content": " "
+  },
+  {
+   "role": "tool",
+   "name": "terminal",
+   "context": "echo second",
+   "tool_call_id": "call_8c86a7ac5cff4207a90e4d09",
+   "timestamp": 1794315216.9297712,
+   "args": {
+    "command": "echo second"
+   }
+  },
+  {
+   "role": "assistant",
+   "text": "Both commands ran: the six-second sleep printed \"first\", then \"second\" printed right after — banana.",
+   "timestamp": 1794315217.845803,
+   "row_id": 279
+  }
+ ]
+}

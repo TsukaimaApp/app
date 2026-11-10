@@ -24,6 +24,8 @@ data class TranscriptMessage(
      * `reasoning_content` the row has; some rows have only this one. Read through [thought].
      */
     @SerialName("reasoning_content") val reasoningContent: JsonElement? = null,
+    /** `steer` marks a user row that was sent into a running turn (`session.steer`). */
+    @SerialName("display_kind") val displayKind: String? = null,
 ) {
     /** The row's reasoning text: [reasoning], else a text [reasoningContent]; null when neither has any. */
     val thought: String?

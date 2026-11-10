@@ -166,13 +166,14 @@ internal class ChatEdits(
         }
 
         /**
-         * The user message reply [assistantId] answers: the nearest user message above it, if it has a persisted row
-         * and did not queue images (else null: rewinding to an older row would drop that message too).
+         * The user message reply [assistantId] answers: the nearest user message above it that started a turn (a steer
+         * did not), if it has a persisted row and did not queue images (else null: rewinding to an older row would
+         * drop that message too).
          */
         fun regenerateSource(items: List<ChatItem>, assistantId: String): ChatItem.UserMessage? {
             val index = items.indexOfFirst { it.id == assistantId && it is ChatItem.AssistantMessage }
             if (index < 0) return null
-            val user = items.subList(0, index).lastOrNull { it is ChatItem.UserMessage } as? ChatItem.UserMessage
+            val user = items.subList(0, index).lastOrNull { it is ChatItem.UserMessage && !it.steer } as? ChatItem.UserMessage
             return user?.takeIf { it.rowId != null && !it.failed && !it.imagesSent }
         }
 

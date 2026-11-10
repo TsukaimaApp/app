@@ -365,6 +365,39 @@ class ChatViewModel(
     /** Overflow "Send as side question" / "Send as background task": the composer's text, without attachments; see [ChatSides]. */
     fun sendAside(kind: SideKind) = sides.send(kind)
 
+    /**
+     * Overflow "Steer now": the composer's text goes into the running turn (`session.steer`), which reads it after
+     * its current tool call; nothing is stopped and no turn is queued. Attachments are not sent with it. When no turn
+     * runs any more (`rejected`) the text is sent as a normal message. A failed call puts the text back.
+     */
+    fun steer() {
+        val s = _state.value
+        val text = s.input.trim()
+        if (!ChatSides.steerable(s)) return
+        val live = chat.liveSessionId ?: return
+        if (s.attachments.any { it.status == AttachmentStatus.Ready }) backend.toast("Attachments aren’t sent with a steer")
+        val localId = "u-l${++userCounter}"
+        _state.update { it.copy(input = "", menu = null, chat = ChatReducer.onSteered(it.chat, text, localId)) }
+        // Stop drops an unread steer: its bubble then turns Not sent, and Retry needs its text.
+        queuedSends[localId] = FailedSend(text, emptyList())
+        launch {
+            try {
+                if (session.steer(live, text) == STEER_REJECTED) {
+                    queuedSends.remove(localId)
+                    setChat { ChatReducer.onSteerDropped(it, localId) }
+                    if (chat.liveSessionId == live) startTurn(live, text, emptyList(), fromComposer = false)
+                }
+            } catch (c: CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                queuedSends.remove(localId)
+                setChat { ChatReducer.onSteerDropped(it, localId) }
+                _state.update { it.copy(input = it.input.ifEmpty { text }) }
+                backend.toast("Couldn’t steer: ${e.message ?: "gateway error"}")
+            }
+        }
+    }
+
     /** "Edit" on user message [id]: its text goes into the composer and the next [send] replaces it; see [ChatEdits]. */
     fun editMessage(id: String) = edits.edit(id)
 
@@ -552,7 +585,7 @@ class ChatViewModel(
     /** Forgets queued sends that ran (their bubble is neither waiting nor failed) or left the transcript. */
     private fun pruneQueuedSends() {
         val items = chat.items.associateBy { it.id }
-        queuedSends.keys.retainAll { id -> (items[id] as? ChatItem.UserMessage)?.let { it.queued || it.failed } == true }
+        queuedSends.keys.retainAll { id -> (items[id] as? ChatItem.UserMessage)?.let { it.queued || it.failed || it.steerWaiting } == true }
     }
 
     /** A failed echo is never [ChatItem.UserMessage.queued]; a retry is queued again while a turn runs. */
@@ -1133,6 +1166,9 @@ class ChatViewModel(
 
         /** `session.interrupt` status when no turn was running. */
         const val NOT_INTERRUPTED = "not_interrupted"
+
+        /** `session.steer` status when no turn is running. */
+        const val STEER_REJECTED = "rejected"
 
         /** How long a voice language pick waits for the saved setting to show before restarting the recogniser. */
         const val SETTINGS_SETTLE_MS = 2_000L
