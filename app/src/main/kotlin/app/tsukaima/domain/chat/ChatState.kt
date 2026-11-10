@@ -65,6 +65,12 @@ sealed interface ChatItem {
          * retrying" or "Did not complete"); null for every other row. Set from the history only.
          */
         val orphanNote: String? = null,
+        /**
+         * A history row whose result the history did not carry (Hermes forwards it for three tools only): [output] is
+         * not known yet, which is not "no output". The stored messages fill it when the row is first opened
+         * ([ChatReducer.onToolOutputs]).
+         */
+        val outputPending: Boolean = false,
     ) : ChatItem
 
     /**

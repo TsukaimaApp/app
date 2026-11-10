@@ -18,7 +18,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -61,7 +63,8 @@ import kotlinx.serialization.json.JsonPrimitive
 /**
  * Slim expandable row for a tool call: quiet by default, output on tap. [margin] is its outer spacing (none in the
  * assist sheet). A `vision_analyze` row shows the image it looked at under the header ([ToolImage]) when [media] is
- * given.
+ * given. The open row's arguments and output are selectable (a long press starts a selection; the header keeps the
+ * tap). [onOpened] runs when a row is open whose output the history did not carry ([ChatItem.ToolCall.outputPending]).
  */
 @Composable
 fun ToolRow(
@@ -69,9 +72,12 @@ fun ToolRow(
     modifier: Modifier = Modifier,
     margin: PaddingValues = PaddingValues(horizontal = Dimens.gutter, vertical = 6.dp),
     media: MediaHost? = null,
+    onOpened: () -> Unit = {},
 ) {
     val colors = MaterialTheme.tsukaima
     var open by rememberSaveable(item.id) { mutableStateOf(false) }
+    // An open history row whose output is not loaded yet asks for it (also after a rebuild, or a failed load reopened).
+    if (open && item.outputPending) LaunchedEffect(item.id) { onOpened() }
     val source = remember { MutableInteractionSource() }
     val rotation by animateFloatAsState(if (open) 180f else 0f, tween(Motion.base, easing = Motion.easing), label = "toolChevron")
     val thinking = item.name.contains("think", ignoreCase = true) || item.name.contains("reason", ignoreCase = true)
@@ -131,24 +137,28 @@ fun ToolRow(
         if (media != null) item.imageUrl?.let { ToolImage(item, it, media) }
         if (open) {
             // Without a server-written summary the arguments are the only account of what the tool was asked to do.
-            if (item.context.isNullOrBlank()) argsText(item.args)?.let { args ->
-                Text(
-                    text = args,
-                    style = TsukaimaType.caption.copy(fontFamily = TsukaimaType.mono.fontFamily),
-                    color = colors.ink3,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
-                )
+            SelectionContainer {
+                Column {
+                    if (item.context.isNullOrBlank()) argsText(item.args)?.let { args ->
+                        Text(
+                            text = args,
+                            style = TsukaimaType.caption.copy(fontFamily = TsukaimaType.mono.fontFamily),
+                            color = colors.ink3,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
+                        )
+                    }
+                    Text(
+                        text = outputText(item),
+                        style = if (thinking) TsukaimaType.caption else TsukaimaType.caption.copy(fontFamily = TsukaimaType.mono.fontFamily),
+                        color = colors.ink2,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                    )
+                }
             }
-            Text(
-                text = item.output?.takeIf { it.isNotBlank() } ?: "No output",
-                style = if (thinking) TsukaimaType.caption else TsukaimaType.caption.copy(fontFamily = TsukaimaType.mono.fontFamily),
-                color = colors.ink2,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
-            )
         }
         // Always visible, like the risk note: a stopped tool's effect is something to check before retrying.
         item.orphanNote?.let { WarnLine(it) }
@@ -262,6 +272,10 @@ internal fun argsText(args: JsonObject?): String? =
     args?.takeIf { it.isNotEmpty() }?.entries?.joinToString("\n") { (key, value) ->
         "$key: ${(value as? JsonPrimitive)?.takeIf { it.isString }?.content ?: value.toString()}"
     }
+
+/** What an open row shows as its output: the text, "Loading output…" while a history row waits for it, else "No output". */
+internal fun outputText(item: ChatItem.ToolCall): String =
+    item.output?.takeIf { it.isNotBlank() } ?: if (item.outputPending) "Loading output…" else "No output"
 
 /** "Output flagged: high risk · prompt injection · redacted". */
 internal fun riskText(risk: ToolRisk): String =

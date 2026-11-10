@@ -478,6 +478,26 @@ class HermesApiTest {
     }
 
     @Test
+    fun toolResultsReadsTheStoredToolRows() = runBlocking {
+        json("""{"session_id":"s1","messages":[
+            {"id":1,"role":"user","content":"hi"},
+            {"id":2,"role":"assistant","content":"","tool_calls":[{"id":"c1"}]},
+            {"id":3,"role":"tool","content":"{\"output\": \"Linux\"}","tool_call_id":"c1","tool_name":"terminal"},
+            {"id":4,"role":"tool","content":null,"tool_call_id":"c2"},
+            {"id":5,"role":"tool","content":"no id"}
+        ],"pagination":{"limit":500,"offset":0,"order":"oldest","returned":5}}""")
+        val results = api().toolResults("s1")
+        assertEquals(listOf("c1", "c2"), results.map { it.first })
+        assertEquals("Linux", app.tsukaima.domain.chat.ToolOutput.text(results[0].second))
+        val url = server.takeRequest(1, TimeUnit.SECONDS)!!.url
+        assertEquals("/api/sessions/s1/messages", url.encodedPath)
+        assertEquals("oldest", url.queryParameter("order"))
+        assertEquals("500", url.queryParameter("limit"))
+        assertEquals("0", url.queryParameter("offset"))
+        assertEquals("false", url.queryParameter("inline_images"))
+    }
+
+    @Test
     fun sessionArchivedReadsTheDatabaseFlag() = runBlocking {
         json("""{"id":"s1","archived":1,"title":"x"}""")
         json("""{"id":"s1","archived":0}""")

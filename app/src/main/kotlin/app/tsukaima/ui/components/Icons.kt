@@ -25,6 +25,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Compress
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Dns
@@ -180,6 +181,9 @@ enum class IconName(val symbol: String) {
 
     /** Not in the handoff (v0.8.0): speech output (phone or Hermes). */
     VolumeUp("volume_up"),
+
+    /** Not in the handoff (v0.10.2): the message menu's "Select text". */
+    SelectAll("select_all"),
 }
 
 /** Pure lookup, safe from JVM unit tests (no Android context involved). */
@@ -193,6 +197,7 @@ fun iconFor(name: IconName): ImageVector = when (name) {
     IconName.Close -> Icons.Rounded.Close
     IconName.Check -> Icons.Rounded.Check
     IconName.ContentCopy -> Icons.Rounded.ContentCopy
+    IconName.SelectAll -> Icons.Rounded.SelectAll
     IconName.Terminal -> Icons.Rounded.Terminal
     IconName.Psychology -> Icons.Rounded.Psychology
     IconName.Error -> Icons.Rounded.Error

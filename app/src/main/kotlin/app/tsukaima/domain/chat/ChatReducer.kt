@@ -71,9 +71,12 @@ object ChatReducer {
      * [ToolStatus.Interrupted] with that note. Only a tool result can carry a notice (Hermes writes them nowhere
      * else): a user or assistant message starting with the same text is an ordinary bubble.
      */
-    fun fromHistory(messages: List<TranscriptMessage>): List<ChatItem> =
-        messages.mapIndexedNotNull { index, m ->
-            val id = "h-${m.rowId ?: index}"
+    fun fromHistory(messages: List<TranscriptMessage>): List<ChatItem> {
+        val toolIds = mutableMapOf<String, Int>()
+        return messages.mapIndexedNotNull { index, m ->
+            // A row id is the row's identity; a row without one (tool rows have none) falls back to its position,
+            // marked so it can never equal a row id.
+            val id = "h-${m.rowId ?: "i$index"}"
             when (m.role) {
                 "user" -> ChatItem.UserMessage(id, m.text, rowId = m.rowId)
                 // A row with reasoning but no text is the thinking before a tool call: kept, in its place above the tool.
@@ -82,22 +85,91 @@ object ChatReducer {
                     else ChatItem.AssistantMessage(id, stripControlToken(m.text), streaming = false, reasoning = m.reasoning?.takeIf { it.isNotBlank() }, rowId = m.rowId)
                 "tool" -> {
                     val note = (m.content as? JsonPrimitive)?.takeIf { it.isString }?.content?.let(::orphanNote)
+                    // The live row of the same call is keyed by its `tool_id`, which is this `tool_call_id`: the same
+                    // key on both paths keeps the row (and its open state) across a rebuild. Hermes forwards a tool
+                    // row's `content` for three tools only; without it the output is not known yet.
+                    val callId = m.toolCallId?.takeIf { it.isNotBlank() }
+                    val nth = callId?.let { toolIds.merge(it, 1, Int::plus) } ?: 1
                     ChatItem.ToolCall(
-                        id = id,
+                        id = if (callId == null) id else occurrenceId(callId, nth),
                         name = m.name ?: "tool",
                         context = m.context,
                         args = m.args,
                         status = if (note != null) ToolStatus.Interrupted else ToolStatus.Done,
-                        output = null,
+                        output = if (note != null) null else ToolOutput.text(m.content),
                         exitCode = null,
                         durationS = null,
                         imageUrl = visionImageUrl(m.name.orEmpty(), m.args),
                         orphanNote = note,
+                        outputPending = m.content == null || m.content is JsonNull,
                     )
                 }
                 else -> null
             }
         }
+    }
+
+    /** The id of the [nth] row (from 1) of tool call [callId]: the id itself, then `id#2`, `id#3`, … (a provider may reuse ids). */
+    private fun occurrenceId(callId: String, nth: Int): String = if (nth <= 1) callId else "$callId#$nth"
+
+    /** The tool-call id a row id came from ([occurrenceId] undone). */
+    private fun callIdOf(rowId: String): String = rowId.substringBeforeLast('#', rowId).takeIf { rowId.substringAfterLast('#', "").toIntOrNull() != null } ?: rowId
+
+    /**
+     * A transcript rebuilt from the stored history ([history], with what the caller added to it) in place of [before]:
+     * every row that was on screen keeps its id, so the list keeps its scroll anchor and each row its open state.
+     * Tool rows already share their key ([fromHistory]); a user or assistant message takes the id its row had in
+     * [before] (matched by the persisted row id). With [carry], rows the history never holds — pending side notes, server notices
+     * and the todo checklist — are kept where they were: after the nearest row above them that survived, else last.
+     */
+    fun rebuild(history: List<ChatItem>, before: List<ChatItem>, carry: Boolean = true): List<ChatItem> {
+        val idByRow = before.mapNotNull { item -> item.persistedRow?.let { it to item.id } }.toMap()
+        val taken = mutableSetOf<String>()
+        val items = history.map { item ->
+            val old = item.persistedRow?.let(idByRow::get)?.takeIf { it != item.id && taken.add(it) && history.none { h -> h.id == it } }
+            when {
+                old == null -> item
+                item is ChatItem.UserMessage -> item.copy(id = old)
+                item is ChatItem.AssistantMessage -> item.copy(id = old)
+                else -> item
+            }
+        }.toMutableList()
+        if (!carry) return items
+        var anchor: String? = null
+        for (item in before) {
+            val carried = item is ChatItem.SideNote && item.pending || item is ChatItem.Notice || item is ChatItem.Todos
+            when {
+                items.any { it.id == item.id } -> anchor = item.id
+                carried -> {
+                    // No surviving row above it (nothing of the old transcript is in the history): it goes last.
+                    items.add(anchor?.let { a -> items.indexOfFirst { it.id == a } + 1 } ?: items.size, item)
+                    anchor = item.id
+                }
+            }
+        }
+        return items
+    }
+
+    /**
+     * The stored results of a chat's tool calls ([stored]: `tool_call_id` → the stored message `content`, oldest first)
+     * for the history rows still waiting for theirs ([ChatItem.ToolCall.outputPending]). The n-th result of an id goes
+     * to the n-th row of that id. [complete]: the store has no older page, so a row with no result has none.
+     */
+    fun onToolOutputs(state: ChatState, stored: List<Pair<String, JsonElement?>>, complete: Boolean): ChatState {
+        val byId = stored.groupBy({ it.first }, { it.second })
+        val items = state.items.map { item ->
+            if (item !is ChatItem.ToolCall || !item.outputPending) return@map item
+            val callId = callIdOf(item.id)
+            val nth = if (callId == item.id) 1 else item.id.substringAfterLast('#').toInt()
+            val results = byId[callId]
+            when {
+                results != null && nth <= results.size -> item.copy(output = ToolOutput.text(results[nth - 1]), outputPending = false)
+                complete -> item.copy(outputPending = false)
+                else -> item
+            }
+        }
+        return state.copy(items = items)
+    }
 
     /**
      * The app's wording of a Hermes orphan-recovery notice (`agent/replay_cleanup.py`): an effect it calls UNKNOWN
@@ -505,7 +577,7 @@ object ChatReducer {
     /** `tool.output_risk {tool_id, risk, findings, redacted}`: flags the tool row it names. */
     private fun onOutputRisk(s: ChatState, p: JsonObject): ChatState {
         val toolId = p.string("tool_id") ?: return s
-        val row = s.items.firstOrNull { it.id == toolId } as? ChatItem.ToolCall ?: return s
+        val row = s.items.lastOrNull { it is ChatItem.ToolCall && callIdOf(it.id) == toolId } as? ChatItem.ToolCall ?: return s
         val findings = (p["findings"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
         val risk = ToolRisk(p.string("risk") ?: "low", findings, p.bool("redacted") == true)
         return s.copy(items = s.items.replace(row) { row.copy(risk = risk) })
@@ -577,7 +649,7 @@ object ChatReducer {
             seq = payload["seq"]?.primitive()?.longOrNull ?: -1,
             suggested = ConnectionAnswers.suggested(payload["display"] as? JsonObject),
         )
-        val items = state.items + card
+        val items = withoutEmptyBubble(state.items) + card
         return state.copy(items = items, status = statusFor(items) ?: AgentStatus.Connection)
     }
 
@@ -769,8 +841,9 @@ object ChatReducer {
     private fun onToolStart(s: ChatState, p: JsonObject): ChatState {
         val name = p.string("name") ?: "tool"
         val toolId = p.string("tool_id") ?: return s.copy(status = AgentStatus.Tool(humanName(name)))
+        val (existing, id) = toolRow(s.items, toolId)
         val running = ChatItem.ToolCall(
-            id = toolId,
+            id = id,
             name = name,
             context = p.string("context"),
             args = p["args"] as? JsonObject,
@@ -780,9 +853,34 @@ object ChatReducer {
             durationS = null,
             imageUrl = visionImageUrl(name, p["args"] as? JsonObject),
         )
-        val existing = s.items.firstOrNull { it.id == toolId }
-        val items = if (existing != null) s.items.replace(existing) { running } else s.items + running
+        val items = if (existing != null) s.items.replace(existing) { running } else withoutEmptyBubble(s.items) + running
         return s.copy(items = items, status = AgentStatus.Tool(humanName(name)))
+    }
+
+    /**
+     * The row a `tool_id` event is about, and the id its row has (or gets). It is the last row of that call id, unless
+     * that row belongs to an earlier turn and is finished: a provider that numbers its calls per reply (`terminal:0`)
+     * reuses ids, and the new call must not overwrite the old turn's row far above. It then gets a row of its own
+     * ([occurrenceId], the same numbering [fromHistory] gives the stored rows).
+     */
+    private fun toolRow(items: List<ChatItem>, toolId: String): Pair<ChatItem.ToolCall?, String> {
+        val rows = items.withIndex().filter { (_, it) -> it is ChatItem.ToolCall && callIdOf(it.id) == toolId }
+        val last = rows.lastOrNull() ?: return null to toolId
+        val row = last.value as ChatItem.ToolCall
+        val turnStart = items.indexOfLast { it.isSent() } + 1
+        return if (row.status != ToolStatus.Running && last.index < turnStart) null to occurrenceId(toolId, rows.size + 1) else row to row.id
+    }
+
+    /**
+     * [items] without the empty bubble `message.start` opened, when it is still the one new text would flow into. A
+     * tool row or a request card about to be appended would block it, and it shows a caret line: left in place it sat
+     * above the tool rows for the whole tool phase and was dropped when the reply began, which moved every tool row
+     * up by a line (each turn, on a model that streams no reasoning). Dropped here instead, the new row takes its
+     * place at the end and nothing above moves.
+     */
+    private fun withoutEmptyBubble(items: List<ChatItem>): List<ChatItem> {
+        val live = liveAssistant(items)?.takeIf { it.text.isEmpty() && it.reasoning.isNullOrEmpty() } ?: return items
+        return items.filterNot { it === live }
     }
 
     /**
@@ -805,11 +903,12 @@ object ChatReducer {
         val output = if (interrupted) {
             lines!!.dropLast(1).joinToString("\n").trimEnd()
         } else {
-            rawOutput
+            // Not only `result.output` (the terminal's shape): every tool's own text field, or the result itself.
+            ToolOutput.text(p["result"])
         }
-        val existing = s.items.firstOrNull { it.id == toolId } as? ChatItem.ToolCall
+        val (existing, id) = toolRow(s.items, toolId)
         val base = existing ?: ChatItem.ToolCall(
-            id = toolId,
+            id = id,
             name = p.string("name") ?: "tool",
             context = p.string("context"),
             args = p["args"] as? JsonObject,
@@ -828,8 +927,9 @@ object ChatReducer {
             output = output,
             exitCode = exitCode,
             durationS = p["duration_s"]?.primitive()?.doubleOrNull,
+            outputPending = false,
         )
-        val items = if (existing != null) s.items.replace(existing) { done } else s.items + done
+        val items = if (existing != null) s.items.replace(existing) { done } else withoutEmptyBubble(s.items) + done
         val completed = s.copy(items = items, status = AgentStatus.Thinking(flair()))
         // The todo tool's completion mirrors the list's snapshot at the payload's top level (as `todo.updated` does).
         return if (p["todos"] is JsonArray) applyTodos(completed, p) else completed
@@ -863,12 +963,14 @@ object ChatReducer {
                 answered = false,
                 origin = if (secret == SecretKind.VaultSaveLogin) req.params.string("origin")?.takeIf { it.isNotBlank() } else null,
             )
-            return state.copy(items = state.items + card, status = statusFor(state.items + card) ?: AgentStatus.Secret(secret))
+            val items = withoutEmptyBubble(state.items) + card
+            return state.copy(items = items, status = statusFor(items) ?: AgentStatus.Secret(secret))
         }
         if (req.method == CLARIFY) {
             val questions = ClarifyAnswers.questions(req.params).takeIf { it.isNotEmpty() } ?: return state
             val card = ChatItem.Clarify(id = req.id, questions = questions, answered = false)
-            return state.copy(items = state.items + card, status = statusFor(state.items + card) ?: AgentStatus.Question)
+            val items = withoutEmptyBubble(state.items) + card
+            return state.copy(items = items, status = statusFor(items) ?: AgentStatus.Question)
         }
         // The server lists the offered scopes in `choices`; without it, derive them as it does
         // (tui_gateway/server.py `_approval_request_payload`).
@@ -885,7 +987,8 @@ object ChatReducer {
             allowSession = allowSession,
             allowAlways = allowAlways,
         )
-        return state.copy(items = state.items + card, status = statusFor(state.items + card) ?: AgentStatus.Approval)
+        val items = withoutEmptyBubble(state.items) + card
+        return state.copy(items = items, status = statusFor(items) ?: AgentStatus.Approval)
     }
 
     // ---- helpers ------------------------------------------------------------------------------

@@ -27,7 +27,7 @@ class IconsTest {
         "compress", "account_tree", "warning",
         "mic", "mic_off", "keyboard",
         "translate",
-        "graphic_eq",
+        "graphic_eq", "select_all", // v0.10.2: the message menu's Select text
         "picture_as_pdf", "broken_image", "volume_up",
     )
 

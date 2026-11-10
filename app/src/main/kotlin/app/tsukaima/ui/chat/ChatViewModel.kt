@@ -494,7 +494,7 @@ class ChatViewModel(
             val messages = session.history(live)
             val before = chat.items
             if (chat.liveSessionId != live) return@attempt
-            setChat { it.copy(items = ChatReducer.fromHistory(messages)) }
+            setChat { it.copy(items = ChatReducer.rebuild(ChatReducer.fromHistory(messages), it.items, carry = false)) }
             restorePurgedSends(before, rowsKept = true)
             restoreFailedSends()
         }
@@ -1057,6 +1057,26 @@ class ChatViewModel(
         copy(text)
         backend.toast(if (reasoning) "Reasoning copied" else "Message copied")
     }
+
+    /** "Select text" on message [id]'s menu: opens it in the selectable view; null closes the view. */
+    fun selectText(id: String?) = _state.update { it.copy(messageMenu = null, selecting = id) }
+
+    /**
+     * A tool row was opened whose output the history did not carry ([ChatItem.ToolCall.outputPending]): reads the
+     * chat's stored tool results once and fills every waiting row. A failure toasts and leaves the rows waiting, so
+     * opening one again retries.
+     */
+    fun loadToolOutputs() {
+        val stored = chat.storedSessionId ?: return
+        if (toolOutputsJob?.isActive == true || chat.items.none { it is ChatItem.ToolCall && it.outputPending }) return
+        toolOutputsJob = launch {
+            backend.toolResults(stored)
+                .onSuccess { results -> if (chat.storedSessionId == stored) setChat { ChatReducer.onToolOutputs(it, results, complete = true) } }
+                .onFailure { backend.toast("Couldn’t load the tool output") }
+        }
+    }
+
+    private var toolOutputsJob: Job? = null
 
     fun delete() = finish("Deleted", "Couldn’t delete the chat") { id ->
         backend.deleteSession(id).onSuccess {

@@ -1,0 +1,152 @@
+{
+ "live": "bc0d44e0",
+ "user_row_id": 252,
+ "history": [
+  {
+   "role": "user",
+   "text": "Think step by step. First run the shell command `echo hello-from-tsukaima` with the terminal tool. Then, as a separate tool call, read the file /etc/hostname with the read_file tool. Then run `sleep 2; uname -s` in the terminal. Finally reply with a short markdown list of the three results.",
+   "timestamp": 1794302980.0371923,
+   "row_id": 252
+  },
+  {
+   "role": "assistant",
+   "text": "",
+   "timestamp": 1794302986.6776433,
+   "row_id": 253,
+   "reasoning_content": " "
+  },
+  {
+   "role": "tool",
+   "name": "terminal",
+   "context": "echo hello-from-tsukaima",
+   "tool_call_id": "call_dd3da72fbaab46e88aaa25cf",
+   "timestamp": 1794302986.8319077,
+   "args": {
+    "command": "echo hello-from-tsukaima"
+   }
+  },
+  {
+   "role": "assistant",
+   "text": "",
+   "timestamp": 1794302987.838435,
+   "row_id": 255,
+   "reasoning_content": " "
+  },
+  {
+   "role": "tool",
+   "name": "read_file",
+   "context": "hostname",
+   "tool_call_id": "call_a6e04d1b6b4b4fd89722c3cc",
+   "timestamp": 1794302987.8447294,
+   "args": {
+    "path": "/etc/hostname"
+   }
+  },
+  {
+   "role": "assistant",
+   "text": "",
+   "timestamp": 1794302989.0141509,
+   "row_id": 257,
+   "reasoning_content": " "
+  },
+  {
+   "role": "tool",
+   "name": "terminal",
+   "context": "sleep 2 + 1 command",
+   "tool_call_id": "call_073fd755f33847bcb741c3d0",
+   "timestamp": 1794302991.250387,
+   "args": {
+    "command": "sleep 2; uname -s"
+   }
+  },
+  {
+   "role": "assistant",
+   "text": "- `echo hello-from-tsukaima` → `hello-from-tsukaima` (exit 0)\n- `/etc/hostname` → `claude`\n- `sleep 2; uname -s` → `Linux` (exit 0)",
+   "timestamp": 1794302993.3267405,
+   "row_id": 259
+  }
+ ],
+ "midturn": [
+  {
+   "role": "user",
+   "text": "Think step by step. First run the shell command `echo hello-from-tsukaima` with the terminal tool. Then, as a separate tool call, read the file /etc/hostname with the read_file tool. Then run `sleep 2; uname -s` in the terminal. Finally reply with a short markdown list of the three results.",
+   "timestamp": 1794302980.0371923,
+   "row_id": 252
+  },
+  {
+   "role": "assistant",
+   "text": "",
+   "timestamp": 1794302986.6776433,
+   "row_id": 253,
+   "reasoning_content": " "
+  },
+  {
+   "role": "tool",
+   "name": "terminal",
+   "context": "echo hello-from-tsukaima",
+   "tool_call_id": "call_dd3da72fbaab46e88aaa25cf",
+   "timestamp": 1794302986.8319077,
+   "args": {
+    "command": "echo hello-from-tsukaima"
+   }
+  }
+ ],
+ "rest": [
+  {
+   "id": 252,
+   "role": "user",
+   "content": "Think step by step. First run the shell command `echo hello-from-tsukaima` with the terminal tool. Then, as a separate tool call, read the file /etc/hostname with the read_file tool. Then run `sleep 2; uname -s` in the terminal. Finally reply with a short markdown list of the three results.",
+   "tool_call_id": null,
+   "tool_name": null
+  },
+  {
+   "id": 253,
+   "role": "assistant",
+   "content": "",
+   "tool_call_id": null,
+   "tool_name": null
+  },
+  {
+   "id": 254,
+   "role": "tool",
+   "content": "{\"output\": \"hello-from-tsukaima\", \"exit_code\": 0, \"error\": null}",
+   "tool_call_id": "call_dd3da72fbaab46e88aaa25cf",
+   "tool_name": "terminal"
+  },
+  {
+   "id": 255,
+   "role": "assistant",
+   "content": "",
+   "tool_call_id": null,
+   "tool_name": null
+  },
+  {
+   "id": 256,
+   "role": "tool",
+   "content": "{\"content\": \"1|claude\", \"total_lines\": 1, \"file_size\": 7, \"truncated\": false, \"is_binary\": false, \"is_image\": false, \"not_found\": false}",
+   "tool_call_id": "call_a6e04d1b6b4b4fd89722c3cc",
+   "tool_name": "read_file"
+  },
+  {
+   "id": 257,
+   "role": "assistant",
+   "content": "",
+   "tool_call_id": null,
+   "tool_name": null
+  },
+  {
+   "id": 258,
+   "role": "tool",
+   "content": "{\"output\": \"Linux\", \"exit_code\": 0, \"error\": null}",
+   "tool_call_id": "call_073fd755f33847bcb741c3d0",
+   "tool_name": "terminal"
+  },
+  {
+   "id": 259,
+   "role": "assistant",
+   "content": "- `echo hello-from-tsukaima` → `hello-from-tsukaima` (exit 0)\n- `/etc/hostname` → `claude`\n- `sleep 2; uname -s` → `Linux` (exit 0)",
+   "tool_call_id": null,
+   "tool_name": null
+  }
+ ]
+}

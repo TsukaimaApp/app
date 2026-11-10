@@ -9,6 +9,8 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
@@ -160,6 +162,32 @@ class HermesApi(
         }
         val flag = row["archived"] as? JsonPrimitive ?: return false
         return flag.booleanOrNull ?: ((flag.intOrNull ?: 0) != 0)
+    }
+
+    /**
+     * The stored results of session [id]'s tool calls, oldest first: `tool_call_id` → the tool message's `content`
+     * (`GET /api/sessions/{id}/messages`, the raw stored rows; `session.history` leaves tool results out). Read in
+     * pages of [MESSAGES_PAGE] (the server's cap) up to [MESSAGES_MAX_PAGES]; images are not inlined.
+     */
+    suspend fun toolResults(id: String): List<Pair<String, JsonElement?>> {
+        val results = mutableListOf<Pair<String, JsonElement?>>()
+        for (page in 0 until MESSAGES_MAX_PAGES) {
+            val query: Array<out Pair<String, String?>> = arrayOf(
+                "limit" to MESSAGES_PAGE.toString(), "offset" to (page * MESSAGES_PAGE).toString(),
+                "order" to "oldest", "inline_images" to "false",
+            )
+            val rows = call(newRequest("GET", "api/sessions", null, true, true, query, arrayOf(id, "messages"))) {
+                HermesJson.parseToJsonElement(it).jsonObject["messages"] as? JsonArray ?: JsonArray(emptyList())
+            }
+            for (row in rows) {
+                val o = row as? JsonObject ?: continue
+                if ((o["role"] as? JsonPrimitive)?.contentOrNull != "tool") continue
+                val callId = (o["tool_call_id"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() } ?: continue
+                results += callId to o["content"]
+            }
+            if (rows.size < MESSAGES_PAGE) break
+        }
+        return results
     }
 
     suspend fun modelOptions(): ModelOptionsDto = get("api/model/options", ModelOptionsDto.serializer())
@@ -621,6 +649,10 @@ class HermesApi(
         /** `le=100` on the server's `limit` query. */
         private const val MAX_SESSIONS = 100
         private const val SEARCH_LIMIT = 20
+
+        /** `/api/sessions/{id}/messages` answers at most this many rows a page. */
+        private const val MESSAGES_PAGE = 500
+        private const val MESSAGES_MAX_PAGES = 10
         private val JSON = "application/json; charset=utf-8".toMediaType()
         private val EMPTY_BODY = JsonObject(emptyMap())
         private const val OCTET_STREAM = "application/octet-stream"

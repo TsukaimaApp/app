@@ -120,6 +120,9 @@ class HermesRepository(
 
     suspend fun sessionArchived(id: String): Result<Boolean> = call { api.sessionArchived(id) }
 
+    /** See [HermesApi.toolResults]. */
+    suspend fun toolResults(id: String): Result<List<Pair<String, kotlinx.serialization.json.JsonElement?>>> = call { api.toolResults(id) }
+
     suspend fun modelOptions(): Result<ModelOptionsDto> = call { api.modelOptions() }
     suspend fun workspaces(): Result<WorkspacesDto> = call { api.workspaces() }
 

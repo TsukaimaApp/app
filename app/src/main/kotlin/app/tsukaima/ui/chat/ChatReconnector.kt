@@ -110,7 +110,7 @@ internal class ChatReconnector(
                 onRebuilding()
                 setChat {
                     it.copy(
-                        items = withCarried(ChatSync.transcript(r), it.items),
+                        items = ChatReducer.rebuild(ChatSync.transcript(r), it.items),
                         lastSeq = replay.latestSeq ?: it.lastSeq,
                         stopRequested = it.stopRequested && r.running,
                     )
@@ -139,29 +139,19 @@ internal class ChatReconnector(
 
     /**
      * Binds a resume result; [rebuild] replaces the transcript with its history plus, while a turn runs, the reply
-     * it has streamed so far ([ChatSync.transcript]), the pending side notes and the todo checklist; live deltas then
-     * append to that bubble. The result's `todo_state` then seeds (or replaces) the checklist.
+     * it has streamed so far ([ChatSync.transcript]); rows keep their ids and the rows history never holds (pending
+     * side notes, notices, the todo checklist) their places ([ChatReducer.rebuild]); live deltas then append to that
+     * bubble. The result's `todo_state` then seeds (or replaces) the checklist.
      */
     fun bindResumed(r: SessionResumed, rebuild: Boolean) {
         setChat { c ->
             val bound = ChatReducer.onSessionBound(c, r.sessionId, r.storedSessionId ?: routeStoredId)
-            val items = if (rebuild) bound.copy(items = withCarried(ChatSync.transcript(r), c.items)) else bound
+            val items = if (rebuild) bound.copy(items = ChatReducer.rebuild(ChatSync.transcript(r), c.items)) else bound
             val withTodos = ChatReducer.onTodoState(items, r.todoState)
             val withInfo = ChatReducer.onSessionInfo(withTodos, r.info).copy(resumeProgress = null)
             if (r.running) withInfo.copy(status = AgentStatus.Thinking(flair())) else ChatReducer.onConnectionRestored(withInfo)
         }
     }
-
-    /**
-     * History never holds side notes, server notices or the todo checklist: a rebuild keeps the pending notes of
-     * [before], its [ChatItem.Notice] lines (a model fallback the user has not read yet) and its [ChatItem.Todos] at
-     * the end, since a completion event may still arrive and the resume's `todo_state` (applied after) may be absent.
-     */
-    private fun withCarried(items: List<ChatItem>, before: List<ChatItem>): List<ChatItem> =
-        items + before.filter {
-            (it is ChatItem.SideNote && it.pending || it is ChatItem.Notice || it is ChatItem.Todos) &&
-                items.none { kept -> kept.id == it.id }
-        }
 
     /**
      * The server may re-attach a live session that already streamed events (another client, or this chat

@@ -167,6 +167,9 @@ class ChatViewModelTest {
             archived = false
         }
         override suspend fun sessionArchived(id: String) = Result.success(archived)
+        var toolResults: Result<List<Pair<String, kotlinx.serialization.json.JsonElement?>>> = Result.success(emptyList())
+        val toolResultCalls = mutableListOf<String>()
+        override suspend fun toolResults(id: String) = toolResults.also { toolResultCalls += id }
         override suspend fun deleteSession(id: String) = Result.success(Unit).also { rest += "delete $id" }
 
         val downloads = mutableListOf<String>()
@@ -538,7 +541,8 @@ class ChatViewModelTest {
         advanceUntilIdle()
 
         val users = vm.state.value.chat.items.filterIsInstance<ChatItem.UserMessage>()
-        assertEquals(listOf("h-1", "h-5", notSent.id), users.map { it.id })
+        // The first message was on screen as its local echo: the rebuild keeps that id (row 1 is its row).
+        assertEquals(listOf("u-l1", "h-5", notSent.id), users.map { it.id })
         assertEquals("the running row stays sent", listOf(false, false, true), users.map { it.failed })
     }
 
@@ -3258,15 +3262,58 @@ class ChatViewModelTest {
         val idle = ChatUiState(chat = ChatState(items = items, status = AgentStatus.Idle))
         fun labels(s: ChatUiState, id: String) = messageItems(s.copy(messageMenu = id), ChatActions()).map { it.label }
 
-        assertEquals(listOf("Copy text", "Edit"), labels(idle, "h-1"))
-        assertEquals(listOf("Copy text", "Regenerate"), labels(idle, "h-2"))
-        assertEquals(listOf("Copy text"), labels(idle, "u-l1"))
-        assertEquals(listOf("Copy text"), labels(idle, "a-1"))
+        assertEquals(listOf("Copy text", "Select text", "Edit"), labels(idle, "h-1"))
+        assertEquals(listOf("Copy text", "Select text", "Regenerate"), labels(idle, "h-2"))
+        assertEquals(listOf("Copy text", "Select text"), labels(idle, "u-l1"))
+        assertEquals(listOf("Copy text", "Select text"), labels(idle, "a-1"))
         val running = idle.copy(chat = idle.chat.copy(status = AgentStatus.Replying))
-        assertEquals(listOf("Copy text"), labels(running, "h-1"))
-        assertEquals(listOf("Copy text"), labels(running, "h-2"))
+        assertEquals(listOf("Copy text", "Select text"), labels(running, "h-1"))
+        assertEquals(listOf("Copy text", "Select text"), labels(running, "h-2"))
         val offline = idle.copy(chat = idle.chat.copy(status = AgentStatus.Offline))
-        assertEquals(listOf("Copy text"), labels(offline, "h-2"))
+        assertEquals(listOf("Copy text", "Select text"), labels(offline, "h-2"))
+    }
+
+    @Test
+    fun selectTextOpensTheMessageAndClosesTheMenu() = runTest(dispatcher) {
+        val b = backend().apply { transport.on("session.resume", obj(resumeJson)) }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        val reply = vm.state.value.chat.items.last()
+        vm.showMessageMenu(reply.id)
+        vm.selectText(reply.id)
+        assertNull(vm.state.value.messageMenu)
+        assertEquals(reply.id, vm.state.value.selecting)
+        vm.selectText(null)
+        assertNull(vm.state.value.selecting)
+    }
+
+    @Test
+    fun openingAHistoryToolRowLoadsTheStoredOutputsOnce() = runTest(dispatcher) {
+        val withTool = """{"session_id":"$live","stored_session_id":"$stored","messages":[
+            {"role":"user","text":"read it","row_id":1},
+            {"role":"tool","name":"read_file","context":"hostname","tool_call_id":"call_1"},
+            {"role":"assistant","text":"claude","row_id":4}]}"""
+        val b = backend().apply { transport.on("session.resume", obj(withTool)) }
+        val vm = vm(b, stored)
+        advanceUntilIdle()
+        fun tool() = vm.state.value.chat.items.filterIsInstance<ChatItem.ToolCall>().single()
+        assertTrue(tool().outputPending)
+        assertEquals("call_1", tool().id)
+
+        b.toolResults = Result.failure(java.io.IOException("down"))
+        vm.loadToolOutputs()
+        advanceUntilIdle()
+        assertTrue("a failed load leaves the row waiting", tool().outputPending)
+        assertEquals("Couldn’t load the tool output", b.toasts.last())
+
+        b.toolResults = Result.success(listOf("call_1" to kotlinx.serialization.json.JsonPrimitive("{\"content\": \"1|claude\", \"total_lines\": 1}")))
+        vm.loadToolOutputs()
+        advanceUntilIdle()
+        assertEquals("1|claude", tool().output)
+        assertFalse(tool().outputPending)
+        vm.loadToolOutputs()
+        advanceUntilIdle()
+        assertEquals(listOf(stored, stored), b.toolResultCalls)
     }
 
     // ---- side questions and background tasks ----------------------------------------------------

@@ -58,6 +58,8 @@ data class ChatUiState(
     val pendingModel: PendingModel? = null,
     /** The message whose long-press menu (copy) is open. */
     val messageMenu: String? = null,
+    /** The message open in the selectable view (the menu's Select text), by item id. */
+    val selecting: String? = null,
     /** The row of the user message being edited: the next send replaces it and drops what followed. */
     val pendingEdit: Long? = null,
     /** The message being edited was sent with attachments, which the edit does not include. */

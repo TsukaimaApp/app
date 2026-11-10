@@ -74,6 +74,9 @@ interface ChatBackend {
 
     /** Whether stored session [id] is archived (`GET /api/sessions/{id}`). */
     suspend fun sessionArchived(id: String): Result<Boolean>
+
+    /** The stored results of session [id]'s tool calls, oldest first (`tool_call_id` → content); see [app.tsukaima.data.api.HermesApi.toolResults]. */
+    suspend fun toolResults(id: String): Result<List<Pair<String, kotlinx.serialization.json.JsonElement?>>> = Result.success(emptyList())
     suspend fun deleteSession(id: String): Result<Unit>
 
     /** A `MEDIA:` file, streaming (`/api/files/download`); the caller closes it. */
@@ -213,6 +216,7 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override suspend fun archiveSession(id: String) = c.repository.archiveSession(id, archived = true)
     override suspend fun unarchiveSession(id: String) = c.repository.archiveSession(id, archived = false)
     override suspend fun sessionArchived(id: String) = c.repository.sessionArchived(id)
+    override suspend fun toolResults(id: String) = c.repository.toolResults(id)
     override suspend fun deleteSession(id: String) = c.repository.deleteSession(id)
     override suspend fun download(path: String) = c.repository.download(path)
     override suspend fun fetchImage(url: String) = c.repository.fetchImage(url)

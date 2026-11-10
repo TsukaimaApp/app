@@ -80,6 +80,7 @@ import app.tsukaima.ui.chat.components.ClarifyCard
 import app.tsukaima.ui.chat.components.Composer
 import app.tsukaima.ui.chat.components.MediaHost
 import app.tsukaima.ui.chat.components.SecretCard
+import app.tsukaima.ui.chat.components.SelectTextView
 import app.tsukaima.ui.chat.components.ConnectionCard
 import app.tsukaima.ui.chat.components.NoticeLine
 import app.tsukaima.ui.chat.components.SideNoteCard
@@ -154,6 +155,8 @@ class ChatActions(
     val onDismissFailed: (String) -> Unit = {},
     val onMessageMenu: (String?) -> Unit = {},
     val onToggleReasoning: (String) -> Unit = {},
+    val onSelectText: (String?) -> Unit = {},
+    val onToolOpened: () -> Unit = {},
     val onCopyMessage: (id: String, reasoning: Boolean) -> Unit = { _, _ -> },
     val onEditMessage: (String) -> Unit = {},
     val onCancelEdit: () -> Unit = {},
@@ -270,6 +273,8 @@ fun ChatScreen(
             onDismissFailed = vm::dismissFailed,
             onMessageMenu = vm::showMessageMenu,
             onToggleReasoning = vm::toggleReasoning,
+            onSelectText = vm::selectText,
+            onToolOpened = vm::loadToolOutputs,
             onCopyMessage = { id, reasoning ->
                 vm.copyMessage(id, reasoning) { text ->
                     scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Message", text))) }
@@ -462,7 +467,7 @@ internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatAct
                 onToggleReasoning = { actions.onToggleReasoning(item.id) },
             )
         }
-        is ChatItem.ToolCall -> ToolRow(item, media = media)
+        is ChatItem.ToolCall -> ToolRow(item, media = media, onOpened = actions.onToolOpened)
         is ChatItem.Subagent -> SubagentRow(item)
         is ChatItem.Approval -> ApprovalCard(
             item = item,
@@ -577,6 +582,7 @@ internal fun messageItems(state: ChatUiState, actions: ChatActions): List<MenuIt
     val regenerate = (item as? ChatItem.AssistantMessage)?.takeIf { rewind && ChatEdits.regenerateSource(state.chat.items, it.id) != null }
     return listOfNotNull(
         MenuItem("Copy text", IconName.ContentCopy) { actions.onCopyMessage(item.id, false) },
+        MenuItem("Select text", IconName.SelectAll) { actions.onSelectText(item.id) },
         reasoning?.let { MenuItem("Copy reasoning", IconName.Psychology) { actions.onCopyMessage(item.id, true) } },
         edit?.let { MenuItem("Edit", IconName.Edit) { actions.onEditMessage(it.id) } },
         regenerate?.let { MenuItem("Regenerate", IconName.Refresh) { actions.onRegenerate(it.id) } },
@@ -593,6 +599,7 @@ private fun ChatSheets(state: ChatUiState, actions: ChatActions, overflow: List<
     MenuSheet(state.menu == ChatMenu.VoiceLanguage, dismiss, voiceLanguageItems(state.voiceLanguages, state.voiceLanguage, actions.onVoiceLanguage))
     val messageMenu = messageItems(state, actions)
     MenuSheet(messageMenu.isNotEmpty(), { actions.onMessageMenu(null) }, messageMenu)
+    state.chat.items.firstOrNull { it.id == state.selecting }?.let { SelectTextView(it, onClose = { actions.onSelectText(null) }) }
     when (state.dialog) {
         ChatDialog.Rename -> {
             var name by rememberSaveable { mutableStateOf(state.chat.title.orEmpty()) }

@@ -102,6 +102,26 @@ reply; when true it is ignored), `approval.cancelled`,
 
 `message.delta`, `reasoning.delta`, `thinking.delta` are coalesced server-side (~30 fps).
 
+**Tool results and row identity** [live, recorded 2026-11-10 on 0.22.2; fixture
+`app/src/test/resources/chat/recorded-tool-turn*`]:
+
+- `tool.complete.result` is the tool's own JSON, not always `{output, exit_code, error}`: `read_file` answers
+  `{content, total_lines, file_size, truncated, …}`, `web_search` data only, and a result that is not JSON arrives as
+  a bare string. The app shows the first text field it knows, else the whole result (`ToolOutput.text`).
+- `tool_id` of `tool.start` / `tool.complete` is the provider's tool-call id, the same value as a history tool
+  row's `tool_call_id`. The app keys a tool row by it on both paths. A provider may reuse an id in a later turn.
+- History tool rows (`session.history`, `session.resume`) carry **no `row_id` and no result**: `{role:"tool", name,
+  context, tool_call_id, timestamp, args}`; `content` only for `write_file`, `patch` and `skill_manage`. User and
+  assistant rows carry `row_id`. The assistant row before each tool call has `text:""`.
+- The stored results are in `GET /api/sessions/{id}/messages?limit=500&offset=&order=oldest&inline_images=false`
+  → `{session_id, messages[{id, role, content, tool_call_id, tool_name, …}], pagination{limit, offset, order,
+  returned}}` (at most 500 a page). A tool row's `content` is the result as JSON text. The app reads it when a
+  history tool row is first opened.
+- `message.complete.persisted_turn` is `{row_ids[], complete, user_row_id, final_assistant_row_id}`; `row_ids` lists
+  every row of the turn in order. `message.complete.usage` also carries `model`.
+- A model that streams no reasoning sends `message.start`, then the tool events, then the first `message.delta`:
+  the reply opened by `message.start` is still empty when the first tool row arrives.
+
 ### Server → client requests
 
 - `approval` params: `session_id`, `request_id`, `command`, `choices`, `allow_session`, `allow_permanent`,

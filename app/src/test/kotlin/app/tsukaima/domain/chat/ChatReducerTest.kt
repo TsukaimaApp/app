@@ -69,7 +69,7 @@ class ChatReducerTest {
         assertEquals("uname -a", tool.context)
         assertEquals(ToolStatus.Done, tool.status)
         assertNull(tool.output)
-        assertEquals("h-3", tool.id)
+        assertEquals("the tool-call id, as the live row has it", "terminal:0", tool.id)
 
         val reply = items[3] as ChatItem.AssistantMessage
         assertTrue(reply.text.startsWith("The kernel"))
@@ -1289,7 +1289,7 @@ class ChatReducerTest {
     fun truthyErrorBeatsTheInterruptMarker() {
         val tool = completed("""{"output":"x\n[Command interrupted]","exit_code":130,"error":"sandbox died"}""")
         assertEquals(ToolStatus.Failed, tool.status)
-        assertEquals("the output is kept whole", "x\n[Command interrupted]", tool.output)
+        assertEquals("the output is kept whole, with the error under it", "x\n[Command interrupted]\nsandbox died", tool.output)
         // A falsy error still lets the marker win.
         assertEquals(ToolStatus.Interrupted, completed("""{"output":"x\n[Command interrupted]","exit_code":130,"error":""}""").status)
     }
@@ -1386,7 +1386,7 @@ class ChatReducerTest {
             """{"role":"assistant","text":"$notice","row_id":3}""",
             """{"role":"user","text":"$notice","row_id":4}""",
         )
-        assertEquals(listOf("h-1", "h-2", "h-3", "h-4"), items.map { it.id })
+        assertEquals(listOf("h-1", "c1", "h-3", "h-4"), items.map { it.id })
         val tool = items[1] as ChatItem.ToolCall
         assertEquals(ToolStatus.Done, tool.status)
         assertNull(tool.orphanNote)

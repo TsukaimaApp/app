@@ -3,6 +3,31 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.10.2 — 2026-11-10 (versionCode 26)
+
+### Fixed
+- Tool rows no longer jump up when the reply starts. On a model that streams no reasoning (DeepSeek, Kimi), the empty
+  reply the turn opened sat as a blinking caret line above the tool rows for the whole tool phase and was removed at
+  the first word of the reply, which moved every tool row up by a line, each turn. The tool row (or an approval,
+  question or connection card) now takes that line's place the moment it arrives.
+- Rows keep their identity when the chat is rebuilt from the server's history (a reconnect after a longer pause, a
+  resume, an edit or regenerate): a tool row is keyed by its tool-call id on both the live and the history path, and
+  a message keeps the id it had on screen. The list keeps its scroll position, and open tool rows and unfolded
+  reasoning stay open instead of every row being replaced. Server notices and the todo checklist stay where they
+  were instead of moving to the end. A provider that reuses tool-call ids (`terminal:0` in every turn) no longer
+  overwrites an earlier turn's row.
+- Tool output: an opened tool row shows the result of every tool, not only of shell commands. The app read only the
+  `output` field, so `read_file` (`content`) and most other tools showed "No output"; it now shows the tool's own
+  text field, an error under it, or the whole result pretty-printed when there is no text field. Very long results
+  are cut at 20,000 characters with a note.
+- Tool output in a reopened chat: the history does not carry tool results, so every tool row of a loaded chat showed
+  "No output". Opening one now loads the chat's stored results once ("Loading output…") and fills all of them.
+
+### Added
+- Select text: the long-press menu of a message has "Select text", which opens the message on its own page where
+  any part can be selected and copied, across paragraphs, list items and code, and from a reply's reasoning into its
+  text. The output and arguments of an open tool row are selectable in place.
+
 ## 0.10.1 — 2026-11-09 (versionCode 25)
 
 ### Added
