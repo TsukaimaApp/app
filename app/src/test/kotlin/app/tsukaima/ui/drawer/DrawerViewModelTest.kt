@@ -345,4 +345,13 @@ class DrawerViewModelTest {
         assertNull(SessionDto(id = "x", source = "cron").sourceLabel)
         assertNull(SessionDto(id = "x").sourceLabel)
     }
+
+    @Test
+    fun sessionFlagsAreReadAsBooleansOrAsTheDatabasesNumbers() {
+        fun row(json: String) = app.tsukaima.data.api.HermesJson.decodeFromString(SessionDto.serializer(), json)
+        assertTrue(row("""{"id":"a","pinned":true,"is_active":true}""").let { it.pinned && it.isActive })
+        assertTrue(row("""{"id":"a","pinned":1,"is_active":1}""").let { it.pinned && it.isActive })
+        assertFalse(row("""{"id":"a","pinned":0,"is_active":null}""").let { it.pinned || it.isActive })
+        assertFalse(row("""{"id":"a"}""").pinned)
+    }
 }

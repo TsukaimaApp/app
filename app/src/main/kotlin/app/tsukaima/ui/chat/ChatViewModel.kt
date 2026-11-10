@@ -103,6 +103,9 @@ class ChatViewModel(
     /** [send] already waited once for the slash catalog: a server that cannot give one must not hold every send. */
     private var catalogAwaited = false
 
+    /** That wait is in flight: another Send tap does nothing until it has decided. */
+    private var awaitingCatalog = false
+
     /** What a failed send carried, by its bubble's local id, for Retry / Dismiss. */
     private data class FailedSend(
         val text: String,
@@ -383,12 +386,18 @@ class ChatViewModel(
         _state.value.pendingEdit?.let { row -> return edits.send(live, text, row) }
         // A slash command the server knows is run, not sent to the model ([ChatCommands]); anything else is a message.
         val slash = text.startsWith("/") && _state.value.attachments.none { it.status == AttachmentStatus.Ready }
+        if (awaitingCatalog) return // a second tap while the first waits below
         if (slash && _state.value.commands == null && !catalogAwaited) {
             // Sent before the catalog answered (pasted and sent at once): wait for it, once, then decide.
             catalogAwaited = true
+            awaitingCatalog = true
             launch {
-                commands.load()
-                commands.awaitLoaded()
+                try {
+                    commands.load()
+                    commands.awaitLoaded()
+                } finally {
+                    awaitingCatalog = false
+                }
                 if (_state.value.input.trim() == text) send()
             }
             return

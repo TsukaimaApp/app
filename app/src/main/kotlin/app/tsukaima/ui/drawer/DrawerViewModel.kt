@@ -90,6 +90,9 @@ data class DrawerUiState(
 /** Chats per "Show older chats" step (the server's cap for one request). */
 const val PAGE = 100
 
+/** The most chats the list holds: every refresh re-reads them all, one request per [PAGE]. Older ones are found by search. */
+const val MAX_CHATS = 500
+
 /** Characters a query needs before the drawer asks the server (`/api/sessions/search`). */
 const val MIN_SEARCH = 2
 
@@ -220,7 +223,7 @@ class DrawerViewModel(
 
     /** "Show older chats": loads one more page of chats (the list is then re-read at that length on every refresh). */
     fun loadMore() {
-        if (_state.value.loadingMore || !_state.value.hasMore) return
+        if (_state.value.loadingMore || !_state.value.hasMore || chatLimit >= MAX_CHATS) return
         chatLimit += PAGE
         _state.update { it.copy(loadingMore = true) }
         refresh()
@@ -246,7 +249,7 @@ class DrawerViewModel(
         repo.sessionsPage(chatLimit)
             .onSuccess { page ->
                 loadFailureReported = false
-                _state.update { it.copy(sessions = page.sessions, loading = false, hasMore = page.more, loadingMore = false) }
+                _state.update { it.copy(sessions = page.sessions, loading = false, hasMore = page.more && chatLimit < MAX_CHATS, loadingMore = false) }
             }
             .onFailure {
                 _state.update { it.copy(loading = false, loadingMore = false) }

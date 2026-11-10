@@ -1,9 +1,18 @@
 package app.tsukaima.data.api
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.intOrNull
 
 @Serializable
 data class HealthDto(
@@ -43,6 +52,19 @@ data class SystemStatsDto(
     val memory: JsonObject? = null,
 )
 
+/**
+ * A flag that some routes send as a JSON boolean and others as the database's `0` / `1` (the session list converts
+ * `pinned`, a raw row does not): any of them is read; anything else is false.
+ */
+object FlagSerializer : KSerializer<Boolean> {
+    override val descriptor = PrimitiveSerialDescriptor("Flag", PrimitiveKind.BOOLEAN)
+    override fun serialize(encoder: Encoder, value: Boolean) = encoder.encodeBoolean(value)
+    override fun deserialize(decoder: Decoder): Boolean {
+        val element = (decoder as? JsonDecoder)?.decodeJsonElement() as? JsonPrimitive ?: return decoder.decodeBoolean()
+        return element.booleanOrNull ?: ((element.intOrNull ?: 0) != 0)
+    }
+}
+
 /** The drawer's sessions as loaded so far; [more]: the server probably has older chats ([HermesApi.drawerPage]). */
 data class DrawerSessions(val sessions: List<SessionDto>, val more: Boolean)
 
@@ -62,9 +84,9 @@ data class SessionDto(
     /** Search hits only: the matching text with `>>>` / `<<<` around the match. */
     val snippet: String? = null,
     /** Kept at the top of every client's list (`PATCH … {pinned}`). */
-    val pinned: Boolean = false,
+    @Serializable(with = FlagSerializer::class) val pinned: Boolean = false,
     /** Not ended and active in the last minutes, as the server judges it: a turn is probably running. */
-    @SerialName("is_active") val isActive: Boolean = false,
+    @SerialName("is_active") @Serializable(with = FlagSerializer::class) val isActive: Boolean = false,
     /** Unix seconds of the latest activity in the session (across its compression chain). */
     @SerialName("last_active") val lastActive: Double? = null,
 ) {

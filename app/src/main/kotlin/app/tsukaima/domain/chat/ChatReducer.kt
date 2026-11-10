@@ -235,9 +235,15 @@ object ChatReducer {
     fun onSteered(state: ChatState, text: String, localId: String): ChatState =
         pinQueued(state.copy(items = state.items + ChatItem.UserMessage(localId, text, steer = true, steerWaiting = true)))
 
-    /** The steer of bubble [localId] did not reach the turn (refused, or the call failed): the bubble goes. */
-    fun onSteerDropped(state: ChatState, localId: String): ChatState =
-        state.copy(items = state.items.filterNot { it.id == localId && it is ChatItem.UserMessage && it.steer })
+    /**
+     * The steer of bubble [localId] did not reach the turn (refused, or the call failed): the bubble goes. The turn
+     * may have ended first, which turned the unread steer into a queued echo ([afterTurnEnd]); the server holds no
+     * such message, so that echo goes too, and with it the wait for its turn.
+     */
+    fun onSteerDropped(state: ChatState, localId: String): ChatState {
+        val items = state.items.filterNot { it.id == localId && it is ChatItem.UserMessage && (it.steer || it.queued && it.rowId == null) }
+        return state.copy(items = items, queuedTurnNext = state.queuedTurnNext && items.any { it is ChatItem.UserMessage && it.queued })
+    }
 
     /**
      * `prompt.submit` accepted user message [localId]: stores its persisted [userRowId] (null = not proven yet, kept
@@ -963,7 +969,8 @@ object ChatReducer {
         if (reply != null && replyRow != null && !reply.streaming) items[replyIndex] = reply.copy(rowId = replyRow)
         // `user_row_ids`: the turn's user rows in order, its own first and then each steer it read.
         val steerRows = (turn["user_row_ids"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.longOrNull }.drop(1)
-        val steers = (userIndex + 1 until nextUser).filter { (items[it] as? ChatItem.UserMessage)?.steer == true }
+        // Only a steer the agent read has a row; one still waiting was not delivered in this turn.
+        val steers = (userIndex + 1 until nextUser).filter { (items[it] as? ChatItem.UserMessage)?.let { m -> m.steer && !m.steerWaiting } == true }
         if (steers.size == steerRows.size) {
             steers.zip(steerRows).forEach { (i, row) -> items[i] = (items[i] as ChatItem.UserMessage).let { it.copy(rowId = it.rowId ?: row) } }
         }

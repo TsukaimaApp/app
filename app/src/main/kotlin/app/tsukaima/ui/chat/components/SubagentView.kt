@@ -23,6 +23,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -120,7 +121,8 @@ fun SubagentView(
             }
             if (running && canAct) {
                 var draft by rememberSaveable(item.id) { mutableStateOf("") }
-                var sending by rememberSaveable(item.id) { mutableStateOf(false) }
+                // Not saved: after a rotation the answer of a send in flight has no one to clear it.
+                var sending by remember(item.id) { mutableStateOf(false) }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()

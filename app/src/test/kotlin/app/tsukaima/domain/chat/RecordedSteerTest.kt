@@ -138,4 +138,16 @@ class RecordedSteerTest {
         val mid = states(upTo = frames.indexOfFirst { it.seq == steerAfter } + 1).last()
         assertTrue(ChatReducer.onSteerDropped(mid, "steer-1").items.none { it.id == "steer-1" })
     }
+
+    /** The turn ended before the server answered the steer, and the answer is a refusal: nothing may stay behind. */
+    @Test
+    fun aSteerRefusedAfterTheTurnEndedLeavesNoQueuedGhost() {
+        val lastTool = frames.last { it.type == "tool.complete" }.seq
+        val end = states(steerAt = lastTool).last()
+        assertTrue(end.queuedTurnNext)
+        val dropped = ChatReducer.onSteerDropped(end, "steer-1")
+        assertTrue(dropped.items.none { it.id == "steer-1" })
+        assertFalse(dropped.queuedTurnNext)
+        assertFalse(dropped.queuesSends)
+    }
 }
