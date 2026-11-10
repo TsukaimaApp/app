@@ -82,6 +82,8 @@ sealed interface ChatItem {
          * ([ChatReducer.onToolOutputs]).
          */
         val outputPending: Boolean = false,
+        /** The latest `tool.progress` of a running call (an MCP server's progress notification); null without any. */
+        val progress: ToolProgress? = null,
     ) : ChatItem
 
     /**
@@ -238,6 +240,16 @@ enum class TodoStatus {
 
 /** What a [ChatItem.SideNote] is: a side question (`prompt.btw`) or a background task (`prompt.background`). */
 enum class SideKind { Question, Background }
+
+/**
+ * `tool.progress {progress, total?, percent?, message?}`: how far a running tool call is. [percent] is the server's,
+ * else `progress / total`; null when the tool reports no total.
+ */
+data class ToolProgress(val percent: Int?, val message: String?) {
+    /** "40% · Fetching page 2", "40%", "Fetching page 2"; null when there is nothing to show. */
+    val label: String?
+        get() = listOfNotNull(percent?.let { "$it%" }, message?.takeIf { it.isNotBlank() }).joinToString(" · ").ifEmpty { null }
+}
 
 /** `tool.output_risk`: [level] as the server rates it (`low`/`medium`/`high`), its [findings], and whether the output was [redacted]. */
 data class ToolRisk(val level: String, val findings: List<String>, val redacted: Boolean)

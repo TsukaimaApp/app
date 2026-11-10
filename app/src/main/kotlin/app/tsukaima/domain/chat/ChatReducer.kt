@@ -388,6 +388,7 @@ object ChatReducer {
             "tool.generating" -> s.copy(status = AgentStatus.Tool(humanName(p.string("name") ?: "tool")))
             "tool.start" -> onToolStart(s, p)
             "tool.complete" -> onToolComplete(s, p, flair)
+            "tool.progress" -> onToolProgress(s, p)
             "message.delta" -> {
                 val (withItem, current) = ensureStreamingAssistant(s, ev.seq)
                 val raw = p.string("text").orEmpty()
@@ -642,6 +643,23 @@ object ChatReducer {
             totalTokens = long("total"),
         )
         return if (parsed == SessionUsage()) state else state.copy(usage = parsed)
+    }
+
+    /**
+     * `tool.progress {tool_id, name, progress, total?, percent?, message?}` (Hermes 0.23: an MCP server's progress
+     * notification, at most one per 500 ms per call): the running row of that call shows it. A row that is not
+     * running (a late frame) is left alone.
+     */
+    private fun onToolProgress(s: ChatState, p: JsonObject): ChatState {
+        val toolId = p.string("tool_id") ?: return s
+        val row = s.items.lastOrNull { it is ChatItem.ToolCall && callIdOf(it.id) == toolId } as? ChatItem.ToolCall ?: return s
+        if (row.status != ToolStatus.Running) return s
+        val done = p["progress"]?.primitive()?.doubleOrNull
+        val total = p["total"]?.primitive()?.doubleOrNull
+        val percent = p["percent"]?.primitive()?.intOrNull
+            ?: if (done != null && total != null && total > 0) (done * 100 / total).toInt() else null
+        val progress = ToolProgress(percent?.coerceIn(0, 100), p.string("message")?.trim()?.takeIf { it.isNotEmpty() })
+        return s.copy(items = s.items.replace(row) { row.copy(progress = progress) })
     }
 
     /** `tool.output_risk {tool_id, risk, findings, redacted}`: flags the tool row it names. */
@@ -1006,6 +1024,7 @@ object ChatReducer {
             exitCode = exitCode,
             durationS = p["duration_s"]?.primitive()?.doubleOrNull,
             outputPending = false,
+            progress = null,
         )
         val items = if (existing != null) s.items.replace(existing) { done } else withoutEmptyBubble(s.items) + done
         // The agent reads a waiting steer after its tool calls, before it asks the model again.

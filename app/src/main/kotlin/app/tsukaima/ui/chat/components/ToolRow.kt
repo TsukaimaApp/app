@@ -25,6 +25,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import android.os.SystemClock
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -123,7 +125,7 @@ fun ToolRow(
                 modifier = Modifier.weight(1f),
             )
             when (item.status) {
-                ToolStatus.Running -> Unit
+                ToolStatus.Running -> RunningMeta(item)
                 ToolStatus.Interrupted -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     StatusDot(StatusVisual(colors.warn, pulsing = false))
                     Text("Interrupted", style = TsukaimaType.caption, color = colors.warn, maxLines = 1)
@@ -164,6 +166,51 @@ fun ToolRow(
         item.orphanNote?.let { WarnLine(it) }
     }
 }
+
+/**
+ * When each running tool row was first shown, by row id (the server sends no start time). Kept outside the
+ * composition so a row scrolled away and back keeps counting from the same moment; the oldest entries go first.
+ */
+internal object ToolClock {
+    private const val KEPT = 64
+    private val starts = LinkedHashMap<String, Long>()
+
+    @Synchronized
+    fun startOf(id: String, now: Long): Long {
+        starts[id]?.let { return it }
+        if (starts.size >= KEPT) starts.remove(starts.keys.first())
+        starts[id] = now
+        return now
+    }
+}
+
+/** "0:07", "2:05", "1:02:03" for [seconds] of running time. */
+internal fun elapsedText(seconds: Long): String {
+    val s = seconds.coerceAtLeast(0)
+    return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
+}
+
+/**
+ * A running row's right side: how far the tool says it is ([ChatItem.ToolCall.progress], its percentage) and how
+ * long it has run, counted from when the row first appeared and shown from [ELAPSED_FROM_S] seconds on (a quick
+ * tool finishes before it would show). A command that runs for minutes is then visibly alive, not hung.
+ */
+@Composable
+private fun RunningMeta(item: ChatItem.ToolCall) {
+    val colors = MaterialTheme.tsukaima
+    val started = remember(item.id) { ToolClock.startOf(item.id, SystemClock.elapsedRealtime()) }
+    val seconds by produceState((SystemClock.elapsedRealtime() - started) / 1000, item.id) {
+        while (true) {
+            value = (SystemClock.elapsedRealtime() - started) / 1000
+            delay(1000)
+        }
+    }
+    val text = listOfNotNull(item.progress?.percent?.let { "$it%" }, elapsedText(seconds).takeIf { seconds >= ELAPSED_FROM_S })
+        .joinToString(" · ")
+    if (text.isNotEmpty()) Text(text, style = TsukaimaType.caption, color = colors.ink3, maxLines = 1)
+}
+
+private const val ELAPSED_FROM_S = 3L
 
 /** Where a [ToolImage] is: waiting for a tap (a foreign http(s) origin), loading, shown, or unavailable. */
 private sealed interface ThumbLoad {
@@ -273,9 +320,16 @@ internal fun argsText(args: JsonObject?): String? =
         "$key: ${(value as? JsonPrimitive)?.takeIf { it.isString }?.content ?: value.toString()}"
     }
 
-/** What an open row shows as its output: the text, "Loading output…" while a history row waits for it, else "No output". */
+/**
+ * What an open row shows as its output: the text; "Loading output…" while a history row waits for it; for a running
+ * call its progress message, else "Running…" (Hermes sends a tool's output only when it ends); else "No output".
+ */
 internal fun outputText(item: ChatItem.ToolCall): String =
-    item.output?.takeIf { it.isNotBlank() } ?: if (item.outputPending) "Loading output…" else "No output"
+    item.output?.takeIf { it.isNotBlank() } ?: when {
+        item.outputPending -> "Loading output…"
+        item.status == ToolStatus.Running -> item.progress?.message?.takeIf { it.isNotBlank() } ?: "Running…"
+        else -> "No output"
+    }
 
 /** "Output flagged: high risk · prompt injection · redacted". */
 internal fun riskText(risk: ToolRisk): String =
