@@ -100,6 +100,9 @@ class ChatViewModel(
     private var openRetried = false
     private var userCounter = 0L
 
+    /** [send] already waited once for the slash catalog: a server that cannot give one must not hold every send. */
+    private var catalogAwaited = false
+
     /** What a failed send carried, by its bubble's local id, for Retry / Dismiss. */
     private data class FailedSend(
         val text: String,
@@ -379,7 +382,18 @@ class ChatViewModel(
         val live = chat.liveSessionId ?: return backend.toast("Still connecting to Hermes")
         _state.value.pendingEdit?.let { row -> return edits.send(live, text, row) }
         // A slash command the server knows is run, not sent to the model ([ChatCommands]); anything else is a message.
-        if (_state.value.attachments.none { it.status == AttachmentStatus.Ready } && commands.run(live, text)) return
+        val slash = text.startsWith("/") && _state.value.attachments.none { it.status == AttachmentStatus.Ready }
+        if (slash && _state.value.commands == null && !catalogAwaited) {
+            // Sent before the catalog answered (pasted and sent at once): wait for it, once, then decide.
+            catalogAwaited = true
+            launch {
+                commands.load()
+                commands.awaitLoaded()
+                if (_state.value.input.trim() == text) send()
+            }
+            return
+        }
+        if (slash && commands.run(live, text)) return
         startTurn(live, text, attachments.takeReady(), fromComposer = true)
     }
 
@@ -1053,7 +1067,10 @@ class ChatViewModel(
                 return@attempt
             }
             backend.updateSettings { it.copy(model = model, modelProvider = provider) }
-            _state.update { it.copy(model = r.value.ifBlank { model }, provider = provider) }
+            _state.update {
+                val chosen = r.value.ifBlank { model }
+                it.copy(model = chosen, provider = provider, chat = ChatReducer.onModelChosen(it.chat, chosen))
+            }
             when {
                 r.deferred -> backend.toast("Model switches when this turn ends")
                 r.warning.isNotBlank() -> backend.toast(ChatSync.toastLine(r.warning))

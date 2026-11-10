@@ -650,6 +650,12 @@ object ChatReducer {
         return withUsage(state.copy(reasoningEffort = effort, model = model), info["usage"])
     }
 
+    /**
+     * The user picked [model] for the session: it is the session's own model from now on, and a fallback mark from
+     * the model before it no longer applies.
+     */
+    fun onModelChosen(state: ChatState, model: String): ChatState = state.copy(model = model, fallback = false)
+
     /** [state] with the counters of a `usage` object; an empty or absent one changes nothing. */
     fun withUsage(state: ChatState, usage: JsonElement?): ChatState {
         val u = usage as? JsonObject ?: return state

@@ -47,6 +47,11 @@ internal class ChatCommands(
         }
     }
 
+    /** Returns when the catalog read in flight (if any) has ended, whether it succeeded or not. */
+    suspend fun awaitLoaded() {
+        loading?.join()
+    }
+
     /**
      * Runs [text] as a slash command when the catalog knows its first word; false when it is not one (the caller
      * sends it as a message). True means it was taken: the composer is cleared and a note waits for the answer.

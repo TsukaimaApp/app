@@ -528,6 +528,26 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun aCommandSentBeforeTheCatalogAnsweredWaitsForIt() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val b = backend().apply {
+            transport.on("commands.catalog", obj(catalogJson))
+            transport.gateNext["commands.catalog"] = gate
+            transport.on("slash.exec", obj("""{"output":"No active goal."}"""))
+        }
+        val vm = vm(b)
+        advanceUntilIdle()
+        vm.setInput("/goal")
+        vm.send()
+        advanceUntilIdle()
+        assertTrue("held until the catalog says whether it is a command", "prompt.submit" !in b.transport.methods() && "slash.exec" !in b.transport.methods())
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals("/goal", b.transport.last("slash.exec")["command"]!!.jsonPrimitive.content)
+        assertTrue("prompt.submit" !in b.transport.methods())
+    }
+
+    @Test
     fun aRefusedCommandShowsTheServersReason() = runTest(dispatcher) {
         val b = backend().apply {
             transport.on("commands.catalog", obj("""{"pairs":[["/undo","Undo"]],"canon":{"/undo":"/undo"}}"""))
