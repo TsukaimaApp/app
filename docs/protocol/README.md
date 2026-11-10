@@ -521,22 +521,98 @@ Tagged as in v0.9.0: **[live]** probed, **[source]** read from the 0.22.2 source
 - `prompt.submit` takes two more optional params for delegated voice turns: `surface` (`"voice-live"`) and
   `voice_context` (recent spoken transcript; Hermes keeps it only for that surface, capped at 6,000 chars).
 
-### `status.update` — what the app shows (2026-11-09, from the Hermes 0.23.0 gateway review)
+### `status.update` — what the app shows (recorded from Hermes v0.23.1, 2026-11-10)
 
-`status.update {kind, text}` (`tui_gateway/server.py::_status_update`) is Hermes’ transient status line; kinds seen:
-`lifecycle` (diagnostics from `agent/status_output.py::_emit_diagnostic_status`, a warning carries a leading ⚠️),
-`warn`, `compacting` / `compressing` (server-side context compression; the completion line is "✓ Context compression
-complete"), `ready`, `process`, `goal`, `loop`, `heartbeat`, and a bare `status`. Diagnostics respect
-`display.suppress_warning_notifications`. The app keeps: `warn` and marked `lifecycle` lines → `ChatItem.Notice`
-(warning); `compacting`/`compressing` → `ChatState.compacting` until the completion line (a quiet notice), `ready`
-or the turn end. Everything else is dropped. The fallback notice reads `⚠️ Model fallback: <model> via <provider>
-unavailable (<reason>); using <model> via <provider>. Primary retry eligible in ~60 s; recovery is not guaranteed.`
-(`hermes_cli/fallback_config.py`); a config-time fallback arrives once on the session’s first successful reply, a
-mid-turn one when the fallback call succeeds. `message.complete` does **not** carry the serving model: the only
-per-turn truth is the server log (`agent.conversation_loop: API call #N: model=… provider=…`).
+`status.update {kind, text}` (`tui_gateway/server.py::_status_update`) is Hermes’ transient status line. The shapes
+below are from recordings (`app/src/test/resources/chat/recorded-compaction.jsonl`,
+`recorded-compaction-refused.jsonl`, `recorded-fallback-turns.jsonl`), not from reading the source; the 0.10.1
+handling was written from the source and got four of them wrong.
+
+| Frame | Sent for | App |
+|---|---|---|
+| `{kind:"compacting", text:"📦 Preflight compression: …"}`, `{kind:"compacting", text:"🗜️ Compacting context — …"}` | An automatic compaction at the start of a turn (also during a manual one) | `ChatState.compacting` → status "Compacting context…" |
+| `{kind:"compacted", text:"✓ Context compaction complete — continuing turn..."}` | It finished | Clears the state; quiet notice "Context compacted" |
+| no frame | It was refused or changed nothing | The turn’s next output (`message.delta`, `reasoning.delta`, `tool.*`) clears the state |
+| `{kind:"compressing", text:"⠋ compressing 8 messages (~17,911 tok)…"}` | A manual `session.compress` started | Sets the state |
+| `{kind:"status", text:"ready"}` | A manual compress ended. A bare status word travels as kind `status` with the word as its text; there is no kind `ready` | Clears the state |
+| `{kind:"compacting", text:"⚠️  Session compressed 2 times — accuracy may degrade. …"}` | A warning the gateway re-tags because its text mentions compression | Warning notice; never sets the state |
+| `{kind:"warn", text:"⚠️ Compression refused: …"}`, any `warn` | Degraded paths | Warning notice |
+| `{kind:"lifecycle", text:"⚠️ Model fallback: <model> via <provider> unavailable (<reason>); using <model> via <provider>."}` | The fallback served this turn; sent before `message.complete` | Warning notice; sets `ChatState.fallback` |
+| `{kind:"lifecycle", text:"✅ Primary model restored: …; fallback … is no longer active."}` | Start of the next turn | Quiet notice; clears `fallback` |
+| `{kind:"lifecycle", text:"❌ …"}` | Terminal failures (retries exhausted, credits gone); from the source, not recorded | Error notice |
+| `{kind:"process", text:"Subagent Task Interrupted: …"}`, `goal`, `loop`, `heartbeat`, other `lifecycle` | Background chatter | Dropped |
+
+Diagnostics respect `display.suppress_warning_notifications`. The state also clears at the turn end and when the
+connection is lost.
+
+**The model that answered.** `message.complete.usage.model`, `session.usage.usage.model` and the `session.info`
+after the turn all name the model the agent was on when the turn ended; on a fallback turn that is the fallback
+model. The next turn starts with the "Primary model restored" line and **no** `session.info`, so a client that
+copies `session.info.model` into its header shows the fallback model until the turn after. The app keeps the
+session’s own model apart (`ChatState.model`, not updated from `session.info` while `fallback` is set) and labels a
+reply with `usage.model` when the two differ. `TranscriptMessage` has no model field, so the label is lost when the
+chat is loaded again.
 
 `source: "tsukaima"` is stored verbatim and unvalidated. It is not in `agent/session_source.py`
 `UI_TRANSPORT_SOURCES` (`tui`, `desktop`), so Tsukaima sessions are hidden from the TUI/dashboard resume pickers and
 `hermes -c`; toolsets fall back to `platform_toolsets.cli`. The surface description the model gets is the operator’s
 `platform_hints.tsukaima` config entry (`hermes config get platform_hints.tsukaima`), which must track
 `domain/markdown/Markdown.kt`’s block types (it renders GFM tables, so a hint saying otherwise is stale).
+
+### v0.11.0 — steer, subagents, slash commands, branch, session edits (verified live against v0.23.1, 2026-11-10)
+
+Recordings for each are in `app/src/test/resources/chat/` (`recorded-steer-*`, `recorded-subagent*`,
+`recorded-slash-commands.json`, `recorded-branch.json`).
+
+**Steer.** `session.steer {session_id*, text*}` → `{status, text}`. `queued` = taken: the agent reads it after its
+current tool batch, before the next model call, as a user row of its own. `rejected` = no turn is running (send it
+as a normal message). While a compression runs the text is queued as a next-turn prompt instead, and the answer is
+also `queued`. No event marks the delivery. History: the row is `{role:"user", text:<the user's words>,
+display_kind:"steer", row_id}` right after the tool row it followed; `message.complete.persisted_turn.user_row_ids`
+is `[<the turn's row>, <one per steer>]`. A steer the turn ends without reading (`result.pending_steer`) is put at
+the end of the server's prompt queue and runs as its own turn; Stop (hard interrupt) drops it.
+`session.redirect` exists beside it and is not used.
+
+**Subagents.** A `delegate_task` call can return at once (`result.mode: "background"`); the child's `subagent.*`
+events then continue after the turn's `message.complete`, and its completion starts a new turn by itself (no user
+row from this client). Every `subagent.*` payload carries `subagent_id`, `child_session_id`, `model`, `tool_count`.
+- `subagent.tail {session_id*, subagent_id*}` → `{available, text, truncated}`: the last 16 KB of the child's live
+  transcript (plain text; a file header up to a `=====` line, then `HH:MM:SS kind | text` lines). `available: false`
+  before the first line and after the child ended.
+- `subagent.interrupt {session_id*, subagent_id*}` → `{found}`. The child ends with `subagent.complete {status:
+  "interrupted", summary}` and a `status.update {kind:"process", text:"Subagent Task Interrupted: …"}`.
+- `subagent.steer {session_id*, subagent_id*, text*}` → `{status: "queued" | "rejected"}`.
+- `subagent.list {session_id*}` → `{subagents[], delegations[]}` (not used).
+
+**Slash commands.** `commands.catalog {session_id}` works for `source: "tsukaima"` (152 `pairs`, 54 skills on the
+test server): `pairs` is `[name, description]`, `canon` maps every accepted name to its command, `skills` and
+`plugin_commands` are keyed by name, `commands[name].desktop` is `terminal` / `hidden` / `settings` /
+`composer-voice` / `advanced` / null. Run: `slash.exec {session_id*, command*}` → `{output, warning?}` or a
+directive; error 4018 "use command.dispatch" for skills and pending-input commands → `command.dispatch {name*, arg,
+session_id}` → `{type, output?, message?, display?, notice?, target?}` with `type` `exec` / `plugin` (show
+`output`), `send` / `skill` (submit `message` as a turn; show `display` or the typed command), `prefill`, `alias`.
+A 4018 from both calls is the command's own refusal ("no user messages to undo"). `/undo`, `/retry`, `/compress`
+rewrite the stored transcript. An unknown command answers `{output: "Unknown command /x — nothing was sent. …"}`.
+
+**Branch.** `session.branch {session_id* (live), count?, name?}` → `{session_id, stored_session_id, title, parent,
+message_count, messages[], info}`. The child holds the first `count` rows of the parent's user and assistant rows
+that have visible text; tool rows and reasoning-only rows are not in that list and are **not copied**, so the
+child's model reads what was said but not the tool results (in the probe it said so itself and ran the tool again).
+The parent is untouched. The list row of a child carries `parent_session_id`.
+
+**Session edits need an identity.** Since 0.23, `PATCH /api/sessions/{id}` (`title`, `archived`, `pinned`,
+`hidden`, `unread`) and `DELETE /api/sessions/{id}` answer **409 `client_upgrade_required`** without `request_id`
+(any unique string) and `expected_revision` (the row's `runtime_revision`, from `GET /api/sessions/{id}` or the
+list). `DELETE` takes them as query parameters and also needs `expected_generation` (`runtime_generation`), else
+400 `invalid_params`. A stale revision answers 409 `revision_conflict`. The answer is `{ok, revision, …}`. App
+versions up to 0.10.3 sent bare edits, so rename, archive and delete failed against 0.23.
+
+**Session list.** `GET /api/sessions` takes `offset` and `order=recent` (latest activity first; default
+`created`) and answers `{sessions, total, limit, offset}`. Rows carry `pinned`, `is_active` (not ended and active
+in the last minutes), `last_active`, `parent_session_id`.
+
+**Other events.** `tool.progress {tool_id, name, progress, total?, percent?, message?}`: an MCP tool's progress, at
+most one per 500 ms per call (contract only; not recorded). `reasoning.available {text}`: the reasoning of a
+response whose provider did not stream it, cut to 500 characters; not sent when `reasoning.delta` carried it
+(0.22 sent the answer text here). `session.reclaimed {session_id, stored_session_id, reason}`: a broadcast when the
+server drops a live session (`idle_timeout`, `lru_evict`, `ws_orphan_reap`).

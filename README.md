@@ -3,7 +3,7 @@
 Native Android client (Kotlin + Jetpack Compose) for a self-hosted [Hermes Agent](https://github.com/NousResearch/hermes-agent).
 Chat with your agent, browse sessions, manage cron jobs, and get actionable notifications from your phone.
 
-Version **0.10.3** (versionCode 27). Changes per release: [`CHANGELOG.md`](CHANGELOG.md).
+Version **0.11.0** (versionCode 28). Changes per release: [`CHANGELOG.md`](CHANGELOG.md).
 
 Runs on Android 10+ phones and tablets with a 64-bit ARM processor (arm64-v8a only: the live voice engine’s native
 WebRTC library would add 7–25 MB per extra ABI, and every Android 10+ phone is 64-bit ARM). The APK is about 18 MB.
@@ -37,7 +37,12 @@ WebRTC library would add 7–25 MB per extra ABI, and every Android 10+ phone is
 - **Send to Tsukaima** from any app’s share sheet: a link, text, screenshots, photos or a PDF land in the composer
   of your last chat or a new one (you pick on a small "Send to Hermes" card); nothing is sent until you tap Send
 - Resume a running chat with the reply streamed so far; replay missed events after a reconnect
-- Sessions drawer: server-side **search**, rename, archive, delete, live refresh; working-directory and model pickers
+- **Steer** a running turn with a message, without stopping it; **slash commands** and skills from the composer
+  (`/goal`, `/undo`, a skill by name); **branch** a chat at any message and keep both lines
+- **Subagents**: watch one's live transcript, stop it or message it, without stopping the turn
+- Running tools show their running time; a reply written by a fallback model is labelled with that model
+- Sessions drawer: server-side **search**, rename, archive, delete, **pin**, live refresh, older chats on demand, the
+  origin of chats from other platforms; working-directory and model pickers
 - Cron job management (create, edit, pause/resume, run now)
 - Status home: gateway state, platforms (live refresh), start/stop/restart
 - Settings sections: Hermes instance (sign in / **sign out**), profile, model, skills and **toolsets** (both

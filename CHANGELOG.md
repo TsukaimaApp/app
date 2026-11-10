@@ -3,6 +3,47 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.11.0 — 2026-11-10 (versionCode 28)
+
+Everything here was checked against recordings from Hermes v0.23.1. Nothing was checked on a phone.
+
+### Fixed
+- Rename, archive, unarchive and delete of a session failed against Hermes 0.23 ("Couldn't rename the session" and
+  the like), from the drawer and from the chat menu. That server refuses a session edit that does not name the
+  revision it changes. Each edit now reads the revision first and sends it.
+- "Compacting context…" could stay on the status line after the compaction was over, and the "Context compacted"
+  line never appeared. The app waited for a completion message that Hermes does not send in that form. It now
+  follows the real ones, and also ends the state when the turn produces output again, when the turn ends and when
+  the connection drops.
+- A warning that mentions compression ("Session compressed 2 times — accuracy may degrade") was taken for a running
+  compaction and not shown. It is a warning line now.
+- After a turn served by a fallback model, the model name in the top bar changed to the fallback model. It keeps
+  the session's own model.
+
+### Added
+- Steer now: with a turn running and text typed, the top bar's menu has "Steer now". The text goes into the running
+  turn, which reads it after its current tool call. Nothing is stopped. If the turn ends before it read the
+  message, the message is sent as the next turn.
+- The model that answered: when a fallback model wrote a reply, its name is shown under that reply. The "Primary
+  model restored" line and Hermes' failure lines (retries exhausted, credits gone) are shown too. The label is lost
+  when the chat is loaded again, because the stored history has no model.
+- Running tools: a tool row that has run for 3 seconds shows its running time, and an MCP tool that reports
+  progress shows its percentage and message. Hermes sends a command's output only when it ends.
+- Subagent page: an opened subagent row has "Watch", which shows that subagent's live transcript, with Stop and a
+  message field for that subagent alone.
+- Slash commands: typing `/` in the composer suggests the server's commands and skills. A known command is run on
+  the server and not sent to the model: `/goal`, `/undo`, `/personality`, `/context`, a skill by name. Its output
+  appears as a note in the chat.
+- Branch from here: the long-press menu of a message makes a new chat that holds this one up to that message, and
+  opens it. The original chat is not changed. From one of your own messages the branch stops before it and the
+  message waits in the new chat's composer. Hermes copies the text of the conversation, not the tool results.
+- Sessions drawer: chats are sorted by latest activity; Pin and Unpin, with a Pinned section; a dot on chats that
+  are active now; the origin of chats that did not start in the app ("Telegram · 2h"); "Show older chats" loads
+  past the first 100.
+- Reasoning from a provider that does not stream it appears with the reply (folded), without a reload.
+- A live session that Hermes drops while the chat is open is resumed at once.
+- An event type the app does not know is logged once, so it shows in a problem report.
+
 ## 0.10.3 — 2026-11-10 (versionCode 27)
 
 ### Fixed
