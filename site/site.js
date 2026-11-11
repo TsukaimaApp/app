@@ -26,7 +26,7 @@
     card.hidden = true;
     done.hidden = false;
     done.classList.toggle('denied', denied);
-    msg.textContent = denied ? 'Understood — I left it running.' : ok;
+    msg.textContent = denied ? 'Understood. I left it running.' : ok;
     reset.focus();
   };
   approve.onclick = () => answer(false);

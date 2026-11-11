@@ -258,3 +258,41 @@ button.btn{cursor:pointer}
 .pm{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-start;padding:6px 0 4px}
 .pm>*{flex-shrink:0}
 .gest{width:108px;height:4px;margin:2px auto 8px;border-radius:99px;background:var(--text-body);opacity:.35}
+
+/* ---- 0.15 page: reasoning note, folded steps, offline, processes, send menu, foldable ---- */
+.sl u{color:var(--accent-pressed);text-decoration:underline dashed;text-underline-offset:4px;text-decoration-thickness:1px}
+.sl .running{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font:var(--type-caption);color:var(--accent-pressed)}
+.sl .running .d{background:var(--accent);animation:p 2s infinite}
+.thought{margin:6px var(--gutter-page);padding:2px 0 2px 12px;border-left:2px solid var(--accent)}
+.thought p{margin:0;font:var(--type-status);font-size:15px;line-height:1.45;color:var(--text-secondary);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden}
+.thought .tt{display:flex;align-items:center;gap:6px;margin-bottom:4px;font:var(--type-ui);font-style:normal;color:var(--accent-pressed)}
+.thought .tt .i{width:16px;height:16px}.thought .tt .i:last-child{color:var(--text-tertiary)}
+.toolrow .dur{flex-shrink:0;font:var(--type-caption);color:var(--text-tertiary)}
+.stepsline{display:flex;align-items:center;gap:10px;min-height:44px;padding:0 var(--gutter-page);font:var(--type-ui);color:var(--text-secondary)}
+.stepsline>span{flex:1}.stepsline span span{color:var(--text-tertiary)}.stepsline b{font-weight:inherit;color:var(--status-danger)}
+.stepsline .i{color:var(--text-tertiary)}
+.offbar{display:flex;align-items:center;gap:10px;min-height:44px;margin:0 12px 8px;padding:0 12px;border:1px solid var(--status-warn);border-radius:var(--radius-row);font:var(--type-ui);color:var(--text-body)}
+.offbar .i{color:var(--status-warn)}.offbar span span{color:var(--text-secondary)}
+.demo .cap{display:flex;align-items:center;justify-content:flex-end;gap:6px;max-width:none;margin:0 var(--gutter-page) 4px;font:var(--type-caption);color:var(--text-tertiary)}
+.demo .cap .i{width:14px;height:14px}
+.menu{margin:0 12px 10px;padding:6px;border:1px solid var(--border-hairline);border-radius:var(--radius-card);background:var(--surface-page)}
+.menu .citem .i{color:var(--text-secondary)}
+.composer .typed{color:var(--text-body)}
+.composer .send.stop{background:var(--status-danger);color:#fff}.composer .send.stop .i{width:20px;height:20px}
+.composer .send.more{background:var(--surface-sunken);color:var(--text-body);margin-left:4px}
+.proc{margin:8px var(--gutter-page);padding:10px 12px;border:1px solid var(--border-hairline);border-radius:var(--radius-row);background:var(--surface-page)}
+.proc .th{display:flex;align-items:center;gap:10px}.proc .th .i{color:var(--accent)}
+.proc code{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:var(--type-code);color:var(--text-body)}
+.proc small{font:var(--type-caption);color:var(--text-tertiary)}
+.proc p{margin:6px 0 8px;font:var(--type-code);font-size:12px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acts.l{justify-content:flex-start;gap:8px}
+.btn.sm{min-height:36px;padding:0 14px;font-size:13px}
+.facts.more{margin-top:72px}
+.fold{display:flex;max-width:860px;margin:0 auto 48px;aspect-ratio:860/600;border:1px solid var(--border-hairline);border-radius:28px;background:var(--surface-raised);overflow:hidden;position:relative}
+.fold::after{content:"";position:absolute;top:0;bottom:0;left:50%;width:1px;background:linear-gradient(var(--border-hairline),transparent 18%,transparent 82%,var(--border-hairline));pointer-events:none}
+.fold .drawer{width:36%;max-width:none;border-right:1px solid var(--border-hairline)}
+.fpane{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--surface-page)}
+.fbody{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:6px}
+.fpane .sl{flex-wrap:nowrap}
+@media (max-width:700px){.fold{aspect-ratio:auto;flex-direction:column}.fold::after{display:none}.fold .drawer{width:100%;border-right:0;border-bottom:1px solid var(--border-hairline)}.fold .dfoot{display:none}}
+@media (prefers-reduced-motion:reduce){.sl .running .d{animation:none}}

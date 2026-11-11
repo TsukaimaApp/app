@@ -228,14 +228,14 @@ const REQUIRED_TEXT = [
   'Android 10+',
   'about 18 MB',
   'no account',
-  'Connected · Hermes 0.22.2',
+  'Connected · Hermes 0.23.0',
   'Opens in Obtainium on your phone',
   'Running shell command',
   'Hermes dashboard',
   'username and password',
   'not affiliated with Nous',
 ];
-const REQUIRED_SECTION_IDS = ['how', 'features', 'voice', 'selfhost', 'faq'];
+const REQUIRED_SECTION_IDS = ['how', 'features', 'fold', 'voice', 'selfhost', 'faq'];
 
 function checkRequired(file, html) {
   const markup = html.replace(/<!--[\s\S]*?-->/g, ' ').replace(/<(script|style|template)\b[\s\S]*?<\/\1\s*>/gi, ' ');

@@ -3,21 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tsukaima — a familiar for Hermes Agent</title>
+<title>Tsukaima · Android client for Hermes Agent</title>
 <link rel="stylesheet" href="site.css">
 <link rel="canonical" href="https://tsukaima.app/">
-<meta name="description" content="A native Android client for your self-hosted Hermes Agent. Chat, watch it work, approve tool calls, talk to it — no account, no middleman.">
+<meta name="description" content="Android client for a self-hosted Hermes Agent. Approve tool calls, steer a running turn, talk to it, and keep reading when the connection drops.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://tsukaima.app/">
-<meta property="og:title" content="Tsukaima — a familiar for Hermes Agent">
-<meta property="og:description" content="A native Android client for your self-hosted Hermes Agent. Chat, watch it work, approve tool calls, talk to it — no account, no middleman.">
+<meta property="og:title" content="Tsukaima · Android client for Hermes Agent">
+<meta property="og:description" content="Android client for a self-hosted Hermes Agent. Approve tool calls, steer a running turn, talk to it, and keep reading when the connection drops.">
 <meta property="og:image" content="https://tsukaima.app/img/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Tsukaima — a familiar for your Hermes Agent">
+<meta property="og:image:alt" content="Tsukaima, a familiar for your Hermes Agent">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Tsukaima — a familiar for Hermes Agent">
-<meta name="twitter:description" content="A native Android client for your self-hosted Hermes Agent. Chat, watch it work, approve tool calls, talk to it — no account, no middleman.">
+<meta name="twitter:title" content="Tsukaima · Android client for Hermes Agent">
+<meta name="twitter:description" content="Android client for a self-hosted Hermes Agent. Approve tool calls, steer a running turn, talk to it, and keep reading when the connection drops.">
 <meta name="twitter:image" content="https://tsukaima.app/img/og.png">
 <link rel="icon" type="image/svg+xml" href="img/favicon.svg">
 <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
@@ -38,13 +38,20 @@
 <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><circle cx="12" cy="12" r="6.5"></circle><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"></path></symbol>
 <symbol id="i-todo" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"></circle></symbol>
 <symbol id="i-doing" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"></circle><path d="M12 4.5a7.5 7.5 0 0 1 0 15z" fill="currentColor"></path></symbol>
+<symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.5l1.9 5.6 5.6 1.9-5.6 1.9L12 18.5l-1.9-5.6-5.6-1.9 5.6-1.9z" fill="currentColor" stroke="none"></path></symbol>
+<symbol id="i-list" viewBox="0 0 24 24"><path d="M9 7h11M9 12h11M9 17h11M4.5 7h.01M4.5 12h.01M4.5 17h.01"></path></symbol>
+<symbol id="i-cloudoff" viewBox="0 0 24 24"><path d="M3.5 3.5l17 17M7 18h10a4 4 0 0 0 2.5-7.1M17.5 9.5A6 6 0 0 0 8 7M6 9.5A4.5 4.5 0 0 0 7 18"></path></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="M12 7.5V12l3 2"></path></symbol>
+<symbol id="i-stop" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor" stroke="none"></rect></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M4.5 12 19 5l-4.5 14-3-5.5z"></path></symbol>
+<symbol id="i-chat" viewBox="0 0 24 24"><path d="M5 5.5h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-8l-4 3.5v-3.5H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z"></path></symbol>
 <symbol id="i-done" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"></circle><path d="m8.7 12.2 2.3 2.3 4.4-4.6"></path></symbol>
 </svg>
 <div class="wrap">
 <header>
 <nav aria-label="Primary">
 <a class="lock" href="#"><img src="img/mark.svg" alt="Tsukaima" width="620" height="660">Tsukaima<span class="k" lang="ja">使い魔</span></a>
-<div class="links"><a href="#how">How it works</a><a href="#features">Features</a><a href="#voice">Voice</a><a href="#selfhost">Self-hosted</a><a href="#faq">FAQ</a><a href="https://github.com/TsukaimaApp/app">GitHub</a></div>
+<div class="links"><a href="#features">Features</a><a href="#fold">Foldables</a><a href="#voice">Voice</a><a href="#selfhost">Self-hosted</a><a href="#faq">FAQ</a><a href="https://github.com/TsukaimaApp/app">GitHub</a></div>
 </nav>
 </header>
 
@@ -53,7 +60,7 @@
 <div>
 <p class="status"><span class="dot"></span><span id="flair">Running shell command</span></p>
 <h1>A familiar for your Hermes Agent.</h1>
-<p class="lede">Tsukaima is a native Android client for Hermes Agent, the open-source autonomous agent by Nous Research. Chat with your agent, watch it work, approve tool calls and switch models — from your pocket, talking straight to your own instance.</p>
+<p class="lede">Tsukaima is an Android app for Hermes Agent, the open-source agent from Nous Research. It connects straight to the instance you run, shows each tool call as it happens, and puts Approve and Deny under your thumb.</p>
 <div class="cta">
 <a class="btn p" href="https://github.com/TsukaimaApp/app/releases/latest">Download APK</a>
 <a class="btn s" href="https://github.com/TsukaimaApp/app">View source</a>
@@ -62,43 +69,44 @@
 </div>
 <p class="fine"><small>Opens in Obtainium on your phone · <a href="https://github.com/ImranR98/Obtainium">Get Obtainium</a></small><small>Android 10+ · about 18 MB · no account</small></p>
 </div>
-<div id="d-phone" class="phone" role="img" aria-label="The Tsukaima chat screen">
+<div id="d-phone" class="phone" role="img" aria-label="The Tsukaima chat screen during a turn">
 <div class="sys" aria-hidden="true"><span>9:41</span><span class="bat"></span></div>
 <div class="tbar" aria-hidden="true"><span class="ib"><svg class="i" aria-hidden="true"><use href="#i-menu"></use></svg></span><span class="chip">Model<svg class="i" aria-hidden="true"><use href="#i-exp"></use></svg></span><span class="sp"></span><span class="ib"><svg class="i" aria-hidden="true"><use href="#i-vert"></use></svg></span></div>
 <div class="sl tool" aria-hidden="true"><span class="d"></span><span>Running shell command</span><small class="meter">15.8k / 1M ctx · 2%</small></div>
 <div class="pm" aria-hidden="true">
 <div class="bubble">Is the nightly backup healthy?</div>
-<div class="toolrow"><div class="th"><svg class="i" aria-hidden="true"><use href="#i-term"></use></svg><span class="tn">terminal <span>· systemctl --user status backup.timer</span></span><svg class="i s" aria-hidden="true"><use href="#i-check"></use></svg><svg class="i x" aria-hidden="true"><use href="#i-exp"></use></svg></div></div>
+<div class="thought"><p class="tt"><svg class="i" aria-hidden="true"><use href="#i-spark"></use></svg>Thought for 6s<svg class="i" aria-hidden="true"><use href="#i-exp"></use></svg></p><p>The timer first, then whether last night's snapshot can actually be restored.</p></div>
+<div class="toolrow"><div class="th"><svg class="i" aria-hidden="true"><use href="#i-term"></use></svg><span class="tn">terminal <span>· systemctl --user status backup.timer</span></span><small class="dur">0.4s</small><svg class="i s" aria-hidden="true"><use href="#i-check"></use></svg><svg class="i x" aria-hidden="true"><use href="#i-exp"></use></svg></div></div>
 <div class="msg"><p>The timer is active and last night's run finished. Checking a restore now:</p><div class="code"><div class="ch"><span>bash</span><span class="cp"><svg class="i" aria-hidden="true"><use href="#i-copy"></use></svg>Copy</span></div><pre>restic snapshots --latest 1</pre></div></div>
 <div class="tasks"><div class="tk"><b>Tasks</b><small>1 of 2 done</small></div><div class="t done"><svg class="i" aria-hidden="true"><use href="#i-done"></use></svg><span>Check the timer</span></div><div class="t doing"><svg class="i" aria-hidden="true"><use href="#i-doing"></use></svg><span>Test a restore</span></div></div>
 </div>
-<div class="composer" aria-hidden="true"><svg class="i ib" aria-hidden="true"><use href="#i-add"></use></svg><span class="ph">Message your agent</span><span class="send"><svg class="i" aria-hidden="true"><use href="#i-up"></use></svg></span></div>
+<div class="composer" aria-hidden="true"><svg class="i ib" aria-hidden="true"><use href="#i-add"></use></svg><span class="ph">Message your agent</span><span class="send stop"><svg class="i" aria-hidden="true"><use href="#i-stop"></use></svg></span></div>
 <div class="gest" aria-hidden="true"></div>
 </div>
 </section>
 
 <hr class="rule">
 <section id="how">
-<div class="label">How it works</div>
-<h2>Three steps, then it's yours.</h2>
-<p class="sub">Hermes keeps running wherever you host it. Tsukaima is just the hand you reach in with.</p>
+<div class="label">Setup</div>
+<h2>You bring the Hermes.</h2>
+<p class="sub">Tsukaima has no server of its own. It needs a Hermes instance your phone can reach, on a LAN, a tailnet or behind your own proxy.</p>
 <div class="steps">
-<div class="step"><h3>Point it at your instance.</h3><p>Enter the server URL and sign in with your Hermes dashboard username and password. Over LAN, Tailscale, or any tunnel you already trust.</p></div>
-<div class="step"><h3>Pick a profile and a model.</h3><p>Every Hermes profile shows up with its own chats. Switch the model from the chip in the top bar, mid-conversation if you like.</p></div>
-<div class="step"><h3>Talk, watch, approve.</h3><p>Send a message, see the status line change as the agent thinks and runs tools, and sign off on anything risky before it happens.</p></div>
+<div class="step"><h3>Enter your server's address.</h3><p>Sign in with your Hermes dashboard username and password. Plain http is accepted for local and private hosts. Anything public needs https.</p></div>
+<div class="step"><h3>Pick a profile and a model.</h3><p>Each Hermes profile keeps its own chats. The chip in the top bar changes the model in the middle of a conversation.</p></div>
+<div class="step"><h3>Send something.</h3><p>The line under the top bar reports what the agent is doing. When it wants to run something that needs your say, a card asks first.</p></div>
 </div>
 </section>
 
 <hr class="rule">
 <section id="features">
 <div class="label">Features</div>
-<h2>Built for watching an agent work.</h2>
-<p class="sub">Most chat apps assume the other side is a person typing. Tsukaima assumes it's a process — so presence, tools and permission are in the design, not bolted on.</p>
+<h2>What you see while it works.</h2>
+<p class="sub">A turn can run for ten minutes and thirty tool calls. These are the parts of the app that keep that readable on a phone.</p>
 
 <div class="feat">
-<div class="copy"><h3>The status line is the app.</h3><p>Idle, thinking, running a tool, waiting on you — a single serif line under the top bar, with a lavender dot that breathes while the agent is busy. Glanceable from across the room.</p><p>While it thinks, the line cycles through quiet verbs instead of a spinner. Beside it, a context meter shows how much of the model's window the chat is using.</p></div>
+<div class="copy"><h3>One line says where things stand.</h3><p>Thinking, running a tool, waiting for you, offline. The line under the top bar always says which, and the context meter sits at its end.</p><p>On your turn the same line carries the reasoning level. Tap the underlined words and pick one of eight, from "taking it easy" to "going beyond its limits".</p></div>
 <div class="demo"><div id="d-status" class="stack">
-<div class="sl idle"><span class="d"></span><span>Hermes is listening</span><small class="meter">15.8k / 1M ctx · 2%</small></div>
+<div class="sl idle"><span class="d"></span><span>Hermes awaits, <u>ready to go all out</u></span><small class="meter">2% ctx</small></div>
 <div class="sl thinking"><span class="d"></span><span>Steeping matcha…</span></div>
 <div class="sl tool"><span class="d"></span><span>Running shell command</span></div>
 <div class="sl approval"><span class="d"></span><span>Waiting for your approval</span></div>
@@ -106,7 +114,7 @@
 </div>
 
 <div class="feat r">
-<div class="copy"><h3>Nothing runs without you.</h3><p>When Hermes asks before running a tool, Tsukaima shows the full command in an inline card — approve or deny in one tap, and the agent carries on either way. Approve for this session or always, when your server allows it.</p><p>Approvals also arrive as notifications with Approve and Deny on them, so you can answer without opening the chat.</p></div>
+<div class="copy"><h3>It asks before it acts.</h3><p>When Hermes wants approval for a command, the whole command is on the card. Approve it once, for the session, or for good, where your server offers those.</p><p>The same two buttons are on the notification, so a turn doesn't sit waiting while the phone is in your pocket. Try the card.</p></div>
 <div class="demo" id="d-approval">
 <div class="approval">
 <p class="ah"><svg class="i" aria-hidden="true"><use href="#i-shield"></use></svg>Hermes wants to run a tool</p>
@@ -123,93 +131,156 @@
 </div>
 
 <div class="feat">
-<div class="copy"><h3>Prose, not bubbles.</h3><p>Your agent's replies sit flush on the page like a document. Markdown and code render inline, with a copy action on every code block, and tables, task-list checkboxes and math render too. Tool calls and thinking collapse into a slim row — there when you want the detail, quiet when you don't.</p><p>When the agent keeps a todo list, it shows as a Tasks card that updates in place as the work moves.</p></div>
-<div class="demo" id="d-chat">
-<div class="bubble">Why did the backup fail last night?</div>
-<div class="toolrow open"><div class="th"><svg class="i" aria-hidden="true"><use href="#i-term"></use></svg><span class="tn">terminal <span>· tail -n 50 /var/log/cron.log</span></span><svg class="i s" aria-hidden="true"><use href="#i-check"></use></svg><svg class="i x" aria-hidden="true"><use href="#i-exp"></use></svg></div><div class="tr-b"><div class="code"><div class="ch"><span>log</span><span class="cp"><svg class="i" aria-hidden="true"><use href="#i-copy"></use></svg>Copy</span></div><pre>Oct 21 03:00:07 backup[2114]: upload failed: storage credential expired</pre></div></div></div>
-<div class="msg"><p class="rsn">Reasoning<svg class="i" aria-hidden="true"><use href="#i-exp"></use></svg></p><p>The backup's storage credential expired on the 16th. Rotate it, then re-run the timer:</p><div class="code"><div class="ch"><span>bash</span><span class="cp"><svg class="i" aria-hidden="true"><use href="#i-copy"></use></svg>Copy</span></div><pre>systemctl --user restart backup.timer</pre></div></div>
-<div class="tasks"><div class="tk"><b>Tasks</b><small>1 of 3 done</small></div><div class="t done"><svg class="i" aria-hidden="true"><use href="#i-done"></use></svg><span class="vh">Done: </span><span>Check the cron log</span></div><div class="t doing"><svg class="i" aria-hidden="true"><use href="#i-doing"></use></svg><span class="vh">In progress: </span><span>Rotate the storage credential</span></div><div class="t todo"><svg class="i" aria-hidden="true"><use href="#i-todo"></use></svg><span class="vh">Pending: </span><span>Re-run the backup</span></div></div>
+<div class="copy"><h3>Talk over it.</h3><p>A running turn still takes input. Steer drops your note into the turn, and the agent reads it after its current tool call. Queue holds a message until the turn ends.</p><p>A side question gets its own answer and leaves the turn alone. A background task goes to a second agent that reports back when it is done.</p></div>
+<div class="demo" id="d-more">
+<div class="menu">
+<div class="citem"><svg class="i" aria-hidden="true"><use href="#i-send"></use></svg><span>Steer now</span></div>
+<div class="citem"><svg class="i" aria-hidden="true"><use href="#i-clock"></use></svg><span>Queue</span></div>
+<div class="citem"><svg class="i" aria-hidden="true"><use href="#i-chat"></use></svg><span>Send as side question</span></div>
+<div class="citem"><svg class="i" aria-hidden="true"><use href="#i-clock"></use></svg><span>Send as background task</span></div>
+</div>
+<div class="composer"><span class="ph typed">Skip the tests, only lint</span><span class="send stop"><svg class="i" aria-hidden="true"><use href="#i-stop"></use></svg></span><span class="send more"><svg class="i" aria-hidden="true"><use href="#i-vert"></use></svg></span></div>
 </div>
 </div>
 
 <div class="feat r">
-<div class="copy"><h3>One agent, many hats.</h3><p>Chats group by Hermes profile — so your ops agent and your research agent stay separate even though they share a server. The drawer is the navigation; there's no tab bar.</p><p>Search runs on the server, archived chats are a tap away, and cron jobs can be created, edited, paused or run from the phone.</p><p>Share a link, a screenshot or a PDF from any app to Tsukaima and it waits in the composer of your last chat or a new one — nothing goes until you tap Send.</p></div>
-<div class="demo" id="d-drawer">
-<div class="drawer">
+<div class="copy"><h3>Thirty tool calls, one line.</h3><p>Reasoning shows as a two-line note that opens on a tap. Each finished tool says how long it ran. When you send your next message, the turn before it folds its steps into a single line, with the failures counted in red.</p><p>Replies are set as a page: tables, math, code with Copy and Wrap, and the agent's todo list as a card that updates in place.</p></div>
+<div class="demo" id="d-chat">
+<div class="bubble">Is the backup job healthy?</div>
+<div class="stepsline"><svg class="i" aria-hidden="true"><use href="#i-list"></use></svg><span>6 steps <span>· 4 tools ·</span> <b>1 failed</b></span><svg class="i" aria-hidden="true"><use href="#i-exp"></use></svg></div>
+<div class="msg"><p>It ran last night, but Sunday's run exited early.</p></div>
+<div class="bubble">Why does it fail on Sundays?</div>
+<div class="thought"><p class="tt"><svg class="i" aria-hidden="true"><use href="#i-spark"></use></svg>Thought for 12s<svg class="i" aria-hidden="true"><use href="#i-exp"></use></svg></p><p>The job runs at 03:00. Sunday is also when the weekly snapshot runs, so both may want the same lock.</p></div>
+<div class="toolrow"><div class="th"><svg class="i" aria-hidden="true"><use href="#i-term"></use></svg><span class="tn">terminal <span>· journalctl -u backup</span></span><small class="dur">3.2s</small><svg class="i s" aria-hidden="true"><use href="#i-check"></use></svg><svg class="i x" aria-hidden="true"><use href="#i-exp"></use></svg></div></div>
+<div class="msg"><p>The weekly snapshot still holds the lock at 03:00 on Sundays. Moving the backup to 04:30 clears it.</p></div>
+</div>
+</div>
+
+<div class="feat">
+<div class="copy"><h3>What it left running.</h3><p>Background commands and subagents outlive the turn that started them. The status line counts them, and the list behind it has live output and a Stop for each one.</p><p>Open a subagent to follow what it is doing, send it a correction, or end it without ending the turn.</p></div>
+<div class="demo" id="d-proc">
+<div class="sl idle"><span class="d"></span><span>Hermes awaits, <u>getting serious</u></span><small class="running"><span class="d"></span>2 running</small></div>
+<div class="proc"><div class="th"><svg class="i" aria-hidden="true"><use href="#i-term"></use></svg><code>npm run build</code><small>2:14</small></div><p>rendering chunks (18)…</p><div class="acts l"><span class="btn s sm">Output</span><span class="btn s sm deny">Stop</span></div></div>
+<div class="proc"><div class="th"><svg class="i" aria-hidden="true"><use href="#i-term"></use></svg><code>tail -f /var/log/backup.log</code><small>12:40</small></div><p>03:00:02 backup.service: lock held, exiting</p><div class="acts l"><span class="btn s sm">Output</span><span class="btn s sm deny">Stop</span></div></div>
+</div>
+</div>
+
+<div class="feat r">
+<div class="copy"><h3>It opens in a tunnel.</h3><p>Chats you have opened are kept on the phone. With no connection, a chat shows that copy and says how old it is.</p><p>A message written offline goes out when Hermes is reachable again. If that takes longer than ten minutes it comes back to you as a draft, so nothing starts an hour late behind your back. The wait is yours to set.</p></div>
+<div class="demo" id="d-offline">
+<div class="offbar"><svg class="i" aria-hidden="true"><use href="#i-cloudoff"></use></svg><span>Offline <span>· saved copy from 14:02</span></span></div>
+<div class="msg"><p>Moving the backup to 04:30 clears it.</p></div>
+<div class="bubble">Move it to 04:30 then.</div>
+<p class="cap"><svg class="i" aria-hidden="true"><use href="#i-clock"></use></svg>Sends when you are back online</p>
+</div>
+</div>
+
+<div class="facts more">
+<div class="fact"><b>Widget</b><span>The last chat and what Hermes is doing in it, on your home screen, with Ask and a mic.</span></div>
+<div class="fact"><b>Camera, clip, location</b><span>The + button takes a photo, records audio, or puts where you are into the message.</span></div>
+<div class="fact"><b>Search and export</b><span>Find text inside a chat, or share the whole conversation as Markdown.</span></div>
+<div class="fact"><b>Media in place</b><span>Audio and video the agent hands you play inside the reply.</span></div>
+<div class="fact"><b>App lock</b><span>Fingerprint, face or screen lock before the app opens. Hidden in recents while it is on.</span></div>
+<div class="fact"><b>Cron from the phone</b><span>Create, edit, pause or run Hermes cron jobs, and hear about the ones that fail.</span></div>
+<div class="fact"><b>Share into it</b><span>Send a link, a screenshot or a PDF from any app. It waits in the composer until you press Send.</span></div>
+<div class="fact"><b>Branch and edit</b><span>Rewrite an earlier message, regenerate a reply, or branch the chat from any point.</span></div>
+</div>
+</section>
+
+<hr class="rule">
+<section id="fold">
+<div class="label">Foldables and tablets</div>
+<h2>Unfolded, it uses the room.</h2>
+<p class="sub">Held on its side, an unfolded phone keeps the chat list beside the conversation. Upright, the list stays a drawer and the chat takes the full width. Fold it shut in the middle of a turn and the chat carries on at phone width.</p>
+<div id="d-fold" class="fold" role="img" aria-label="An unfolded phone held on its side: the chat list on the left, the open chat on the right">
+<div class="drawer" aria-hidden="true">
 <div class="dh"><img src="img/mark.svg" alt="" width="620" height="660">Tsukaima<span class="k" lang="ja">使い魔</span></div>
 <div class="search"><svg class="i" aria-hidden="true"><use href="#i-search"></use></svg>Search sessions</div>
 <div class="dlist">
+<div class="dlabel">Pinned</div>
+<div class="citem"><span>Deal watch triage</span><small>5m</small></div>
 <div class="dlabel">Ops profile</div>
-<div class="citem sel" aria-current="true"><span>Why the backup failed</span><small>2m</small></div>
+<div class="citem sel"><span>Why the backup fails on Sundays</span><small>now</small></div>
 <div class="citem"><span>Renew the TLS certificates</span><small>3d</small></div>
-<div class="dlabel">Research profile</div>
 <div class="citem"><span>Compare vector databases</span><small>1w</small></div>
-<div class="citem"><span>Notes on agent memory</span><small>2w</small></div>
 </div>
 <div class="dfoot"><div class="citem"><svg class="i" aria-hidden="true"><use href="#i-gear"></use></svg><span>Settings</span></div></div>
 </div>
-<div class="dside" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+<div class="fpane" aria-hidden="true">
+<div class="tbar"><span class="chip">Model<svg class="i" aria-hidden="true"><use href="#i-exp"></use></svg></span><span class="sp"></span><span class="ib"><svg class="i" aria-hidden="true"><use href="#i-vert"></use></svg></span></div>
+<div class="sl tool"><span class="d"></span><span>Running shell command</span><small class="meter">9% ctx</small></div>
+<div class="fbody">
+<div class="bubble">Why does it fail on Sundays?</div>
+<div class="thought"><p class="tt"><svg class="i" aria-hidden="true"><use href="#i-spark"></use></svg>Thinking… 0:12<svg class="i" aria-hidden="true"><use href="#i-exp"></use></svg></p><p>Sunday is also when the weekly snapshot runs, so both may want the same lock.</p></div>
+<div class="toolrow"><div class="th"><svg class="i" aria-hidden="true"><use href="#i-term"></use></svg><span class="tn">terminal <span>· journalctl -u backup</span></span><svg class="i s" aria-hidden="true"><use href="#i-check"></use></svg><svg class="i x" aria-hidden="true"><use href="#i-exp"></use></svg></div></div>
 </div>
+<div class="composer"><svg class="i ib" aria-hidden="true"><use href="#i-add"></use></svg><span class="ph">Message your agent</span><span class="send stop"><svg class="i" aria-hidden="true"><use href="#i-stop"></use></svg></span></div>
+</div>
+</div>
+<div class="facts">
+<div class="fact"><b>Settings in two columns</b><span>Held on its side, Settings lists its topics on the left and opens each on the right. Upright it starts as one column, and a button in the top bar switches between the two.</span></div>
+<div class="fact"><b>No stretched rows</b><span>Where one column is shown on a wide screen, it stays phone width and centred, so a label and its switch are never a hand apart.</span></div>
+<div class="fact"><b>Reading width</b><span>Replies stop at 640dp however wide the screen is. Long lines of prose are hard to read on any device.</span></div>
 </div>
 </section>
 
 <hr class="rule">
 <section id="voice">
 <div class="label">Voice</div>
-<h2>Say it instead.</h2>
-<p class="sub">Voice mode listens, sends what it hears, and reads replies aloud sentence by sentence as they stream. Tap the orb to interrupt. Set Tsukaima as the device assistant and long-press home for one exchange. Speech is processed on the phone or on your Hermes, your choice. If your Hermes runs GPT-Live, voice becomes a live conversation instead — talk freely while Hermes does the work, with the minutes on screen because the session is billed by time. Approvals still need a tap.</p>
+<h2>Hands full.</h2>
+<p class="sub">Voice mode sends what it hears and reads the reply aloud sentence by sentence while it is still streaming. Tap the orb to cut in. Approvals still need a tap.</p>
 <div class="facts">
-<div class="fact"><b>On the phone</b><span>Android's own speech recogniser and text-to-speech, on-device where the system supports it.</span></div>
-<div class="fact"><b>On Hermes</b><span>One utterance at a time, uploaded as Opus to your Hermes, transcribed and spoken with the engines you configured there.</span></div>
-<div class="fact"><b>Device assistant</b><span>Long-press home for one exchange; anything that needs approval opens in the app.</span></div>
+<div class="fact"><b>On the phone</b><span>Android's own recogniser and speech, on the device where the system supports it.</span></div>
+<div class="fact"><b>On your Hermes</b><span>Each utterance goes to your server as Opus and comes back in the voices you set up there.</span></div>
+<div class="fact"><b>Live</b><span>With GPT-Live on your Hermes, it is a running conversation while the agent works. The minutes are on screen, because that session is billed by time.</span></div>
+<div class="fact"><b>Device assistant</b><span>Make Tsukaima the assistant and a long press on home asks one question from anywhere.</span></div>
 </div>
 </section>
 
 <hr class="rule">
 <section id="selfhost">
 <div class="self">
-<div><div class="label">Self-hosted</div><h2>No account. No middleman.</h2><p class="sub">Tsukaima talks directly to one Hermes instance over your own network or tunnel. There's no Tsukaima server, no analytics, no sync service. You sign in with your Hermes dashboard account; the username and password live in Android's encrypted storage and go only to your Hermes.</p></div>
+<div><div class="label">Self-hosted</div><h2>Your server is the only one.</h2><p class="sub">The app talks to one Hermes instance and nothing else. There is no Tsukaima backend, no analytics and no sync. Your username and password sit in Android's encrypted storage and are sent only to your Hermes.</p></div>
 <div class="settings-mock">
-<div class="sm-title">Settings · Hermes instance</div>
+<div class="sm-title">Settings · Connection</div>
 <dl>
 <div class="sm-row"><dt>Server URL</dt><dd>https://hermes.your-tailnet.ts.net</dd></div>
 <div class="sm-row"><dt>Username</dt><dd>you</dd></div>
 <div class="sm-row"><dt>Password</dt><dd><span aria-hidden="true">••••••••</span><span class="vh">hidden password</span></dd></div>
 </dl>
-<p class="sm-result"><span class="sm-dot"></span>Connected · Hermes 0.22.2</p>
+<p class="sm-result"><span class="sm-dot"></span>Connected · Hermes 0.23.0</p>
 </div>
 </div>
 <div class="facts">
-<div class="fact"><b>Single user</b><span>One phone, one Hermes. No teams, no sharing, no roles to manage.</span></div>
-<div class="fact"><b>Live over the WebSocket</b><span>Replies, tool events and approval requests stream over Hermes' own JSON-RPC WebSocket, and missed events replay after a reconnect.</span></div>
-<div class="fact"><b>Material 3, warm by default</b><span>Light and dark themes in a warm palette. Material You dynamic color is a switch away if you want it to match your wallpaper.</span></div>
-<div class="fact"><b>Open source</b><span>Kotlin + Jetpack Compose, Apache-2.0. Build it yourself or install the signed release from GitHub.</span></div>
+<div class="fact"><b>One phone, one Hermes</b><span>Single user by design. There are no teams or roles to set up.</span></div>
+<div class="fact"><b>Reconnects without gaps</b><span>Events ride Hermes' own JSON-RPC WebSocket. After a drop, the app replays what it missed and restores any approval still waiting.</span></div>
+<div class="fact"><b>Light, dark, or your wallpaper</b><span>A warm palette in both themes, with Material You as a switch.</span></div>
+<div class="fact"><b>Apache-2.0</b><span>Kotlin and Jetpack Compose. Build it yourself, or install the signed release.</span></div>
 </div>
 </section>
 
 <hr class="rule">
 <section id="faq">
 <div class="label">FAQ</div>
-<h2>Questions people ask.</h2>
+<h2>Before you install.</h2>
 <div class="faq">
-<details><summary>Does it work without a Hermes instance?</summary><p>No. Tsukaima is a client, not an agent. It needs a running Hermes Agent to connect to — on a home server, a VPS, or your laptop.</p></details>
-<details><summary>Can I reach it from outside my network?</summary><p>Yes, however you'd reach Hermes itself: Tailscale, WireGuard, a reverse proxy with TLS. Plain http is allowed only for local and private hosts — loopback, LAN, tailnet and single-label names; anything else needs https.</p></details>
-<details><summary>Is anything sent to Nous or to the Tsukaima author?</summary><p>No. Tsukaima has no telemetry and no service of its own; the app talks to your Hermes. Images from other hosts load only when you tap them, and voice on the phone uses Android's own speech services. Live voice, when your Hermes runs it, streams your audio to OpenAI; the key stays on your Hermes.</p></details>
-<details><summary>Which tool calls need approval?</summary><p>Whichever ones your Hermes asks about; its own settings decide. Tsukaima surfaces every one of those as an approval card; it doesn't decide for you.</p></details>
-<details><summary>Will there be an iOS version?</summary><p>Not planned. Tsukaima is Android-first and leans on Material 3.</p></details>
-<details><summary>Why the name?</summary><p>A tsukaima (<span lang="ja">使い魔</span>) is a familiar — a spirit bound to its master and sent out to do the work. The agent runs elsewhere; this is the thing in your hand that's bound to it.</p></details>
-<details><summary>How do I get updates?</summary><p>Add Tsukaima to Obtainium and it watches the GitHub releases for you, or download the next APK from Releases. The app does not update itself.</p></details>
-<details><summary>Which Android versions?</summary><p>Android 10 and newer, on phones, tablets and foldables with a 64-bit ARM processor (every Android 10+ phone has one). On a wide screen the drawer becomes a pane beside the chat.</p></details>
+<details><summary>Do I need a Hermes instance?</summary><p>Yes. Tsukaima is a client. It needs a running Hermes Agent to connect to, on a home server, a VPS or a laptop.</p></details>
+<details><summary>Can I reach it from outside my network?</summary><p>The same way you reach Hermes: Tailscale, WireGuard, or a reverse proxy with TLS. Plain http is allowed only for loopback, LAN, tailnet and single-label hosts.</p></details>
+<details><summary>Does anything go to Nous or to the author?</summary><p>No. There is no telemetry. Images from other hosts load only when you tap them. Phone voice uses Android's speech services. Live voice, if your Hermes runs it, streams audio to OpenAI with the key held on your server.</p></details>
+<details><summary>What is kept on the phone?</summary><p>Your sign-in, in encrypted storage. A copy of each chat you have opened, your drafts and any message waiting to send, in the app's private files. Signing out deletes all of it.</p></details>
+<details><summary>Which tool calls need approval?</summary><p>The ones your Hermes asks about. Its settings decide; the app shows every request and never answers one for you.</p></details>
+<details><summary>Does it keep working in the background?</summary><p>While Android lets it. A foreground service holds the connection for notifications, and Android 15 caps that at about six hours a day. After that the app is quiet until you open it.</p></details>
+<details><summary>How do I get updates?</summary><p>Add it to Obtainium, which watches the GitHub releases, or download the next APK yourself. The app does not update itself.</p></details>
+<details><summary>Which devices?</summary><p>Android 10 and newer on a 64-bit ARM processor: phones, foldables and tablets.</p></details>
+<details><summary>iOS?</summary><p>Not planned.</p></details>
+<details><summary>Why the name?</summary><p>A tsukaima (<span lang="ja">使い魔</span>) is a familiar: a spirit bound to its master and sent out to do the work. The agent runs somewhere else. This is the part of it you carry.</p></details>
 </div>
 </section>
 
 <hr class="rule">
-<div class="quiet"><img src="img/resting-wisp.svg" alt="" width="510" height="290"><p>Cream, one lavender,<br>a serif where it matters —<br>the agent is loud.</p></div>
-
-<hr class="rule">
 <section class="final">
 <h2>Bind your familiar.</h2>
-<p class="sub">Free, open source, no account. Install, sign in to your Hermes, start talking.</p>
+<p class="sub">Free and open source. Install it, sign in to your Hermes, and send the first message.</p>
 <div class="cta">
 <a class="btn p" href="https://github.com/TsukaimaApp/app/releases/latest">Download APK</a>
 <!-- Badge by the Obtainium project, https://github.com/ImranR98/Obtainium (GPL-3.0), used as that project invites. -->
