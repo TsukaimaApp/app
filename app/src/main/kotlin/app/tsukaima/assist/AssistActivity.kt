@@ -87,8 +87,11 @@ class AssistActivity : ComponentActivity() {
                 settings?.let { loaded ->
                     // The app lock covers this sheet too: while the app is locked it shows no chat. The gesture opens
                     // the app instead, where the lock screen asks for the unlock.
-                    val locked by container.appLock.locked.collectAsStateWithLifecycle()
-                    if (loaded.appLock && locked) {
+                    // Judged now, not from the last time the app was opened: it may have been away past its wait since.
+                    val locked = remember(loaded.appLock, loaded.appLockAfterSeconds) {
+                        loaded.appLock && container.appLock.lockedNow(loaded.appLockAfterSeconds)
+                    }
+                    if (locked) {
                         LaunchedEffect(Unit) {
                             startActivity(Intent(this@AssistActivity, app.tsukaima.MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                             finish()

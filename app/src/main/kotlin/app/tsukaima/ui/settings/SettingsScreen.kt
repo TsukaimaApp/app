@@ -323,9 +323,12 @@ fun SettingsContent(
     }
 }
 
-/** The narrowest screen that shows the list beside the open page. */
-private val TWO_PANE_MIN = 720.dp
-private val HUB_WIDTH = 340.dp
+/**
+ * The narrowest screen that can show the list beside the open page: 600dp, so an unfolded phone held upright
+ * (about 700dp) has the choice too. It starts as one column there and the top bar's button opens the second.
+ */
+private val TWO_PANE_MIN = 600.dp
+private val HUB_WIDTH = 300.dp
 private val ONE_COLUMN_MAX = 640.dp
 
 /** The pickers a settings page opens as a sheet. */

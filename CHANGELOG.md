@@ -3,6 +3,17 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.15.2 — 2026-11-11 (versionCode 36)
+
+Not checked on a phone.
+
+### Fixed
+- Settings offers its two columns from 600dp of width. In 0.14.1 it took 720dp, which an unfolded phone held upright
+  (about 700dp) does not reach, so the button to open the second column never showed there.
+- The app lock on the device-assistant sheet now counts the time the app has been away. In 0.15.1 the sheet only
+  knew the app was locked if the main app had been opened since; after an unlock, the sheet kept showing its chat
+  however long the app had been in the background.
+
 ## 0.15.1 — 2026-11-11 (versionCode 35)
 
 Not checked on a phone.

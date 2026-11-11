@@ -75,6 +75,14 @@ class BeyondChatTest {
         lock.unlocked()
         lock.onStart(afterSeconds = 0) // no stop before it (a rotation): nothing to judge
         assertFalse(lock.locked.value)
+        // Another entry point (the assistant sheet) asks while the app is away: the wait is judged then.
+        lock.onStop()
+        now += 59_000
+        assertFalse(lock.lockedNow(afterSeconds = 60))
+        now += 2_000
+        assertTrue(lock.lockedNow(afterSeconds = 60))
+        assertTrue(lock.locked.value)
+        lock.unlocked()
         assertTrue(AppLock.shouldLock(leftAt = 10, now = 10, afterSeconds = 0))
         assertTrue("the clock was set back", AppLock.shouldLock(leftAt = 10, now = 5, afterSeconds = 600))
         assertEquals(listOf("Immediately", "After 1 minute", "After 5 minutes", "After 15 minutes"), AppLock.WAITS.map(AppLock::waitLabel))

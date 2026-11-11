@@ -37,6 +37,17 @@ class AppLock(private val now: () -> Long = System::currentTimeMillis) {
         if (shouldLock(left, now(), afterSeconds)) _locked.value = true
     }
 
+    /**
+     * Whether the app is locked as of now, for an entry point that is not the main screen (the assistant sheet):
+     * the wait is judged at this moment, because [onStart] only runs when the main screen comes back. The time
+     * the app left is kept, so the main screen judges it again. The sheet itself does not count as being in the app.
+     */
+    fun lockedNow(afterSeconds: Int): Boolean {
+        val left = leftAt
+        if (left != null && shouldLock(left, now(), afterSeconds)) _locked.value = true
+        return _locked.value
+    }
+
     /** The user proved who they are, or the lock is switched off. */
     fun unlocked() {
         _locked.value = false
