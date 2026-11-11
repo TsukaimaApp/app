@@ -551,6 +551,7 @@ class ChatViewModel(
             val chat = ChatReducer.onSubmitted(
                 it.chat, text, localId, flair, sent.map(PendingAttachment::name),
                 promptText = prompt ?: Attachments.promptText(text, sent), imagesSent = sent.any { a -> a.queued }, queued = queued,
+                now = WallClock.now(),
             )
             if (fromComposer) it.copy(input = "", chat = chat) else it.copy(chat = chat)
         }
@@ -616,6 +617,9 @@ class ChatViewModel(
 
     /** The reasoning header of message [id] was tapped. */
     fun toggleReasoning(id: String) = setChat { ChatReducer.toggleReasoning(it, id) }
+
+    /** A folded step group of an earlier turn was tapped. */
+    fun toggleSteps(id: String) = setChat { ChatReducer.toggleSteps(it, id) }
 
     /**
      * Replaces the transcript with live session [live]'s stored history (failed sends kept); a failure toasts.

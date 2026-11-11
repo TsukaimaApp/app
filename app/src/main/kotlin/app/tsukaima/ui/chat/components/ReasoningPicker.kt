@@ -113,7 +113,7 @@ private const val SPARKS = 10
 
 /** Whether the system's "remove animations" setting is on (animator duration scale 0): nothing here moves then. */
 @Composable
-private fun motionOff(): Boolean {
+internal fun motionOff(): Boolean {
     val resolver = LocalContext.current.contentResolver
     return remember(resolver) { Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f }
 }

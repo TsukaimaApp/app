@@ -606,32 +606,33 @@ class ChatReducerTest {
     }
 
     @Test
-    fun streamedReasoningShowsOpenUntilTheUserClosesIt() {
+    fun reasoningIsFoldedUntilTheUserOpensItAndThenStaysOpen() {
         val s = live.feed(ev("message.start", seq = 1), ev("reasoning.delta", """{"text":"think"}""", 2))
         val a = s.items.single() as ChatItem.AssistantMessage
         assertTrue(a.reasoningLive)
-        assertTrue("live reasoning is readable without a tap", ChatReducer.reasoningOpen(s, a))
+        // Folded, the block still shows its newest lines (0.13): open means all of it.
+        assertFalse("live reasoning starts folded", ChatReducer.reasoningOpen(s, a))
 
-        val closed = ChatReducer.toggleReasoning(s, a.id)
-        assertFalse(ChatReducer.reasoningOpen(closed, a))
+        val opened = ChatReducer.toggleReasoning(s, a.id)
+        assertTrue(ChatReducer.reasoningOpen(opened, a))
         // Streaming on, text arriving and the turn ending never change the user's choice.
-        val done = closed.feed(ev("message.delta", """{"text":"Hi"}""", 3), ev("message.complete", """{"text":"Hi","usage":{}}""", 4))
+        val done = opened.feed(ev("message.delta", """{"text":"Hi"}""", 3), ev("message.complete", """{"text":"Hi","usage":{}}""", 4))
         val final = done.items.single() as ChatItem.AssistantMessage
-        assertFalse(ChatReducer.reasoningOpen(done, final))
-        assertTrue(ChatReducer.reasoningOpen(ChatReducer.toggleReasoning(done, final.id), final))
+        assertTrue(ChatReducer.reasoningOpen(done, final))
+        assertFalse(ChatReducer.reasoningOpen(ChatReducer.toggleReasoning(done, final.id), final))
 
-        // History loads closed; a tap opens it.
+        // History loads folded; a tap opens it.
         val fromHistory = ChatItem.AssistantMessage("h-1", "Hi", streaming = false, reasoning = "think")
         assertFalse(ChatReducer.reasoningOpen(ChatState(items = listOf(fromHistory)), fromHistory))
     }
 
     @Test
     fun reasoningStaysAboveTheRequestThatFollowedIt() {
-        // Reasoning-only bubble, user closes it, then a request blocks it so the next delta opens a new bubble below.
+        // Reasoning-only bubble, user opens it, then a request blocks it so the next delta opens a new bubble below.
         val s = live.feed(ev("message.start", seq = 1), ev("reasoning.delta", """{"text":"think"}""", 2))
         val first = s.items.single() as ChatItem.AssistantMessage
-        val closed = ChatReducer.toggleReasoning(s, first.id)
-        val moved = closed.feed(prompt("srq-1", "clarify", """"questions":[{"qid":"q","question":"Which?"}]"""), ev("reasoning.delta", """{"text":" more"}""", 3))
+        val opened = ChatReducer.toggleReasoning(s, first.id)
+        val moved = opened.feed(prompt("srq-1", "clarify", """"questions":[{"qid":"q","question":"Which?"}]"""), ev("reasoning.delta", """{"text":" more"}""", 3))
         assertEquals(3, moved.items.size)
         val kept = moved.items[0] as ChatItem.AssistantMessage
         assertEquals(first.id, kept.id)
@@ -642,8 +643,8 @@ class ChatReducerTest {
         assertEquals(" more", next.reasoning)
         assertTrue(next.streaming)
         assertTrue(next.reasoningLive)
-        assertFalse("the user's choice stays with the bubble they closed", ChatReducer.reasoningOpen(moved, kept))
-        assertTrue("a new segment streams open", ChatReducer.reasoningOpen(moved, next))
+        assertTrue("the user's choice stays with the bubble they opened", ChatReducer.reasoningOpen(moved, kept))
+        assertFalse("a new segment starts folded", ChatReducer.reasoningOpen(moved, next))
     }
 
     @Test

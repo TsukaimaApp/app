@@ -1,12 +1,8 @@
 package app.tsukaima.ui.chat.components
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -17,8 +13,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -29,15 +23,15 @@ import app.tsukaima.ui.components.IconName
 import app.tsukaima.ui.components.TsukaimaIcon
 import app.tsukaima.ui.components.longPressMenu
 import app.tsukaima.ui.theme.Dimens
-import app.tsukaima.ui.theme.Motion
 import app.tsukaima.ui.theme.TsukaimaType
 import app.tsukaima.ui.theme.tsukaima
 
 /**
  * Assistant prose directly on the page: no bubble, 20dp gutters, 640dp max, optional reasoning, and file cards
- * for its `MEDIA:` deliveries ([media]). [onLongPress] opens the message menu (copy). The reasoning's open state
- * is the chat's ([reasoningOpen], toggled through [onToggleReasoning]), not the composable's: a list that
- * recycles or rebuilds its items must not fold a block the reader is in the middle of.
+ * for its `MEDIA:` deliveries ([media]). [onLongPress] opens the message menu (copy). The reasoning is a
+ * [ThoughtBlock] above the reply ([thoughtFrom] and [thoughtMs] time it). Its open state is the chat's
+ * ([reasoningOpen], toggled through [onToggleReasoning]), not the composable's: a list that recycles or rebuilds
+ * its items must not fold a block the reader is in the middle of.
  * [model] is shown under the finished reply when another model than the session's wrote it (a fallback).
  * [padding] is its outer spacing (none in the assist sheet).
  */
@@ -52,11 +46,12 @@ fun AssistantMessage(
     reasoningOpen: Boolean = false,
     onToggleReasoning: () -> Unit = {},
     model: String? = null,
+    thoughtFrom: Long? = null,
+    thoughtMs: Long? = null,
     padding: PaddingValues = PaddingValues(horizontal = Dimens.gutter, vertical = 4.dp),
 ) {
     val colors = MaterialTheme.tsukaima
     val blocks = remember(text, streaming) { Markdown.parse(text, streaming) }
-    val open = reasoningOpen
     Column(
         modifier = modifier
             .widthIn(max = 640.dp)
@@ -65,19 +60,10 @@ fun AssistantMessage(
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (reasoning != null) {
-            val rotation by animateFloatAsState(if (open) 180f else 0f, tween(Motion.base, easing = Motion.easing), label = "reasoningChevron")
-            Row(
-                modifier = Modifier
-                    .clickable(role = Role.Button, onClickLabel = "Toggle reasoning", onClick = onToggleReasoning)
-                    .heightIn(min = Dimens.hit)
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text("Reasoning", style = TsukaimaType.caption, color = colors.ink3)
-                TsukaimaIcon(IconName.ExpandMore, contentDescription = null, size = 16.dp, tint = colors.ink3, modifier = Modifier.rotate(rotation))
-            }
-            if (open) Text(reasoning, style = TsukaimaType.caption, color = colors.ink2)
+            ThoughtBlock(
+                reasoning, live = streaming && text.isEmpty(), open = reasoningOpen, onToggle = onToggleReasoning,
+                since = thoughtFrom, thoughtMs = thoughtMs,
+            )
         }
         MarkdownText(blocks, streaming = streaming, media = media)
         if (model != null && !streaming) {

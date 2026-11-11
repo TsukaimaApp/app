@@ -48,6 +48,7 @@ import app.tsukaima.data.api.ImageOrigin
 import app.tsukaima.domain.chat.ChatItem
 import app.tsukaima.domain.chat.ToolRisk
 import app.tsukaima.domain.chat.ToolStatus
+import app.tsukaima.domain.chat.TranscriptRows
 import app.tsukaima.ui.chat.ImageResult
 import app.tsukaima.ui.chat.ToolImageSource
 import app.tsukaima.ui.components.IconName
@@ -131,7 +132,11 @@ fun ToolRow(
                     Text("Interrupted", style = TsukaimaType.caption, color = colors.warn, maxLines = 1)
                 }
                 ToolStatus.Failed -> TsukaimaIcon(IconName.Error, size = 16.dp, tint = colors.danger, contentDescription = "Failed")
-                ToolStatus.Done -> TsukaimaIcon(IconName.Check, size = 16.dp, tint = colors.ink3, contentDescription = "Done")
+                ToolStatus.Done -> {
+                    // How long it ran, when the server said (a row loaded from history has no duration).
+                    TranscriptRows.durationLabel(item.durationS)?.let { Text(it, style = TsukaimaType.caption, color = colors.ink3, maxLines = 1) }
+                    TsukaimaIcon(IconName.Check, size = 16.dp, tint = colors.ink3, contentDescription = "Done")
+                }
             }
             TsukaimaIcon(IconName.ExpandMore, contentDescription = null, size = 18.dp, tint = colors.ink2, modifier = Modifier.rotate(rotation))
         }

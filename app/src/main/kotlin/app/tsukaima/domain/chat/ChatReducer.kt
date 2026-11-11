@@ -74,9 +74,15 @@ object ChatReducer {
     /** The first event of a turn (observed: `message.start` right after the previous `message.complete`). */
     private val QUEUED_TURN_STARTS = setOf("message.start", "message.delta", "reasoning.delta", "tool.start", "message.complete")
 
-    fun reduce(state: ChatState, frame: Frame, flair: () -> String = ThinkingFlair::next): ChatState =
+    fun reduce(state: ChatState, frame: Frame, flair: () -> String = ThinkingFlair::next): ChatState = reduce(state, frame, 0L, flair)
+
+    /**
+     * [reduce] with the phone's clock: [now] (epoch millis) is when [frame] arrived, which times what Hermes sends
+     * no time for (how long reasoning streamed). 0 = no clock, nothing is timed.
+     */
+    fun reduce(state: ChatState, frame: Frame, now: Long, flair: () -> String = ThinkingFlair::next): ChatState =
         when (frame) {
-            is Frame.Event -> pinQueued(reduceEvent(state, frame, flair))
+            is Frame.Event -> pinQueued(reduceEvent(state, frame, flair, now))
             is Frame.ServerRequest -> pinQueued(reduceServerRequest(state, frame))
             is Frame.Response, is Frame.Unknown -> state
         }
@@ -93,7 +99,10 @@ object ChatReducer {
             // marked so it can never equal a row id.
             val id = "h-${m.rowId ?: "i$index"}"
             when (m.role) {
-                "user" -> ChatItem.UserMessage(id, m.text, rowId = m.rowId, steer = m.displayKind == STEER_KIND)
+                "user" -> ChatItem.UserMessage(
+                    id, m.text, rowId = m.rowId, steer = m.displayKind == STEER_KIND,
+                    at = m.timestamp?.takeIf { it > 0 }?.let { (it * 1000).toLong() },
+                )
                 // A row with reasoning but no text is the thinking before a tool call: kept, in its place above the tool.
                 "assistant" ->
                     if (m.text.isBlank() && m.thought == null) null
@@ -161,6 +170,12 @@ object ChatReducer {
             val old = before.getOrNull(at - 1) as? ChatItem.AssistantMessage ?: continue
             if (old.rowId == null && items.none { it.id == old.id } && taken.add(old.id)) items[i] = message.copy(id = old.id)
         }
+        // History has no reasoning time: a message keeps the one measured while it streamed.
+        val timed = before.mapNotNull { (it as? ChatItem.AssistantMessage)?.takeIf { m -> m.thoughtMs != null }?.let { m -> m.id to m.thoughtMs } }.toMap()
+        if (timed.isNotEmpty()) for (i in items.indices) {
+            val m = items[i] as? ChatItem.AssistantMessage ?: continue
+            if (m.thoughtMs == null && m.reasoning != null) timed[m.id]?.let { items[i] = m.copy(thoughtMs = it) }
+        }
         if (!carry) return items
         var anchor: String? = null
         for (item in before) {
@@ -218,10 +233,11 @@ object ChatReducer {
         promptText: String? = null,
         imagesSent: Boolean = false,
         queued: Boolean = false,
+        now: Long = 0L,
     ): ChatState = state.copy(
         items = state.items + ChatItem.UserMessage(
             localId, text, attachments, promptText = promptText?.takeIf { it != text }, imagesSent = imagesSent,
-            queued = queued,
+            queued = queued, at = now.takeIf { it > 0 },
         ),
         // A queued send waits behind the live turn: its status stays that turn's.
         status = if (queued) state.status else AgentStatus.Thinking(flair()),
@@ -385,7 +401,7 @@ object ChatReducer {
 
     // ---- events -------------------------------------------------------------------------------
 
-    private fun reduceEvent(state: ChatState, ev: Frame.Event, flair: () -> String): ChatState {
+    private fun reduceEvent(state: ChatState, ev: Frame.Event, flair: () -> String, now: Long = 0L): ChatState {
         if (!isForUs(state, ev.sessionId)) return state
         // Only events bound to the live session carry a comparable seq; replays at or below the
         // watermark are dropped. Global (empty-id) events and unbound states never touch lastSeq.
@@ -403,7 +419,14 @@ object ChatReducer {
                 val text = p.string("text").orEmpty()
                 val (withItem, current) = ensureStreamingAssistant(s, ev.seq)
                 withItem.copy(
-                    items = withItem.items.replace(current) { current.copy(reasoning = (current.reasoning ?: "") + text, reasoningLive = true) },
+                    items = withItem.items.replace(current) {
+                        // Timed on the phone ([now]; 0 = no clock): first reasoning to the latest.
+                        val from = current.thoughtFrom ?: now.takeIf { it > 0 }
+                        current.copy(
+                            reasoning = (current.reasoning ?: "") + text, reasoningLive = true,
+                            thoughtFrom = from, thoughtMs = from?.let { (now - it).coerceAtLeast(0) },
+                        )
+                    },
                     status = AgentStatus.Thinking(flair()),
                 )
             }
@@ -1201,9 +1224,16 @@ object ChatReducer {
         return counted.copy(items = counted.items + item) to item
     }
 
-    /** Whether [item]'s reasoning shows open: the user's choice, else open while it streamed in this session. */
+    /**
+     * Whether [item]'s reasoning shows in full: only when the user opened it. Folded, it still shows a few lines
+     * (the newest while it streams, the first once done), so it neither hides nor pushes the reply down the page.
+     */
     fun reasoningOpen(state: ChatState, item: ChatItem.AssistantMessage): Boolean =
-        state.reasoningOpen[item.id] ?: item.reasoningLive
+        state.reasoningOpen[item.id] ?: false
+
+    /** The user tapped a folded step group ([TranscriptRows]): opens it, or folds it again. */
+    fun toggleSteps(state: ChatState, id: String): ChatState =
+        state.copy(openSteps = if (id in state.openSteps) state.openSteps - id else state.openSteps + id)
 
     /** The user tapped the reasoning header of [id]: flips it from whatever it currently shows. Never auto-closes. */
     fun toggleReasoning(state: ChatState, id: String): ChatState {

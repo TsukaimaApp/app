@@ -58,6 +58,9 @@ object TsukaimaType {
     val sectionTitle = style(SourceSerif, 600, 17.0, 1.25)
     val statusLine = style(SourceSerif, 500, 14.0, 1.3, FontStyle.Italic)
 
+    /** The agent's reasoning in the transcript: the status line's voice at reading size. */
+    val thought = style(SourceSerif, 500, 15.0, 1.45, FontStyle.Italic)
+
     // Sans roles: chat + UI.
     val body = style(InstrumentSans, 400, 15.5, 1.55)
     val ui = style(InstrumentSans, 500, 14.0, 1.4)

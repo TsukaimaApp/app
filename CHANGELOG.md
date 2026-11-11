@@ -3,6 +3,31 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.13.0 — 2026-11-11 (versionCode 31)
+
+Not checked on a phone.
+
+### Added
+- **Time marks** between messages ("Today 09:02", "Yesterday 21:14", "Tue 3 Nov 18:05"), above a message that
+  starts a new day or follows the previous one by an hour or more. 12- or 24-hour as the phone is set. Times of
+  earlier messages come from the server's history; a message sent now is stamped by the phone.
+- **Earlier turns fold their work.** In every turn before the current one, a run of three or more steps (tool calls
+  and the reasoning between them) is one line: "6 steps · 4 tools · 1 failed". Tap it to unfold the steps, tap
+  again to fold. The current turn is never folded, so nothing moves while the agent works; its steps fold when you
+  send the next message.
+- **How long a tool ran**, beside the check mark of a finished tool row ("3.2s", "2m 5s"). A row loaded from history
+  has none: Hermes does not store it.
+- **Latest** button over the bottom corner of the chat while you are scrolled up. A tap goes back to the newest
+  message and follows it again. A dot on it says something arrived below since you left.
+
+### Changed
+- **Reasoning is a margin note**: an accent rule down the left, a header and the text in serif italic. In 0.12.0 it
+  was small grey text under the word "Reasoning". The header reads "Thinking… 0:12" while reasoning streams and
+  "Thought for 12s" after ("Thought" for reasoning loaded from history, which is not timed). Folded, the block
+  shows two lines: the newest while it streams, the first once done. Tap it to read all of it.
+- Reasoning now starts folded to those two lines. Since 0.5.3 reasoning streamed in the open chat stayed fully
+  open until you folded it by hand. A block you opened stays open.
+
 ## 0.12.0 — 2026-11-10 (versionCode 30)
 
 Not checked on a phone.

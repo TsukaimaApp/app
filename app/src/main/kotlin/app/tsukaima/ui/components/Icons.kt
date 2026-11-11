@@ -34,6 +34,9 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderZip
 import androidx.compose.material.icons.rounded.Forum
@@ -188,6 +191,9 @@ enum class IconName(val symbol: String) {
 
     /** Not in the handoff (v0.11.0): the drawer's Pin / Unpin. */
     PushPin("push_pin"),
+    ArrowDownward("arrow_downward"),
+    AutoAwesome("auto_awesome"),
+    Checklist("checklist"),
 }
 
 /** Pure lookup, safe from JVM unit tests (no Android context involved). */
@@ -195,6 +201,9 @@ fun iconFor(name: IconName): ImageVector = when (name) {
     IconName.Menu -> Icons.Rounded.Menu
     IconName.MoreVert -> Icons.Rounded.MoreVert
     IconName.ExpandMore -> Icons.Rounded.ExpandMore
+    IconName.ArrowDownward -> Icons.Rounded.ArrowDownward
+    IconName.AutoAwesome -> Icons.Rounded.AutoAwesome
+    IconName.Checklist -> Icons.Rounded.Checklist
     IconName.Add -> Icons.Rounded.Add
     IconName.ArrowUpward -> Icons.Rounded.ArrowUpward
     IconName.ArrowBack -> Icons.AutoMirrored.Rounded.ArrowBack

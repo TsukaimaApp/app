@@ -1,5 +1,12 @@
 package app.tsukaima.ui.chat
 
+import androidx.compose.ui.Alignment
+import app.tsukaima.ui.chat.components.LatestButton
+import app.tsukaima.ui.chat.components.StepsLine
+import app.tsukaima.ui.chat.components.TimeMark
+import app.tsukaima.domain.chat.TranscriptRows
+import app.tsukaima.domain.chat.TranscriptRow
+import java.time.ZoneId
 import android.Manifest
 import android.content.ClipData
 import android.content.pm.PackageManager
@@ -161,6 +168,7 @@ class ChatActions(
     val onDismissFailed: (String) -> Unit = {},
     val onMessageMenu: (String?) -> Unit = {},
     val onToggleReasoning: (String) -> Unit = {},
+    val onToggleSteps: (String) -> Unit = {},
     val onSelectText: (String?) -> Unit = {},
     val onToolOpened: () -> Unit = {},
     val onCopyMessage: (id: String, reasoning: Boolean) -> Unit = { _, _ -> },
@@ -293,6 +301,7 @@ fun ChatScreen(
             onDismissFailed = vm::dismissFailed,
             onMessageMenu = vm::showMessageMenu,
             onToggleReasoning = vm::toggleReasoning,
+            onToggleSteps = vm::toggleSteps,
             onSelectText = vm::selectText,
             onToolOpened = vm::loadToolOutputs,
             onCopyMessage = { id, reasoning ->
@@ -466,6 +475,8 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
             actions.previewImage, actions.imageAllowed, actions.onAllowImage, actions.previewToolImage,
         )
     }
+    val zone = remember { ZoneId.systemDefault() }
+    val rows = remember(items, state.chat.openSteps, zone) { TranscriptRows.build(items, state.chat.openSteps, zone) }
     // Follow the bottom while the user is there; a manual scroll up stops following until they come back.
     var follow by rememberSaveable { mutableStateOf(true) }
     LaunchedEffect(listState) {
@@ -473,16 +484,39 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
             .collect { (scrolling, canScrollForward) -> if (scrolling) follow = !canScrollForward }
     }
     val tail = transcriptTailKey(items)
-    LaunchedEffect(items.size, tail) {
-        if (follow && items.isNotEmpty()) listState.scrollToItem(items.size) // the end spacer: bottom of the last item
+    LaunchedEffect(rows.size, tail) {
+        if (follow && rows.isNotEmpty()) listState.scrollToItem(rows.size) // the end spacer: bottom of the last item
     }
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 6.dp),
-    ) {
-        items(items, key = { it.id }, contentType = { it::class }) { item -> TranscriptItem(item, state, actions, media) }
-        item(key = "end") { Spacer(Modifier.height(10.dp)) }
+    // What was last when the reader left the bottom: anything after it is new to them (the Latest button's dot).
+    var leftAt by remember { mutableStateOf(tail) }
+    if (follow) leftAt = tail
+    val scope = rememberCoroutineScope()
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 6.dp),
+        ) {
+            items(rows, key = { it.key }, contentType = { if (it is TranscriptRow.Item) it.item::class else it::class }) { row ->
+                when (row) {
+                    is TranscriptRow.Item -> TranscriptItem(row.item, state, actions, media)
+                    is TranscriptRow.TimeMark -> TimeMark(row.at, zone)
+                    is TranscriptRow.Steps -> StepsLine(row, onToggle = { actions.onToggleSteps(row.id) })
+                }
+            }
+            item(key = "end") { Spacer(Modifier.height(10.dp)) }
+        }
+        LatestButton(
+            visible = !follow && listState.canScrollForward,
+            unseen = tail != leftAt,
+            onClick = {
+                follow = true
+                scope.launch { listState.animateScrollToItem(rows.size) }
+            },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 12.dp),
+        )
     }
 }
 
@@ -516,6 +550,8 @@ internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatAct
                 reasoningOpen = ChatReducer.reasoningOpen(state.chat, item),
                 onToggleReasoning = { actions.onToggleReasoning(item.id) },
                 model = item.model,
+                thoughtFrom = item.thoughtFrom,
+                thoughtMs = item.thoughtMs,
             )
         }
         is ChatItem.ToolCall -> ToolRow(item, media = media, onOpened = actions.onToolOpened)

@@ -79,7 +79,7 @@ internal class ChatEdits(
             val cut = ChatReducer.onTruncated(it.chat, row)
             val chat = ChatReducer.onSubmitted(
                 cut, text, localId, flair, shownAttachments,
-                promptText = promptText, imagesSent = sent.any { a -> a.queued },
+                promptText = promptText, imagesSent = sent.any { a -> a.queued }, now = WallClock.now(),
             )
             if (fromComposer) it.copy(chat = chat, input = "", pendingEdit = null, editDropsAttachments = false) else it.copy(chat = chat)
         }

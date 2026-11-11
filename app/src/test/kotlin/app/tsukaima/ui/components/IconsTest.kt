@@ -30,6 +30,7 @@ class IconsTest {
         "graphic_eq", "select_all", // v0.10.2: the message menu's Select text
         "picture_as_pdf", "broken_image", "volume_up",
         "push_pin", // v0.11.0: the drawer's Pin / Unpin
+        "arrow_downward", "auto_awesome", "checklist", // v0.13.0: Latest button, reasoning block, folded steps
     )
 
     @Test

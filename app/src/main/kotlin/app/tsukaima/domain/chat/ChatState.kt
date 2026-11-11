@@ -37,6 +37,8 @@ sealed interface ChatItem {
         val queued: Boolean = false,
         val steer: Boolean = false,
         val steerWaiting: Boolean = false,
+        /** When it was sent, epoch millis (the phone's clock for a live send, the row's `timestamp` from history); null when unknown. */
+        val at: Long? = null,
     ) : ChatItem
 
     data class AssistantMessage(
@@ -44,7 +46,7 @@ sealed interface ChatItem {
         val text: String,
         val streaming: Boolean,
         val reasoning: String?,
-        /** The reasoning was streamed in this session (shown open unless the user closed it); history loads closed. */
+        /** The reasoning was streamed in this session; history's was not. */
         val reasoningLive: Boolean = false,
         /** The persisted row (history `row_id`, or the turn's `final_assistant_row_id`); null until known. */
         val rowId: Long? = null,
@@ -53,6 +55,10 @@ sealed interface ChatItem {
          * fallback served the turn); null otherwise, and for a reply loaded from history, which carries no model.
          */
         val model: String? = null,
+        /** When the first reasoning of this message arrived, epoch millis; null for history and for a clockless reducer. */
+        val thoughtFrom: Long? = null,
+        /** How long its reasoning streamed (first to last `reasoning.delta`), millis; null when it was not timed. */
+        val thoughtMs: Long? = null,
     ) : ChatItem
 
     data class ToolCall(
@@ -360,6 +366,8 @@ data class ChatState(
     val resumeProgress: String? = null,
     /** The user's explicit open/closed choice for a message's reasoning, by item id; absent = the item's default. */
     val reasoningOpen: Map<String, Boolean> = emptyMap(),
+    /** The folded step groups the user opened ([TranscriptRows]), by group id. */
+    val openSteps: Set<String> = emptySet(),
     /** A turn ended while a [ChatItem.UserMessage.queued] echo waited: the next turn to start is that echo's. */
     val queuedTurnNext: Boolean = false,
     /**

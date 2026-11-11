@@ -208,7 +208,7 @@ internal class ChatReconnector(
         val live = chat.liveSessionId
         if (live == null) {
             // A deferred resume reports its history load before the resume binds the live id.
-            if (ev.type == RESUME_PROGRESS && state.value.loading) setChat { ChatReducer.reduce(it, ev, flair) }
+            if (ev.type == RESUME_PROGRESS && state.value.loading) setChat { ChatReducer.reduce(it, ev, WallClock.now(), flair) }
             return
         }
         if (ev.type == RECLAIMED) {
@@ -226,7 +226,7 @@ internal class ChatReconnector(
             state.update { it.copy(model = model ?: it.model, provider = provider ?: it.provider) }
         }
         val before = chat
-        setChat { ChatReducer.reduce(it, ev, flair) }
+        setChat { ChatReducer.reduce(it, ev, WallClock.now(), flair) }
         // A notice is shown once: a replayed one (at or below the watermark) left the state untouched.
         if (ev.type == NOTIFICATION && (ev.seq == null || chat.lastSeq != before.lastSeq)) {
             (ev.payload["text"] as? JsonPrimitive)?.contentOrNull?.let(ChatSync::toastLine)?.takeIf { it.isNotEmpty() }?.let(backend::toast)
@@ -242,7 +242,7 @@ internal class ChatReconnector(
         if (!snapshot && backend.closedRequestIds.contains(req.id)) return
         val live = chat.liveSessionId ?: return
         if ((req.params["session_id"] as? JsonPrimitive)?.contentOrNull != live) return
-        setChat { ChatReducer.reduce(it, req, flair) }
+        setChat { ChatReducer.reduce(it, req, WallClock.now(), flair) }
     }
 
     private companion object {
