@@ -32,10 +32,10 @@ class ReasoningPickerUiTest : ComposeUiTest() {
                 actions = ChatActions(onReasoning = { picked += it }),
             )
         }
-        compose.onNodeWithText("Hermes is listening,").assertExists()
+        compose.onNodeWithText("Hermes awaits,").assertExists()
         compose.onNodeWithText("Ultra").assertDoesNotExist()
         compose.onNodeWithContentDescription("Reasoning level: High").assertHeightIsAtLeast(44.dp).performClick()
-        compose.onNodeWithText("thinking past all reason").assertExists()
+        compose.onNodeWithText("going beyond its limits").assertExists()
         compose.onNodeWithText("Ultra").performClick()
         compose.waitForIdle()
         assertEquals(listOf("ultra"), picked)
@@ -51,7 +51,7 @@ class ReasoningPickerUiTest : ComposeUiTest() {
             )
         }
         compose.onNodeWithText("Replying…").assertExists()
-        compose.onNodeWithText("Hermes is listening,").assertDoesNotExist()
+        compose.onNodeWithText("Hermes awaits,").assertDoesNotExist()
         compose.onNodeWithContentDescription("Reasoning level: High").assertDoesNotExist()
     }
 }

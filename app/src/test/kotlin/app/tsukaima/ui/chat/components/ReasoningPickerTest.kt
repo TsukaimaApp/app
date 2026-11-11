@@ -17,12 +17,12 @@ class ReasoningPickerTest {
 
     @Test
     fun eachEffortHasItsPhraseAndTheDefaultReadsAsUsual() {
-        assertEquals("thinking hard", reasoningPhrase("high"))
-        assertEquals("not thinking it over", reasoningPhrase("none"))
-        assertEquals("thinking past all reason", reasoningPhrase("ultra"))
-        assertEquals("thinking as usual", reasoningPhrase(""))
-        assertEquals("thinking as usual", reasoningPhrase(null))
-        assertEquals("thinking as usual", reasoningPhrase("something-new"))
+        assertEquals("ready to go all out", reasoningPhrase("high"))
+        assertEquals("taking it easy", reasoningPhrase("none"))
+        assertEquals("going beyond its limits", reasoningPhrase("ultra"))
+        assertEquals("at its usual pace", reasoningPhrase(""))
+        assertEquals("at its usual pace", reasoningPhrase(null))
+        assertEquals("at its usual pace", reasoningPhrase("something-new"))
         assertEquals(REASONING_PICKER.size, REASONING_PICKER.map { it.phrase }.toSet().size)
     }
 

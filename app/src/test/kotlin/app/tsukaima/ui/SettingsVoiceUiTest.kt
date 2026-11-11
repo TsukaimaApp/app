@@ -19,9 +19,9 @@ class SettingsVoiceUiTest : ComposeUiTest() {
 
     @Test
     fun `the Voice section lists processing, language and assistant`() {
-        setThemed { SettingsContent(SettingsUiState(voiceProcessing = VoiceProcessing.Phone), SettingsActions()) }
+        setThemed { SettingsContent(SettingsUiState(voiceProcessing = VoiceProcessing.Phone), SettingsActions(), initialPage = app.tsukaima.ui.settings.SettingsPage.Voice) }
 
-        compose.onNodeWithText("Voice").performScrollTo().assertExists()
+        compose.onNodeWithText("Voice").assertExists() // the page's title, in the bar
         compose.onNodeWithText("Voice processing").performScrollTo().assertExists()
         compose.onNodeWithText("Language").performScrollTo().assertExists()
         compose.onNodeWithText("Use as device assistant").performScrollTo().assertExists()
@@ -34,6 +34,7 @@ class SettingsVoiceUiTest : ComposeUiTest() {
             SettingsContent(
                 SettingsUiState(voiceProcessing = VoiceProcessing.Phone),
                 SettingsActions(onVoiceProcessingOpen = { opened++ }),
+                initialPage = app.tsukaima.ui.settings.SettingsPage.Voice,
             )
         }
         compose.onNodeWithText("On Hermes").assertDoesNotExist()
@@ -61,6 +62,7 @@ class SettingsVoiceUiTest : ComposeUiTest() {
             SettingsContent(
                 SettingsUiState(liveVoice = true, liveVoiceCaption = caption),
                 SettingsActions(onLiveVoice = { set = it }, onVoiceSectionShown = { shown++ }),
+                initialPage = app.tsukaima.ui.settings.SettingsPage.Voice,
             )
         }
         assertEquals(1, shown)

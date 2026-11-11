@@ -331,3 +331,12 @@ The user chose from a canvas: offline messages go out by themselves within a con
 - Ruling: the process list is polled (on bind, at each turn end, on a `process` status line, every 3 s with the sheet open) and `agent.terminal.output` only extends a known row's tail — Hermes sends no start or end event and `terminal.close` was never seen — cost if wrong: a process that starts and ends silently between polls is never shown.
 - Ruling: no separate notification for a finished background process; its status line becomes the text of the notification of the turn Hermes then starts — two notifications seconds apart for one event would be noise — cost if wrong: if Hermes ever stops starting that turn, the finish is not notified.
 - Ruling: recovery after Android ends the background service is not built in this release; `diagnostics/BackgroundLog.kt` records the service's life for the problem report instead — a sticky restart or a job that reconnects cannot be verified without a phone, and a wrong one drains the battery or loops — cost if wrong: one more release with the app going quiet after the system's limit.
+
+## v0.14.1
+
+The user sent a scrolling screenshot of Settings (about fifteen screens, mostly skill switches) and chose from a canvas: a short list with a page per topic (A), Hermes' settings first, and on wide screens two columns by default, collapsible, collapsed by default when upright.
+
+- Ruling: the pages are state inside `SettingsContent` (`SettingsPage`, saved across rotation), not navigation routes — one view model and one screen already hold every setting, and two columns need the list and a page in the same composition — cost if wrong: a page cannot be deep-linked from outside; `initialPage` is the hook if one is needed.
+- Ruling: "two columns" needs 720dp of width; the default is two columns when the window is wider than tall and one when it is taller, and the top bar's button overrides it until the screen is left — cost if wrong: one constant (`TWO_PANE_MIN`), or persisting the choice.
+- Ruling: one column is capped at 640dp and centred on a wide screen — the old page stretched labels and switches to opposite edges — cost if wrong: one constant.
+- Ruling: skills are grouped by the server's `category`, falling back to the first letter (the canvas showed letters; the category was not known to exist then) — a category says more than a letter — cost if wrong: switch the grouping key.

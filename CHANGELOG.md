@@ -3,6 +3,26 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.14.1 — 2026-11-11 (versionCode 33)
+
+Not checked on a phone.
+
+### Changed
+- **Settings is a short list of pages.** It was one page about fifteen screens long, most of it a hundred skill
+  switches. Now it lists ten topics, each with its state in one line ("Skills · 96 of 104 on"), and a tap opens
+  that topic on a page of its own. Hermes' settings come first (Connection, Model, Skills, Toolsets, Pairing), then
+  the phone's (Notifications, Voice, Offline, Appearance, Diagnostics and support). Profile is on the Connection
+  page. Nothing was removed.
+- **Skills page**: a search field (name, description or category), All / On / Off, and the skills grouped by the
+  server's category (by first letter where a skill has none).
+- **The status line on your turn** reads "Hermes awaits, ready to go all out" (the underlined part is still the
+  reasoning picker). It read "Hermes is listening, thinking hard", which sounded as if Hermes were thinking already,
+  and was wrong in an empty chat. The eight levels, Off to Ultra: taking it easy, barely lifting a finger, just
+  warming up, getting serious, ready to go all out, holding nothing back, at full power, going beyond its limits.
+- **Wide screens** (an unfolded phone, a tablet): held on its side, Settings shows the list on the left and the
+  open page on the right. Held upright it starts as one column, no wider than a phone's. A button in the top bar
+  switches between the two.
+
 ## 0.14.0 — 2026-11-11 (versionCode 32)
 
 Not checked on a phone.

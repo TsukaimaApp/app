@@ -77,20 +77,22 @@ import kotlin.math.sin
 
 /**
  * One reasoning effort of the picker: the [value] `config.set key=reasoning` takes, its [name], and how the status
- * line says it after "Hermes is listening," ([phrase]).
+ * line says it after "Hermes awaits," ([phrase]), with a light anime flavour: the user asked for that, and for not too much of it.
+ * The line is a state, so it is as true in an empty chat as after a reply; "Hermes is listening, thinking hard"
+ * (0.12) read as if it were thinking now.
  */
 data class ReasoningLevel(val value: String, val name: String, val phrase: String)
 
 /** The efforts in rising order (the values of `REASONING_LEVELS`); the index is the level's strength, 0 = off. */
 val REASONING_PICKER: List<ReasoningLevel> = listOf(
-    ReasoningLevel("none", "Off", "not thinking it over"),
-    ReasoningLevel("minimal", "Minimal", "barely thinking"),
-    ReasoningLevel("low", "Low", "thinking lightly"),
-    ReasoningLevel("medium", "Medium", "thinking it through"),
-    ReasoningLevel("high", "High", "thinking hard"),
-    ReasoningLevel("xhigh", "Extra high", "thinking very hard"),
-    ReasoningLevel("max", "Max", "thinking as hard as it can"),
-    ReasoningLevel("ultra", "Ultra", "thinking past all reason"),
+    ReasoningLevel("none", "Off", "taking it easy"),
+    ReasoningLevel("minimal", "Minimal", "barely lifting a finger"),
+    ReasoningLevel("low", "Low", "just warming up"),
+    ReasoningLevel("medium", "Medium", "getting serious"),
+    ReasoningLevel("high", "High", "ready to go all out"),
+    ReasoningLevel("xhigh", "Extra high", "holding nothing back"),
+    ReasoningLevel("max", "Max", "at full power"),
+    ReasoningLevel("ultra", "Ultra", "going beyond its limits"),
 )
 
 /** From this strength on (Max, Ultra) the phrase keeps shimmering; below it only moves when it is picked. */
@@ -99,8 +101,8 @@ internal const val TOP_LEVEL = 6
 /** The strength of [effort] in [REASONING_PICKER]; -1 for the provider's default (`""`), an unknown value or none yet. */
 internal fun reasoningStrength(effort: String?): Int = REASONING_PICKER.indexOfFirst { it.value == effort }
 
-/** What the status line says for [effort]; the provider's default and an unknown value read "thinking as usual". */
-internal fun reasoningPhrase(effort: String?): String = REASONING_PICKER.getOrNull(reasoningStrength(effort))?.phrase ?: "thinking as usual"
+/** What the status line says for [effort]; the provider's default and an unknown value read "at its usual pace". */
+internal fun reasoningPhrase(effort: String?): String = REASONING_PICKER.getOrNull(reasoningStrength(effort))?.phrase ?: "at its usual pace"
 
 private val Gold = Color(0xFFF0D9A0)
 private val Rainbow = listOf(
@@ -119,8 +121,8 @@ internal fun motionOff(): Boolean {
 }
 
 /**
- * The chat's status line while it is the user's turn: the dot, "Hermes is listening," and the reasoning effort as a
- * phrase ("thinking hard") that is the control for it. A tap on the phrase calls [onToggle] (the [ReasoningPanel]
+ * The chat's status line while it is the user's turn: the dot, "Hermes awaits," and the reasoning effort as a
+ * phrase ("ready to go all out") that is the control for it. A tap on the phrase calls [onToggle] (the [ReasoningPanel]
  * under the line); a tap elsewhere on the line is [onClick], as on the plain status line. [meter] sits at the end.
  *
  * Motion: picking a level makes the new phrase condense (fade in from wide letter-spacing) and throws a burst of
@@ -133,7 +135,7 @@ fun ReasoningStatusLine(
     open: Boolean,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
-    lead: String = "Hermes is listening,",
+    lead: String = "Hermes awaits,",
     onClick: (() -> Unit)? = null,
     meter: String? = null,
     /** Shown at the line's end in the meter's place (the background-process chip). */

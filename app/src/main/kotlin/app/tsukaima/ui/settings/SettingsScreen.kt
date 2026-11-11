@@ -1,5 +1,18 @@
 package app.tsukaima.ui.settings
 
+import app.tsukaima.ui.theme.TsukaimaShapes
+import app.tsukaima.diagnostics.Diagnostics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.key
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.activity.compose.BackHandler
 import android.app.role.RoleManager
 import android.content.ActivityNotFoundException
 import android.content.Context
@@ -190,7 +203,13 @@ fun SettingsScreen(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: Modifier = Modifier) {
+fun SettingsContent(
+    state: SettingsUiState,
+    actions: SettingsActions,
+    modifier: Modifier = Modifier,
+    /** The page open at first (a test, a deep link); null = the list. */
+    initialPage: SettingsPage? = null,
+) {
     val colors = MaterialTheme.tsukaima
     SignOutDialog(state, actions)
     RevokeDialog(state, actions)
@@ -225,30 +244,178 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
             },
         ),
     )
-    Column(
+    BoxWithConstraints(
         modifier
             .fillMaxSize()
             .background(colors.surfacePage),
     ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            IconButton44(IconName.ArrowBack, "Back", actions.onBack)
-            Text("Settings", style = TsukaimaType.title, color = colors.ink1)
+        // A wide screen (an unfolded phone, a tablet) can show the list beside the open page. That is the default
+        // when the screen is wider than tall; upright it starts as one column. The top bar's button switches.
+        val wide = maxWidth >= TWO_PANE_MIN
+        val landscape = maxWidth > maxHeight
+        var paneChoice by rememberSaveable { mutableStateOf<Boolean?>(null) }
+        val twoPane = wide && (paneChoice ?: landscape)
+        var pageName by rememberSaveable { mutableStateOf(initialPage?.name) }
+        val page = pageName?.let { name -> SettingsPage.entries.firstOrNull { it.name == name } }
+        // Beside the list something is always open: the first page until one is picked.
+        val shown = page ?: SettingsPage.Connection.takeIf { twoPane }
+        BackHandler(enabled = page != null && !twoPane) { pageName = null }
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                val inPage = page != null && !twoPane
+                IconButton44(IconName.ArrowBack, if (inPage) "Back to Settings" else "Back", if (inPage) ({ pageName = null }) else actions.onBack)
+                Text(if (inPage) page?.title.orEmpty() else "Settings", style = TsukaimaType.title, color = colors.ink1, modifier = Modifier.weight(1f))
+                if (wide) {
+                    IconButton44(IconName.VerticalSplit, if (twoPane) "Show one column" else "Show the list beside the page", onClick = { paneChoice = !twoPane })
+                }
+            }
+            val showSheet: (SettingsSheet) -> Unit = { sheet ->
+                when (sheet) {
+                    SettingsSheet.VoiceLanguage -> showVoiceLanguages = true
+                    SettingsSheet.VoiceProcessing -> showVoiceProcessing = true
+                    SettingsSheet.OfflineSend -> showOfflineSend = true
+                }
+            }
+            if (twoPane) {
+                Row(Modifier.weight(1f).fillMaxWidth()) {
+                    SettingsHub(state, selected = shown, onOpen = { pageName = it.name }, modifier = Modifier.width(HUB_WIDTH).fillMaxHeight())
+                    Box(Modifier.fillMaxHeight().width(1.dp).background(colors.hairline))
+                    SettingsPageBody(shown ?: SettingsPage.Connection, state, actions, showSheet, heading = true, modifier = Modifier.weight(1f).fillMaxHeight())
+                }
+            } else {
+                // One column never stretches across a wide screen.
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                    val column = Modifier.widthIn(max = ONE_COLUMN_MAX).fillMaxHeight()
+                    if (page == null) SettingsHub(state, selected = null, onOpen = { pageName = it.name }, modifier = column)
+                    else SettingsPageBody(page, state, actions, showSheet, heading = false, modifier = column)
+                }
+            }
         }
-        Column(
-            Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(28.dp),
-        ) {
+    }
+}
+
+/** The narrowest screen that shows the list beside the open page. */
+private val TWO_PANE_MIN = 720.dp
+private val HUB_WIDTH = 340.dp
+private val ONE_COLUMN_MAX = 640.dp
+
+/** The pickers a settings page opens as a sheet. */
+enum class SettingsSheet { VoiceLanguage, VoiceProcessing, OfflineSend }
+
+/**
+ * The pages of Settings, in the list's order: what configures Hermes first ([hermes]), then what configures this
+ * phone. The list shows each as one row with [settingsSummary] under its [title].
+ */
+enum class SettingsPage(val title: String, val icon: IconName, val hermes: Boolean) {
+    Connection("Connection", IconName.Dns, true),
+    Model("Model", IconName.Memory, true),
+    Skills("Skills", IconName.AutoAwesome, true),
+    Toolsets("Toolsets", IconName.Terminal, true),
+    Pairing("Pairing", IconName.Link, true),
+    Notifications("Notifications", IconName.Notifications, false),
+    Voice("Voice", IconName.GraphicEq, false),
+    Offline("Offline", IconName.CloudOff, false),
+    Appearance("Appearance", IconName.Palette, false),
+    Diagnostics("Diagnostics and support", IconName.MonitorHeart, false),
+}
+
+/** What the list says under [page]'s title: the page's current state in one line, so most visits need no tap. */
+internal fun settingsSummary(page: SettingsPage, s: SettingsUiState): String = when (page) {
+    SettingsPage.Connection -> {
+        val host = Diagnostics.serverHost(s.storedUrl)
+        when {
+            host == null || !s.passwordSaved -> "Not signed in"
+            else -> listOfNotNull(host, s.username.takeIf { it.isNotBlank() }?.let { "signed in as $it" }, s.profile.takeIf { it.isNotBlank() && it != "default" }?.let { "profile $it" }).joinToString(" · ")
+        }
+    }
+    SettingsPage.Model -> s.model ?: "Not chosen"
+    SettingsPage.Skills -> countOn(s.skills.size, s.skills.count { it.enabled == true })
+    SettingsPage.Toolsets -> countOn(s.toolsets.size, s.toolsets.count { it.enabled == true })
+    SettingsPage.Pairing -> when {
+        s.pendingPairing.isNotEmpty() -> "${s.pendingPairing.size} waiting for approval"
+        s.approvedPairing.isNotEmpty() -> "${s.approvedPairing.size} paired"
+        else -> "No paired accounts"
+    }
+    SettingsPage.Notifications -> {
+        val on = listOf(s.notifications.approvals, s.notifications.pairing, s.notifications.replies, s.notifications.alerts).count { it }
+        when (on) {
+            0 -> "All off"
+            4 -> "All on"
+            else -> "$on of 4 on"
+        }
+    }
+    SettingsPage.Voice -> (if (s.voiceProcessing == VoiceProcessing.Server) "On Hermes" else PHONE_PROCESSING) + " · Live voice " + if (s.liveVoice) "on" else "off"
+    SettingsPage.Offline -> if (s.offlineSendMinutes == 0) "Offline messages stay drafts" else "Send within ${offlineSendLabel(s.offlineSendMinutes).lowercase()}"
+    SettingsPage.Appearance -> when (s.theme) {
+        ThemeMode.Warm -> "Warm"
+        ThemeMode.Dark -> "Dark"
+        ThemeMode.System -> "System"
+    } + if (s.materialYou) " · Material You" else ""
+    SettingsPage.Diagnostics -> if (s.lastCrash != null) "The app crashed last time" else "Logs, usage, problem report"
+}
+
+private fun countOn(total: Int, on: Int) = if (total == 0) "Loads once you are signed in" else "$on of $total on"
+
+/** The list of pages: two groups, a row each with its summary; [selected] is the page open beside it. */
+@Composable
+private fun SettingsHub(state: SettingsUiState, selected: SettingsPage?, onOpen: (SettingsPage) -> Unit, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.tsukaima
+    Column(
+        modifier
+            .verticalScroll(rememberScrollState())
+            .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 24.dp),
+    ) {
+        listOf("Hermes" to true, "This phone" to false).forEach { (label, hermes) ->
+            Text(
+                label.uppercase(), style = TsukaimaType.label, color = colors.ink3,
+                modifier = Modifier.padding(start = 12.dp, top = 14.dp, bottom = 4.dp).semantics { heading() },
+            )
+            SettingsPage.entries.filter { it.hermes == hermes }.forEach { page ->
+                TsukaimaRow(
+                    title = page.title,
+                    subtitle = settingsSummary(page, state),
+                    leading = page.icon,
+                    trailing = { Chevron() },
+                    onClick = { onOpen(page) },
+                    modifier = Modifier
+                        .background(if (page == selected) colors.accentSelected else Color.Transparent, TsukaimaShapes.row)
+                        .semantics { this.selected = page == selected },
+                )
+            }
+        }
+    }
+}
+
+/** One page's settings. [heading] puts the page's title above them (beside the list, where the top bar says "Settings"). */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SettingsPageBody(
+    page: SettingsPage,
+    state: SettingsUiState,
+    actions: SettingsActions,
+    showSheet: (SettingsSheet) -> Unit,
+    heading: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.tsukaima
+    // Each page scrolls from its own top.
+    val scroll = key(page) { rememberScrollState() }
+    Column(
+        modifier
+            .imePadding()
+            .verticalScroll(scroll)
+            .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(28.dp),
+    ) {
+        if (heading) Text(page.title, style = TsukaimaType.titleSmall, color = colors.ink1, modifier = Modifier.semantics { heading() })
+        when (page) {
+            SettingsPage.Connection -> {
             Section("Hermes instance") {
                 TsukaimaTextField(
                     value = state.serverUrl,
@@ -308,8 +475,9 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                     names.forEach { Chip(it, onClick = { actions.onProfile(it) }, selected = state.profile == it) }
                 }
             }
-
-            Section("Model") {
+            }
+            SettingsPage.Model -> {
+            Section(null) {
                 if (state.models.isEmpty()) {
                     Caption(state.model ?: "Models load once you are signed in.")
                 } else {
@@ -320,22 +488,10 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                     }
                 }
             }
-
-            Section("Skills", hint = "Toggle only. Installing new skills is a desktop task.") {
-                Column {
-                    state.skills.forEach { skill ->
-                        val on = skill.enabled == true
-                        TsukaimaRow(
-                            title = skill.name,
-                            trailing = { TsukaimaSwitch(on, { actions.onSkill(skill.name, it) }) },
-                            onClick = { actions.onSkill(skill.name, !on) },
-                            modifier = Modifier.bleed(12.dp),
-                        )
-                    }
-                }
             }
-
-            Section("Toolsets", hint = "Applies to new sessions. Provider keys and setup stay in the dashboard.") {
+            SettingsPage.Skills -> SkillsPage(state.skills, actions.onSkill)
+            SettingsPage.Toolsets -> {
+            Section(null, hint = "Applies to new sessions. Provider keys and setup stay in the dashboard.") {
                 Column {
                     state.toolsets.forEach { tool ->
                         val on = tool.enabled == true
@@ -348,8 +504,9 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                     }
                 }
             }
-
-            Section("Pairing", hint = "Who may talk to the bot.") {
+            }
+            SettingsPage.Pairing -> {
+            Section(null, hint = "Who may talk to the bot.") {
                 state.pendingPairing.forEach { p ->
                     PairingCard(p.platform, p.who, p.userId, onApprove = { actions.onApprove(p) })
                 }
@@ -368,8 +525,9 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                     }
                 }
             }
-
-            Section("Notifications", hint = "What Tsukaima may notify you about. Android’s own settings still apply.") {
+            }
+            SettingsPage.Notifications -> {
+            Section(null, hint = "What Tsukaima may notify you about. Android’s own settings still apply.") {
                 Column(Modifier.bleed(12.dp)) {
                     val n = state.notifications
                     NotifyRow("Approvals and questions", "When Hermes waits for you", n.approvals) { on ->
@@ -386,8 +544,9 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                     }
                 }
             }
-
-            Section("Voice") {
+            }
+            SettingsPage.Voice -> {
+            Section(null) {
                 val onHermes = state.voiceProcessing == VoiceProcessing.Server
                 TsukaimaRow(
                     title = "Voice processing",
@@ -396,7 +555,7 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                     trailing = { Chevron() },
                     onClick = {
                         actions.onVoiceProcessingOpen()
-                        showVoiceProcessing = true
+                        showSheet(SettingsSheet.VoiceProcessing)
                     },
                     modifier = Modifier.bleed(12.dp),
                 )
@@ -418,7 +577,7 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                     trailing = { Chevron() },
                     onClick = {
                         actions.onVoiceLanguagesOpen()
-                        showVoiceLanguages = true
+                        showSheet(SettingsSheet.VoiceLanguage)
                     },
                     modifier = Modifier.bleed(12.dp),
                 )
@@ -431,7 +590,38 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                     modifier = Modifier.bleed(12.dp),
                 )
             }
-
+            }
+            SettingsPage.Offline -> {
+            Section(null) {
+                TsukaimaRow(
+                    title = "Send messages written offline",
+                    subtitle = if (state.offlineSendMinutes == 0) "Never: they stay in the composer as a draft"
+                    else "When back online within ${offlineSendLabel(state.offlineSendMinutes).lowercase()}; after that they become a draft",
+                    leading = IconName.CloudOff,
+                    trailing = { Chevron() },
+                    onClick = { showSheet(SettingsSheet.OfflineSend) },
+                    modifier = Modifier.bleed(12.dp),
+                )
+            }
+            }
+            SettingsPage.Appearance -> {
+            Section(null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(ThemeMode.Warm to "Warm", ThemeMode.Dark to "Dark", ThemeMode.System to "System").forEach { (mode, label) ->
+                        Chip(label, onClick = { actions.onTheme(mode) }, selected = state.theme == mode)
+                    }
+                }
+                Caption("System is the default: warm in light, near-black in dark.")
+                TsukaimaRow(
+                    title = "Material You dynamic color",
+                    subtitle = "Off keeps the fixed warm palette.",
+                    trailing = { TsukaimaSwitch(state.materialYou, actions.onMaterialYou) },
+                    onClick = { actions.onMaterialYou(!state.materialYou) },
+                    modifier = Modifier.bleed(12.dp),
+                )
+            }
+            }
+            SettingsPage.Diagnostics -> {
             Section("Diagnostics") {
                 Column(Modifier.bleed(12.dp)) {
                     TsukaimaRow(
@@ -470,33 +660,68 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                     ReportProblemRow(state.reporting, actions.onReportProblem)
                 }
             }
-
-            Section("Offline") {
-                TsukaimaRow(
-                    title = "Send messages written offline",
-                    subtitle = if (state.offlineSendMinutes == 0) "Never: they stay in the composer as a draft"
-                    else "When back online within ${offlineSendLabel(state.offlineSendMinutes).lowercase()}; after that they become a draft",
-                    leading = IconName.CloudOff,
-                    trailing = { Chevron() },
-                    onClick = { showOfflineSend = true },
-                    modifier = Modifier.bleed(12.dp),
-                )
             }
+        }
+    }
+}
 
-            Section("Theme") {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(ThemeMode.Warm to "Warm", ThemeMode.Dark to "Dark", ThemeMode.System to "System").forEach { (mode, label) ->
-                        Chip(label, onClick = { actions.onTheme(mode) }, selected = state.theme == mode)
-                    }
-                }
-                Caption("System is the default: warm in light, near-black in dark.")
-                TsukaimaRow(
-                    title = "Material You dynamic color",
-                    subtitle = "Off keeps the fixed warm palette.",
-                    trailing = { TsukaimaSwitch(state.materialYou, actions.onMaterialYou) },
-                    onClick = { actions.onMaterialYou(!state.materialYou) },
-                    modifier = Modifier.bleed(12.dp),
+/** Which skills the Skills page lists: all, only those switched on, or only those switched off. */
+enum class SkillFilter { All, On, Off }
+
+/**
+ * [skills] for the Skills page: those matching [query] (in the name, description or category, any case) and
+ * [filter], by name, under their category (the server's; a skill without one goes under its first letter).
+ */
+internal fun skillGroups(skills: List<SkillDto>, query: String, filter: SkillFilter): List<Pair<String, List<SkillDto>>> {
+    val q = query.trim()
+    return skills
+        .filter { skill ->
+            val on = skill.enabled == true
+            (filter == SkillFilter.All || on == (filter == SkillFilter.On)) &&
+                (q.isEmpty() || listOfNotNull(skill.name, skill.description, skill.category).any { it.contains(q, ignoreCase = true) })
+        }
+        .sortedBy { it.name.lowercase() }
+        .groupBy { it.category?.takeIf(String::isNotBlank) ?: it.name.take(1).uppercase() }
+        .toSortedMap(String.CASE_INSENSITIVE_ORDER)
+        .map { it.key to it.value }
+}
+
+/** Skills with a search field and All / On / Off, grouped: a hundred switches are found, not scrolled through. */
+@Composable
+private fun SkillsPage(skills: List<SkillDto>, onSkill: (String, Boolean) -> Unit) {
+    val colors = MaterialTheme.tsukaima
+    var query by rememberSaveable { mutableStateOf("") }
+    var filter by rememberSaveable { mutableStateOf(SkillFilter.All) }
+    val on = skills.count { it.enabled == true }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Caption("Toggle only. Installing new skills is a desktop task.")
+        if (skills.isEmpty()) {
+            Caption("Skills load once you are signed in.")
+            return@Column
+        }
+        TsukaimaTextField(query, { query = it }, placeholder = "Search ${skills.size} skills")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("All ${skills.size}", onClick = { filter = SkillFilter.All }, selected = filter == SkillFilter.All)
+            Chip("On $on", onClick = { filter = SkillFilter.On }, selected = filter == SkillFilter.On)
+            Chip("Off ${skills.size - on}", onClick = { filter = SkillFilter.Off }, selected = filter == SkillFilter.Off)
+        }
+        val groups = remember(skills, query, filter) { skillGroups(skills, query, filter) }
+        if (groups.isEmpty()) Caption("No skill matches.")
+        groups.forEach { (group, members) ->
+            Column {
+                Text(
+                    group.uppercase(), style = TsukaimaType.label, color = colors.ink3,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 2.dp).semantics { heading() },
                 )
+                members.forEach { skill ->
+                    val enabled = skill.enabled == true
+                    TsukaimaRow(
+                        title = skill.name,
+                        trailing = { TsukaimaSwitch(enabled, { onSkill(skill.name, it) }) },
+                        onClick = { onSkill(skill.name, !enabled) },
+                        modifier = Modifier.bleed(12.dp),
+                    )
+                }
             }
         }
     }
@@ -610,12 +835,13 @@ private fun RevokeDialog(state: SettingsUiState, actions: SettingsActions) {
 }
 
 @Composable
-private fun Section(title: String, hint: String? = null, content: @Composable () -> Unit) {
+private fun Section(title: String?, hint: String? = null, content: @Composable () -> Unit) {
     val colors = MaterialTheme.tsukaima
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // The jsx pulls the hint up by 6dp into the 10dp gap, leaving 4dp under the title.
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = TsukaimaType.sectionTitle, color = colors.ink1)
+            // A page that is one section has its title in the bar above: only the hint is left.
+            if (title != null) Text(title, style = TsukaimaType.sectionTitle, color = colors.ink1)
             if (hint != null) Text(hint, style = TsukaimaType.caption, color = colors.ink3)
         }
         content()

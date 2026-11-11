@@ -153,7 +153,7 @@ data class ChatUiState(
         }
 
     /**
-     * It is the user's turn in a chat whose effort can be set: the status line shows "Hermes is listening," with
+     * It is the user's turn in a chat whose effort can be set: the status line shows "Hermes awaits," with
      * the reasoning picker. Not while anything else is on the line (a turn, compaction, offline, gateway state).
      */
     val reasoningPickable: Boolean

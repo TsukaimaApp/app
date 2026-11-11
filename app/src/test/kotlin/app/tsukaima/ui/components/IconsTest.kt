@@ -31,6 +31,7 @@ class IconsTest {
         "picture_as_pdf", "broken_image", "volume_up",
         "push_pin", // v0.11.0: the drawer's Pin / Unpin
         "arrow_downward", "auto_awesome", "checklist", // v0.13.0: Latest button, reasoning block, folded steps
+        "notifications", "palette", "vertical_split", // v0.14.1: the Settings list and its two-column switch
     )
 
     @Test
