@@ -3,6 +3,7 @@ package app.tsukaima
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import androidx.core.content.edit
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
@@ -20,6 +21,29 @@ object Shortcuts {
             .setAction(Intent.ACTION_VIEW)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .putExtra(ApprovalNotifier.EXTRA_OPEN_SCREEN, screen)
+            .putExtra(EXTRA_TOKEN, token(context))
+
+    /** The extra that proves an intent is one of the app's own ([token]). */
+    const val EXTRA_TOKEN = "launch_token"
+
+    /**
+     * A random value made once per install and kept in the app's private preferences. [MainActivity] is exported
+     * (the launcher starts it), so any app can send it an intent; only the app's own shortcuts and widget carry
+     * this value, and only an intent that carries it may start the microphone ([trusted]).
+     */
+    fun token(context: Context): String {
+        val prefs = context.applicationContext.getSharedPreferences("launch", Context.MODE_PRIVATE)
+        prefs.getString("token", null)?.let { return it }
+        val made = java.util.UUID.randomUUID().toString()
+        prefs.edit { putString("token", made) }
+        return prefs.getString("token", made) ?: made
+    }
+
+    /** Whether [intent] carries this install's [token]. Compared in constant time. */
+    fun trusted(context: Context, intent: Intent?): Boolean {
+        val given = intent?.getStringExtra(EXTRA_TOKEN) ?: return false
+        return java.security.MessageDigest.isEqual(given.toByteArray(), token(context).toByteArray())
+    }
 
     fun publish(context: Context) {
         fun shortcut(id: String, label: String, icon: Int, screen: String) = ShortcutInfoCompat.Builder(context, id)

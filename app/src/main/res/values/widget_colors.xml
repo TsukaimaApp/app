@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The home-screen widget's palette: the app's warm theme by day, its dark theme by night (ui/theme/Color.kt). -->
+<resources>
+    <color name="widget_surface">#FFFDF7</color>
+    <color name="widget_bar">#EFEAE0</color>
+    <color name="widget_hairline">#E6E0D4</color>
+    <color name="widget_ink1">#272220</color>
+    <color name="widget_ink2">#5D564E</color>
+    <color name="widget_warn">#7A5A1E</color>
+    <color name="widget_accent">#7C6FCF</color>
+    <color name="widget_on_accent">#FFFFFF</color>
+</resources>

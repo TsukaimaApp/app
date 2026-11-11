@@ -3,4 +3,10 @@
     <string name="app_name">Tsukaima</string>
     <!-- The share sheet target (ShareActivity). -->
     <string name="share_label">Send to Tsukaima</string>
+    <!-- The home-screen widget (widget/StatusWidget). -->
+    <string name="widget_description">What Hermes is doing, and a bar to ask or talk to it</string>
+    <string name="widget_line">Hermes awaits</string>
+    <string name="widget_ask">Ask Hermes</string>
+    <string name="widget_mic">Talk to Hermes</string>
+    <string name="widget_open">Open the last chat</string>
 </resources>

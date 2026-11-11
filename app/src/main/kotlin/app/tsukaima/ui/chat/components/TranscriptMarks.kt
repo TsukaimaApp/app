@@ -1,5 +1,12 @@
 package app.tsukaima.ui.chat.components
 
+import app.tsukaima.ui.components.ButtonSize
+import app.tsukaima.ui.components.SecondaryButton
+import app.tsukaima.ui.components.GhostButton
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.produceState
 import android.text.format.DateFormat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -214,4 +221,39 @@ internal fun savedCopyText(at: Long, now: Long, zone: ZoneId, hour24: Boolean): 
         else -> label
     }
     return "saved copy from $time"
+}
+
+/**
+ * Above the composer while an audio clip is recorded: a pulsing dot, "Recording 0:07" (counted from [since], epoch
+ * millis), Cancel (drops the clip) and Stop (ends it and attaches it).
+ */
+@Composable
+fun RecordingBar(since: Long, onStop: () -> Unit, onCancel: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.tsukaima
+    val seconds by produceState(((System.currentTimeMillis() - since) / 1000).coerceAtLeast(0), since) {
+        while (true) {
+            value = ((System.currentTimeMillis() - since) / 1000).coerceAtLeast(0)
+            delay(500)
+        }
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .clip(TsukaimaShapes.row)
+            .background(colors.surfaceRaised)
+            .border(1.dp, colors.hairline, TsukaimaShapes.row)
+            .defaultMinSize(minHeight = Dimens.hit)
+            .padding(start = 14.dp, end = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        StatusDot(StatusVisual(colors.danger, pulsing = true))
+        Text(
+            "Recording ${elapsedText(seconds)}", style = TsukaimaType.ui, color = colors.ink1, maxLines = 1,
+            modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
+        )
+        GhostButton("Cancel", onCancel, size = ButtonSize.Sm)
+        SecondaryButton("Stop", onStop, size = ButtonSize.Sm, icon = IconName.Stop)
+    }
 }

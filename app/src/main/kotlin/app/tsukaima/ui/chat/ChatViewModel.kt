@@ -1075,6 +1075,19 @@ class ChatViewModel(
     /** The microphone permission was refused. */
     fun voiceDenied() = backend.toast("Microphone access is needed for voice mode")
 
+    /** A delivered audio or video file on the phone, for its card's player; null (with a toast) when it cannot be fetched. */
+    suspend fun mediaFile(path: String): java.io.File? =
+        backend.mediaFile(path).onFailure { backend.toast("Couldn’t load the file: ${it.message ?: "network error"}") }.getOrNull()
+
+    /** An audio clip for the composer started recording at [since] (epoch millis), or ended (null). */
+    fun setRecording(since: Long?) = _state.update { it.copy(recordingSince = since, menu = null) }
+
+    /** "Share my location": [text] goes into the composer, under what is typed; nothing is sent. */
+    fun insertText(text: String) = _state.update { it.copy(input = if (it.input.isBlank()) text else it.input.trimEnd() + "\n\n" + text) }
+
+    /** A capture for the composer (photo, audio clip, location) did not work out; [why] says so. */
+    fun captureFailed(why: String) = backend.toast(why)
+
     /** The share sheet for an exported chat could not open. */
     fun exportFailed() = backend.toast("Couldn’t export the chat")
 

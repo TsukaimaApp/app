@@ -29,6 +29,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.tsukaima.ui.shell.AppShell
+import app.tsukaima.security.LockScreen
+import app.tsukaima.data.prefs.Settings
+import android.view.WindowManager
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import app.tsukaima.ui.theme.TsukaimaTheme
 import app.tsukaima.ui.theme.isDarkTheme
 
@@ -47,8 +53,21 @@ class MainActivity : ComponentActivity() {
             // Until settings load, follow the system (the shell shows only the page background meanwhile).
             val dark = isDarkTheme(settings?.theme)
             SystemBarIcons(dark)
+            // The app lock: while it is on and the app is locked, the lock screen covers everything. The shell stays
+            // composed under it (its navigation survives a lock), hidden from sight, touch and screen readers.
+            val locked by container.appLock.locked.collectAsStateWithLifecycle()
+            val lockOn = settings?.appLock == true
+            val covered = lockOn && locked
+            LaunchedEffect(settings?.appLock) {
+                if (settings != null && !lockOn) container.appLock.unlocked() // switched off: nothing to prove
+            }
+            LaunchedEffect(lockOn) {
+                // With the lock on, the app's content is also kept out of the recents screen and screenshots.
+                if (lockOn) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            }
             TsukaimaTheme(darkTheme = dark, dynamicColor = settings?.materialYou == true) {
-                AppShell(container)
+                Box(if (covered) Modifier.clearAndSetSemantics {} else Modifier) { AppShell(container) }
+                if (covered) LockScreen(onUnlocked = container.appLock::unlocked)
             }
         }
     }
@@ -74,6 +93,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        val container = (application as TsukaimaApp).container
+        container.appLock.onStart(container.settings.value?.appLockAfterSeconds ?: Settings.DEFAULT_APP_LOCK_AFTER_SECONDS)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) (application as TsukaimaApp).container.appLock.onStop()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleOpenScreen(intent)
@@ -88,12 +118,16 @@ class MainActivity : ComponentActivity() {
         val session = DeepLink.sessionId(intent.getStringExtra(DeepLink.EXTRA_SESSION_ID))
         when (screen) {
             ApprovalNotifier.SCREEN_CHAT -> (application as TsukaimaApp).container.openScreen.value = OpenScreen(screen, session)
-            ApprovalNotifier.SCREEN_SETTINGS, ApprovalNotifier.SCREEN_NEW_CHAT, ApprovalNotifier.SCREEN_VOICE ->
+            ApprovalNotifier.SCREEN_SETTINGS, ApprovalNotifier.SCREEN_NEW_CHAT ->
                 (application as TsukaimaApp).container.openScreen.value = OpenScreen(screen)
+            // Voice starts the microphone: only for the app's own shortcut or widget. Any other sender gets a chat at rest.
+            ApprovalNotifier.SCREEN_VOICE -> (application as TsukaimaApp).container.openScreen.value =
+                OpenScreen(if (Shortcuts.trusted(this, intent)) screen else ApprovalNotifier.SCREEN_NEW_CHAT)
         }
         // Not again on recreation.
         intent.removeExtra(ApprovalNotifier.EXTRA_OPEN_SCREEN)
         intent.removeExtra(DeepLink.EXTRA_SESSION_ID)
+        intent.removeExtra(Shortcuts.EXTRA_TOKEN)
     }
 
     private fun granted(): Boolean = Build.VERSION.SDK_INT < 33 ||

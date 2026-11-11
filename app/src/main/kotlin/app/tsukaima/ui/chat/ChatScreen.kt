@@ -1,5 +1,9 @@
 package app.tsukaima.ui.chat
 
+import app.tsukaima.ui.chat.components.AudioPlayback
+import app.tsukaima.ui.chat.components.RecordingBar
+import app.tsukaima.domain.chat.LocationText
+import java.io.File
 import androidx.compose.runtime.mutableIntStateOf
 import app.tsukaima.ui.chat.components.SearchMark
 import app.tsukaima.ui.chat.components.LocalChatSearch
@@ -137,6 +141,8 @@ class ChatActions(
     val imageAllowed: (String) -> Boolean = { false },
     val onAllowImage: (String) -> Unit = {},
     val previewToolImage: suspend (ChatItem.ToolCall) -> ImageResult = { ImageResult.Unavailable },
+    /** A delivered audio or video file, fetched for playing in its card; null when it cannot be. */
+    val playFile: suspend (String) -> File? = { null },
     val onApprove: (String) -> Unit = {},
     val onDeny: (String) -> Unit = {},
     val onApproveFor: (id: String, choice: ApprovalChoice) -> Unit = { _, _ -> },
@@ -186,6 +192,12 @@ class ChatActions(
     val onProcessStop: (String) -> Unit = {},
     /** "Export chat": share the conversation as a Markdown file. */
     val onExport: () -> Unit = {},
+    /** The attach sheet's entries beside "Photos and files" ([onAttach]). */
+    val onCamera: () -> Unit = {},
+    val onRecordAudio: () -> Unit = {},
+    val onRecordStop: () -> Unit = {},
+    val onRecordCancel: () -> Unit = {},
+    val onLocation: () -> Unit = {},
     val onSelectText: (String?) -> Unit = {},
     val onToolOpened: () -> Unit = {},
     val onCopyMessage: (id: String, reasoning: Boolean) -> Unit = { _, _ -> },
@@ -254,6 +266,48 @@ fun ChatScreen(
             }
         }
     }
+    // The attach sheet's captures. A photo is taken by the camera app into a file of ours; a clip is recorded here.
+    var photo by remember { mutableStateOf<File?>(null) }
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
+        val file = photo
+        photo = null
+        if (saved && file != null && file.length() > 0) vm.attach(listOf(FilePickedFile(file, "image/jpeg"))) else file?.delete()
+    }
+    val recorder = remember { AudioClipRecorder(context.applicationContext) }
+    val startClip = {
+        if (recorder.start()) vm.setRecording(System.currentTimeMillis()) else vm.captureFailed("Couldn’t start recording")
+    }
+    val clipMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startClip() else vm.captureFailed("Microphone access is needed to record")
+    }
+    val shareLocation = {
+        scope.launch {
+            val fix = currentLocation(context)
+            if (fix == null) vm.captureFailed("Couldn’t find your location. Is location switched on?")
+            else vm.insertText(LocationText.of(fix.latitude, fix.longitude, if (fix.hasAccuracy()) fix.accuracy else null))
+        }
+    }
+    val locationGrant = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+        if (grants.values.any { it }) shareLocation() else vm.captureFailed("Location access is needed to share where you are")
+    }
+    // A clip is not recorded behind the user's back: leaving the screen drops it.
+    val host = LocalActivity.current
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        if (host?.isChangingConfigurations != true) AudioPlayback.stop() // nothing plays on after the chat left the screen
+        if (recorder.recording && host?.isChangingConfigurations != true) {
+            recorder.cancel()
+            vm.setRecording(null)
+        }
+    }
+    DisposableEffect(recorder) {
+        onDispose {
+            // The recorder goes with this composition (a rotation too): the clip is dropped, and the bar with it.
+            if (recorder.recording) {
+                recorder.cancel()
+                vm.setRecording(null)
+            }
+        }
+    }
     LaunchedEffect(vm) { vm.closed.collect { onDeleted() } }
     LaunchedEffect(vm) { vm.branched.collect { onOpenSession(it) } }
     // The phone voice ends when the chat leaves the screen (app in the background, another destination), not on
@@ -287,6 +341,7 @@ fun ChatScreen(
             imageAllowed = vm::imageAllowed,
             onAllowImage = vm::allowImage,
             previewToolImage = vm::toolImage,
+            playFile = vm::mediaFile,
             onApprove = vm::approve,
             onDeny = vm::deny,
             onApproveFor = vm::answerApproval,
@@ -336,6 +391,34 @@ fun ChatScreen(
             onProcesses = vm::openProcesses,
             onProcessesClose = vm::closeProcesses,
             onProcessStop = vm::stopProcess,
+            onCamera = {
+                try {
+                    val file = Captures.newFile(context, "photo", "jpg")
+                    photo = file
+                    camera.launch(Captures.uri(context, file))
+                } catch (_: Exception) { // no camera app, or the provider refused the path
+                    photo = null
+                    vm.captureFailed("No camera app to take a photo with")
+                }
+            },
+            onRecordAudio = {
+                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startClip()
+                else clipMic.launch(Manifest.permission.RECORD_AUDIO)
+            },
+            onRecordStop = {
+                val clip = recorder.stop()
+                vm.setRecording(null)
+                if (clip != null) vm.attach(listOf(FilePickedFile(clip, "audio/mp4"))) else vm.captureFailed("Nothing was recorded")
+            },
+            onRecordCancel = {
+                recorder.cancel()
+                vm.setRecording(null)
+            },
+            onLocation = {
+                val granted = listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+                    .any { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
+                if (granted) shareLocation() else locationGrant.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+            },
             onExport = {
                 val chat = vm.state.value.chat
                 val text = ChatExport.markdown(chat.title, chat.items, ZoneId.systemDefault())
@@ -513,12 +596,13 @@ private fun ChatColumn(
             }
         }
         if (state.archived) ArchivedBanner(onUnarchive = actions.onUnarchive)
+        state.recordingSince?.let { RecordingBar(it, onStop = actions.onRecordStop, onCancel = actions.onRecordCancel) }
         CommandSuggestions(state.commandMatches, onPick = { actions.onInput(it.name + " ") })
         Composer(
             value = state.input,
             onValueChange = actions.onInput,
             onSend = actions.onSend,
-            onAttach = actions.onAttach,
+            onAttach = { actions.onMenu(ChatMenu.Attach) },
             enabled = state.typeable,
             disabledPlaceholder = "This chat is archived",
             canSend = state.canSend,
@@ -550,7 +634,7 @@ private fun Transcript(
     val media = remember(state.mediaState, actions) {
         MediaHost(
             state.mediaState, actions.onOpenMedia, actions.previewMedia,
-            actions.previewImage, actions.imageAllowed, actions.onAllowImage, actions.previewToolImage,
+            actions.previewImage, actions.imageAllowed, actions.onAllowImage, actions.previewToolImage, actions.playFile,
         )
     }
     val zone = remember { ZoneId.systemDefault() }
@@ -809,6 +893,7 @@ private fun ChatSheets(state: ChatUiState, actions: ChatActions, overflow: List<
     MenuSheet(state.menu == ChatMenu.Workspace, dismiss, workspaceItems(state, actions))
     MenuSheet(state.menu == ChatMenu.Overflow && overflow.isNotEmpty(), dismiss, overflow)
     MenuSheet(state.menu == ChatMenu.Reasoning, dismiss, reasoningItems(state, actions))
+    MenuSheet(state.menu == ChatMenu.Attach, dismiss, attachItems(state, actions))
     val sendMenu = sendItems(state, actions)
     MenuSheet(state.menu == ChatMenu.Send && sendMenu.isNotEmpty(), dismiss, sendMenu)
     MenuSheet(state.menu == ChatMenu.VoiceLanguage, dismiss, voiceLanguageItems(state.voiceLanguages, state.voiceLanguage, actions.onVoiceLanguage))
@@ -981,3 +1066,14 @@ class ChatSearchState {
         index = 0
     }
 }
+
+/**
+ * The composer's + menu: files from the phone, a photo taken now, an audio clip recorded now, and where the phone
+ * is (as text in the composer). Recording is not offered while a clip is already being recorded.
+ */
+internal fun attachItems(state: ChatUiState, actions: ChatActions): List<MenuItem> = listOfNotNull(
+    MenuItem("Photos and files", IconName.Image, onClick = actions.onAttach),
+    MenuItem("Take a photo", IconName.PhotoCamera, onClick = actions.onCamera),
+    MenuItem("Record audio", IconName.Mic, onClick = actions.onRecordAudio).takeIf { state.recordingSince == null },
+    MenuItem("Share my location", IconName.LocationOn, onClick = actions.onLocation),
+)

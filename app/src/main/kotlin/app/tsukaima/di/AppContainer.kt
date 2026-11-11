@@ -294,6 +294,12 @@ class AppContainer(context: Context) {
         settings.value?.takeIf { it.onboarded && it.serverUrl.isNotBlank() }?.let { "${it.serverUrl}|${it.username}|${it.profile}" }
     }
 
+    /** Whether the app's content is behind the lock screen ([app.tsukaima.data.prefs.Settings.appLock]). */
+    val appLock = app.tsukaima.security.AppLock()
+
+    /** Audio and video the agent delivered, fetched for playing in the chat (`cacheDir/media`). */
+    val mediaCache = app.tsukaima.data.files.MediaCache(File(appContext.cacheDir, "media"))
+
     /** Cached copies of shared streams (`cacheDir/shared`), pruned at app start and on every share. */
     val sharedFiles = SharedFileStore(File(appContext.cacheDir, "shared"))
 
@@ -320,6 +326,14 @@ class AppContainer(context: Context) {
         logger = { m, t -> Log.w(TAG, m, t) },
         prefs = { settings.value?.notifications ?: NotificationPrefs() },
     )
+
+    /** The home-screen widget's content, kept from the gateway's events ([app.tsukaima.widget.StatusWidget]). */
+    val widget = app.tsukaima.widget.WidgetUpdater(
+        appContext, appScope, gateway.events, connection.serverRequests, gateway.state, settings,
+    ).also { updater ->
+        updater.start()
+        answeredRequestIds.addListener { updater.closeApprovals() }
+    }
 
     /** Answers approvals from notification buttons, by srq id only, at most once. */
     val approvalAnswerer = ApprovalAnswerer(
@@ -369,7 +383,10 @@ class AppContainer(context: Context) {
         notifications.signedOut()
         GatewayService.stop(appContext)
         visibleLiveSessionId.value = null
-        appScope.launch { chatStore.clear() } // saved transcripts and drafts belong to the account that left
+        appScope.launch {
+            chatStore.clear()
+            mediaCache.clear()
+        } // saved transcripts and drafts belong to the account that left
     }
 
     private companion object {

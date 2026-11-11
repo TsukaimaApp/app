@@ -11,7 +11,7 @@ import app.tsukaima.domain.chat.SlashCommand
 import app.tsukaima.domain.voice.VoiceLanguage
 import app.tsukaima.domain.voice.VoiceState
 
-enum class ChatMenu { Model, Workspace, Overflow, Reasoning, VoiceLanguage, Send }
+enum class ChatMenu { Model, Workspace, Overflow, Reasoning, VoiceLanguage, Send, Attach }
 enum class ChatDialog { Rename, DeleteConfirm, ModelConfirm }
 
 /** A model pick the server wants confirmed (`confirm_required`) before it switches; [message] says why. */
@@ -106,6 +106,8 @@ data class ChatUiState(
     val processes: List<ProcessRow> = emptyList(),
     /** The "Running in the background" sheet is open. */
     val processSheet: Boolean = false,
+    /** An audio clip is being recorded for the composer since this time (epoch millis); null when none is. */
+    val recordingSince: Long? = null,
     /** Messages written offline that wait to be sent ([ChatOffline]), oldest first; drawn under the transcript. */
     val outbox: List<OutboxMessage> = emptyList(),
     /**

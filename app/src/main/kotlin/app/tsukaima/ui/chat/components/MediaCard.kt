@@ -61,6 +61,11 @@ class MediaHost(
     val imageAllowed: (String) -> Boolean = { false },
     val allowImage: (String) -> Unit = {},
     val toolImage: suspend (ChatItem.ToolCall) -> ImageResult = { ImageResult.Unavailable },
+    /**
+     * A delivered file fetched to the phone for playing (null when it cannot be fetched). Null here: this place
+     * does not play audio or video, and their cards only download.
+     */
+    val playFile: (suspend (String) -> java.io.File?)? = null,
 )
 
 private fun iconFor(kind: MediaKind) = when (kind) {
@@ -75,7 +80,8 @@ private fun iconFor(kind: MediaKind) = when (kind) {
 /**
  * A file the agent delivered (`MEDIA:` line): kind icon, bold name, shortened folder, and a download action.
  * The whole card downloads on tap; while downloading the tap is ignored, a failure shows its reason and
- * retries on tap. Images get an inline preview above the row when one loads.
+ * retries on tap. Images get an inline preview above the row when one loads; audio and video get a player
+ * there ([AudioStrip], [VideoFrame]) where the host can fetch files for playing ([MediaHost.playFile]).
  */
 @Composable
 fun MediaCard(path: String, host: MediaHost, modifier: Modifier = Modifier) {
@@ -112,6 +118,14 @@ fun MediaCard(path: String, host: MediaHost, modifier: Modifier = Modifier) {
                 }
             },
     ) {
+        // Audio and video play in the card; the row under them still downloads the file.
+        host.playFile?.let { fetch ->
+            when (Media.kind(path)) {
+                MediaKind.Audio -> AudioStrip(path, name, fetch)
+                MediaKind.Video -> VideoFrame(path, name, fetch)
+                else -> Unit
+            }
+        }
         preview?.let { bitmap ->
             Image(
                 bitmap = bitmap,

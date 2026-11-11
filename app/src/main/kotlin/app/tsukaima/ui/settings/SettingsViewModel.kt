@@ -98,6 +98,8 @@ data class SettingsUiState(
     val voiceLanguages: List<VoiceLanguage> = emptyList(),
     /** Where voice mode recognises speech and speaks replies. */
     val voiceProcessing: VoiceProcessing = VoiceProcessing.Phone,
+    val appLock: Boolean = false,
+    val appLockAfterSeconds: Int = app.tsukaima.data.prefs.Settings.DEFAULT_APP_LOCK_AFTER_SECONDS,
     /** [app.tsukaima.data.prefs.Settings.offlineSendMinutes]. */
     val offlineSendMinutes: Int = app.tsukaima.data.prefs.Settings.DEFAULT_OFFLINE_SEND_MINUTES,
     /** The GPT-Live voice setting ([app.tsukaima.data.prefs.Settings.liveVoice]). */
@@ -197,6 +199,8 @@ class SettingsViewModel(
                         voiceLanguage = s.voiceLanguage,
                         voiceProcessing = s.voiceProcessing,
                         offlineSendMinutes = s.offlineSendMinutes,
+                        appLock = s.appLock,
+                        appLockAfterSeconds = s.appLockAfterSeconds,
                         liveVoice = s.liveVoice,
                         // Seed the form once; later emissions (our own writes) must not clobber typing.
                         serverUrl = if (firstLoad && it.serverUrl.isEmpty()) s.serverUrl else it.serverUrl,
@@ -307,7 +311,7 @@ class SettingsViewModel(
                     serverUrl = it.serverUrl, username = it.username, storedUrl = it.storedUrl, profile = it.profile,
                     theme = it.theme, materialYou = it.materialYou, simulateOffline = it.simulateOffline,
                     notifications = it.notifications, voiceLanguage = it.voiceLanguage, voiceLanguages = it.voiceLanguages,
-                    offlineSendMinutes = it.offlineSendMinutes,
+                    offlineSendMinutes = it.offlineSendMinutes, appLock = it.appLock, appLockAfterSeconds = it.appLockAfterSeconds,
                     lastCrash = it.lastCrash,
                 )
             }
@@ -493,6 +497,20 @@ class SettingsViewModel(
     }
 
     /** Saves where voice mode recognises speech and speaks replies; the next voice session uses it. */
+    /** The app lock switch; the screen has already asked the user to prove who they are before switching it on. */
+    fun setAppLock(on: Boolean) {
+        _state.update { it.copy(appLock = on) }
+        viewModelScope.launch { settings.update { it.copy(appLock = on) } }
+    }
+
+    fun setAppLockAfter(seconds: Int) {
+        _state.update { it.copy(appLockAfterSeconds = seconds) }
+        viewModelScope.launch { settings.update { it.copy(appLockAfterSeconds = seconds) } }
+    }
+
+    /** The phone's prompt did not confirm the user, so the lock stays as it was. */
+    fun appLockNotConfirmed() = toast("App lock not changed")
+
     fun setOfflineSendMinutes(minutes: Int) {
         _state.update { it.copy(offlineSendMinutes = minutes) }
         viewModelScope.launch { settings.update { it.copy(offlineSendMinutes = minutes) } }

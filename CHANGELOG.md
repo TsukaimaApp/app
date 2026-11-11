@@ -3,6 +3,43 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.15.0 — 2026-11-11 (versionCode 34)
+
+Not checked on a phone.
+
+### Added
+- **Home-screen widget.** It shows the last chat that did something, what Hermes is doing in it ("Hermes awaits",
+  "Hermes is working…", "Waiting for your approval") and one line about that: the reply's first line, the running
+  tool, or the command that waits. Tap the top to open the last chat. The bar under it opens a new chat ("Ask
+  Hermes") or starts voice (the mic). The widget hears what the app hears: once Android stops the app it keeps
+  showing what was last known, and says "Not connected" when the app knows it has no connection.
+- **The + button opens a sheet** with four entries: Photos and files (as before), Take a photo (the phone's camera
+  app), Record audio (a bar above the composer counts the time; Stop attaches the clip, Cancel drops it) and Share
+  my location (your position as text with a map link goes into the composer; nothing is sent until you send it).
+  Location asks for Android's location permission the first time, and is read once per use.
+- **Search in a chat** (top bar menu › Search in chat). The top bar becomes a search field with "2 of 5" and arrows
+  to the next and previous match. Matches are marked in the text; the one the search stands on is marked more
+  strongly. The count is of messages that hold the text. Folded steps unfold while you search, and reasoning that
+  holds the match opens.
+- **Audio and video play in the chat.** A delivered audio file gets a round play button, a progress line and
+  "0:44 / 2:10". A video gets a frame with a play button and plays in place; tap to pause. The first tap fetches
+  the file. The row under the player still downloads it. One thing plays at a time, and playback stops when you
+  leave the chat.
+- **App lock** (Settings › App lock, off by default). With it on, Tsukaima opens only after your fingerprint, face
+  or the phone's screen lock, and locks again after it has been off the screen for the time you choose: at once, or
+  after 1, 5 or 15 minutes. While it is on, the app is hidden in the recents screen and from screenshots, and the
+  widget leaves out the chat's title and detail. Switching it on asks you to unlock once first.
+- **Launcher shortcuts** on a long press of the app icon: New chat, Voice, Continue last chat.
+- **Export a chat** (top bar menu › Export chat): the conversation as a Markdown file through the share sheet.
+  Your messages with their times, Hermes' replies, and each tool call as one line. Reasoning and tool output are
+  left out.
+
+### Limits
+- The app lock covers the main app. Approve and Deny on a notification, and the device-assistant sheet, work
+  without it.
+- Voice from the shortcut or the widget starts listening at once. Another app that opens Tsukaima's voice screen
+  gets a chat at rest instead.
+
 ## 0.14.1 — 2026-11-11 (versionCode 33)
 
 Not checked on a phone.

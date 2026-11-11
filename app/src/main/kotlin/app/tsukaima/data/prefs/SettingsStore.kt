@@ -73,9 +73,14 @@ data class Settings(
      * composer as a draft. 0 = offline messages are never sent by themselves.
      */
     val offlineSendMinutes: Int = DEFAULT_OFFLINE_SEND_MINUTES,
+    /** The app opens only after the phone's fingerprint, face or screen lock ([app.tsukaima.security.AppLock]). */
+    val appLock: Boolean = false,
+    /** How long the app may be off the screen before it locks again, in seconds; 0 = at once. */
+    val appLockAfterSeconds: Int = DEFAULT_APP_LOCK_AFTER_SECONDS,
 ) {
     companion object {
         const val DEFAULT_OFFLINE_SEND_MINUTES = 10
+        const val DEFAULT_APP_LOCK_AFTER_SECONDS = 60
     }
 }
 
@@ -107,6 +112,8 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             prefs[LIVE_VOICE] = next.liveVoice
             prefs.putOrRemove(LAST_CHAT_ID, next.lastChatId)
             prefs[OFFLINE_SEND_MINUTES] = next.offlineSendMinutes
+            prefs[APP_LOCK] = next.appLock
+            prefs[APP_LOCK_AFTER] = next.appLockAfterSeconds
             prefs.remove(LEGACY_VOICE_OUTPUT) // never shipped; its choice is not carried over
         }
     }
@@ -149,6 +156,8 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             liveVoice = this[LIVE_VOICE] ?: defaults.liveVoice,
             lastChatId = this[LAST_CHAT_ID],
             offlineSendMinutes = this[OFFLINE_SEND_MINUTES] ?: defaults.offlineSendMinutes,
+            appLock = this[APP_LOCK] ?: defaults.appLock,
+            appLockAfterSeconds = this[APP_LOCK_AFTER] ?: defaults.appLockAfterSeconds,
         )
     }
 
@@ -175,6 +184,8 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
         val LIVE_VOICE = booleanPreferencesKey("live_voice")
         val LAST_CHAT_ID = stringPreferencesKey("last_chat_id")
         val OFFLINE_SEND_MINUTES = intPreferencesKey("offline_send_minutes")
+        val APP_LOCK = booleanPreferencesKey("app_lock")
+        val APP_LOCK_AFTER = intPreferencesKey("app_lock_after_seconds")
 
         /** 0.7.x's "Speech recognition" setting (`Phone`/`Server`): read only while [VOICE_PROCESSING] is unset. */
         val LEGACY_VOICE_RECOGNITION = stringPreferencesKey("voice_recognition")

@@ -1,5 +1,6 @@
 package app.tsukaima.ui.settings
 
+import app.tsukaima.security.AppLock
 import app.tsukaima.ui.theme.TsukaimaShapes
 import app.tsukaima.diagnostics.Diagnostics
 import androidx.compose.ui.semantics.selected
@@ -111,6 +112,9 @@ class SettingsActions(
     /** Voice processing picked: on this phone or on Hermes. */
     val onVoiceProcessing: (VoiceProcessing) -> Unit = {},
     val onOfflineSend: (Int) -> Unit = {},
+    /** The app lock switch (switching it on asks the user to prove who they are first) and its wait. */
+    val onAppLock: (Boolean) -> Unit = {},
+    val onAppLockAfter: (Int) -> Unit = {},
     /** The voice processing sheet opens: probe the server's STT and TTS providers for its label. */
     val onVoiceProcessingOpen: () -> Unit = {},
     /** The Live voice switch flipped. */
@@ -184,6 +188,16 @@ fun SettingsScreen(
             onVoiceLanguagesOpen = vm::loadVoiceLanguages,
             onVoiceProcessing = vm::setVoiceProcessing,
             onOfflineSend = vm::setOfflineSendMinutes,
+            onAppLock = { on ->
+                val activity = context as? android.app.Activity
+                when {
+                    !on -> vm.setAppLock(false)
+                    activity == null -> vm.appLockNotConfirmed()
+                    // Proved once before it is switched on: a lock nobody can open must not be set.
+                    else -> AppLock.authenticate(activity, "Turn on app lock") { ok -> if (ok) vm.setAppLock(true) else vm.appLockNotConfirmed() }
+                }
+            },
+            onAppLockAfter = vm::setAppLockAfter,
             onVoiceProcessingOpen = vm::loadVoiceProviders,
             onLiveVoice = vm::setLiveVoice,
             onVoiceSectionShown = vm::loadVoiceLiveStatus,
@@ -225,6 +239,14 @@ fun SettingsContent(
         onDismiss = { showOfflineSend = false },
         items = OFFLINE_SEND_CHOICES.map { minutes ->
             MenuItem(offlineSendLabel(minutes), null, checked = state.offlineSendMinutes == minutes) { actions.onOfflineSend(minutes) }
+        },
+    )
+    var showLockAfter by rememberSaveable { mutableStateOf(false) }
+    MenuSheet(
+        visible = showLockAfter,
+        onDismiss = { showLockAfter = false },
+        items = AppLock.WAITS.map { seconds ->
+            MenuItem(AppLock.waitLabel(seconds), null, checked = state.appLockAfterSeconds == seconds) { actions.onAppLockAfter(seconds) }
         },
     )
     var showVoiceProcessing by rememberSaveable { mutableStateOf(false) }
@@ -280,6 +302,7 @@ fun SettingsContent(
                     SettingsSheet.VoiceLanguage -> showVoiceLanguages = true
                     SettingsSheet.VoiceProcessing -> showVoiceProcessing = true
                     SettingsSheet.OfflineSend -> showOfflineSend = true
+                    SettingsSheet.LockAfter -> showLockAfter = true
                 }
             }
             if (twoPane) {
@@ -306,7 +329,7 @@ private val HUB_WIDTH = 340.dp
 private val ONE_COLUMN_MAX = 640.dp
 
 /** The pickers a settings page opens as a sheet. */
-enum class SettingsSheet { VoiceLanguage, VoiceProcessing, OfflineSend }
+enum class SettingsSheet { VoiceLanguage, VoiceProcessing, OfflineSend, LockAfter }
 
 /**
  * The pages of Settings, in the list's order: what configures Hermes first ([hermes]), then what configures this
@@ -321,6 +344,7 @@ enum class SettingsPage(val title: String, val icon: IconName, val hermes: Boole
     Notifications("Notifications", IconName.Notifications, false),
     Voice("Voice", IconName.GraphicEq, false),
     Offline("Offline", IconName.CloudOff, false),
+    Lock("App lock", IconName.Lock, false),
     Appearance("Appearance", IconName.Palette, false),
     Diagnostics("Diagnostics and support", IconName.MonitorHeart, false),
 }
@@ -352,6 +376,7 @@ internal fun settingsSummary(page: SettingsPage, s: SettingsUiState): String = w
     }
     SettingsPage.Voice -> (if (s.voiceProcessing == VoiceProcessing.Server) "On Hermes" else PHONE_PROCESSING) + " · Live voice " + if (s.liveVoice) "on" else "off"
     SettingsPage.Offline -> if (s.offlineSendMinutes == 0) "Offline messages stay drafts" else "Send within ${offlineSendLabel(s.offlineSendMinutes).lowercase()}"
+    SettingsPage.Lock -> if (s.appLock) "On · locks ${AppLock.waitLabel(s.appLockAfterSeconds).lowercase()}" else "Off"
     SettingsPage.Appearance -> when (s.theme) {
         ThemeMode.Warm -> "Warm"
         ThemeMode.Dark -> "Dark"
@@ -603,6 +628,27 @@ private fun SettingsPageBody(
                     modifier = Modifier.bleed(12.dp),
                 )
             }
+            }
+            SettingsPage.Lock -> {
+                val secure = AppLock.deviceSecure(LocalContext.current)
+                Section(null, hint = "Tsukaima opens only after your fingerprint, face or the phone's screen lock. While it is on, the app is also hidden in the recents screen and from screenshots.") {
+                    Column(Modifier.bleed(12.dp)) {
+                        TsukaimaRow(
+                            title = "Lock Tsukaima",
+                            subtitle = if (secure || state.appLock) null else "Set a screen lock on this phone first",
+                            leading = IconName.Lock,
+                            trailing = { TsukaimaSwitch(state.appLock, { if (secure || !it) actions.onAppLock(it) }) },
+                            onClick = { if (secure || state.appLock) actions.onAppLock(!state.appLock) },
+                        )
+                        TsukaimaRow(
+                            title = "Lock again",
+                            subtitle = AppLock.waitLabel(state.appLockAfterSeconds) + if (state.appLockAfterSeconds > 0) " away from the app" else ", when you leave the app",
+                            leading = IconName.Schedule,
+                            trailing = { Chevron() },
+                            onClick = { showSheet(SettingsSheet.LockAfter) },
+                        )
+                    }
+                }
             }
             SettingsPage.Appearance -> {
             Section(null) {

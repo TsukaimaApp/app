@@ -92,6 +92,12 @@ interface ChatBackend {
     /** An image on the server's disk ([path] absolute or `~/…`) as a `data:` URL, through `/api/media` (bearer, 25 MiB). */
     suspend fun media(path: String): Result<String>
 
+    /**
+     * A `MEDIA:` audio or video file fetched into the app's cache for playing in the chat; the same path within
+     * the hour is served from the cache.
+     */
+    suspend fun mediaFile(path: String): Result<java.io.File> = Result.failure(IOException("no media cache"))
+
     /** Where downloads are saved (blocking; run on IO). */
     val fileSaver: FileSaver
 
@@ -230,6 +236,7 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
     override suspend fun deleteSession(id: String) = c.repository.deleteSession(id)
     override suspend fun download(path: String) = c.repository.download(path)
     override suspend fun fetchImage(url: String) = c.repository.fetchImage(url)
+    override suspend fun mediaFile(path: String) = c.mediaCache.file(path) { c.repository.download(path) }
     override suspend fun media(path: String) = c.repository.media(path)
     override val fileSaver get() = c.fileSaver
     override fun openFile(uri: String, mime: String) = c.openFile(uri, mime)
