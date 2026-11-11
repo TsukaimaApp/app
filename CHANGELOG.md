@@ -3,6 +3,17 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.15.1 — 2026-11-11 (versionCode 35)
+
+Not checked on a phone.
+
+### Fixed
+- The app lock now covers the device-assistant sheet. In 0.15.0 the assistant gesture showed its chat while the app
+  was locked. Now the gesture opens the app, where the lock screen asks for the unlock. Approve and Deny on a
+  notification still work without it.
+- A delivered audio or video file larger than 120 MB is refused while it downloads. 0.15.0 trusted the size the
+  server declared, so a larger file could fill the cache.
+
 ## 0.15.0 — 2026-11-11 (versionCode 34)
 
 Not checked on a phone.
@@ -35,8 +46,8 @@ Not checked on a phone.
   left out.
 
 ### Limits
-- The app lock covers the main app. Approve and Deny on a notification, and the device-assistant sheet, work
-  without it.
+- The app lock covers the main app. Approve and Deny on a notification work without it. (The device-assistant
+  sheet also did in 0.15.0; fixed in 0.15.1.)
 - Voice from the shortcut or the widget starts listening at once. Another app that opens Tsukaima's voice screen
   gets a chat at rest instead.
 

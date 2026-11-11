@@ -30,9 +30,24 @@ class MediaCache(private val dir: File, private val io: CoroutineDispatcher = Di
                 if (target.isFile && target.length() > 0 && now() - target.lastModified() < FRESH_MS) return@withLock Result.success(target)
                 val fetched = download().getOrElse { return@withLock Result.failure(it) }
                 val temp = File(dir, target.name + ".part")
-                fetched.use { d ->
-                    if ((d.size ?: 0) > MAX_BYTES) throw IOException("The file is too large to play here")
-                    temp.sink().buffer().use { out -> out.writeAll(d.body) }
+                try {
+                    fetched.use { d ->
+                        if ((d.size ?: 0) > MAX_FILE_BYTES) throw IOException(TOO_LARGE)
+                        // Counted while it is written: the size the server declared is not trusted.
+                        temp.sink().buffer().use { out ->
+                            var written = 0L
+                            while (true) {
+                                val read = d.body.read(out.buffer, CHUNK)
+                                if (read < 0) break
+                                written += read
+                                if (written > MAX_FILE_BYTES) throw IOException(TOO_LARGE)
+                                out.emitCompleteSegments()
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    temp.delete()
+                    throw e
                 }
                 target.delete()
                 if (!temp.renameTo(target)) throw IOException("Could not keep the file")
@@ -61,6 +76,11 @@ class MediaCache(private val dir: File, private val io: CoroutineDispatcher = Di
     companion object {
         const val FRESH_MS = 60 * 60 * 1000L
         const val MAX_BYTES = 300L * 1024 * 1024
+
+        /** One file may be this large (Hermes' own download limit is 100 MB). */
+        const val MAX_FILE_BYTES = 120L * 1024 * 1024
+        private const val CHUNK = 64L * 1024
+        private const val TOO_LARGE = "The file is too large to play here"
 
         /** `<hash of the path>.<its extension>`: nothing of the server's path reaches the file system. */
         internal fun name(path: String): String {

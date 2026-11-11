@@ -14,6 +14,7 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.jsonObject
 import okio.Buffer
+import okio.buffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -114,6 +115,20 @@ class BeyondChatTest {
         now += MediaCache.FRESH_MS + 1
         cache.file("/home/user/out/../song.MP3", download).getOrThrow()
         assertEquals(2, fetches)
+        // A body longer than the cap is cut off and leaves nothing behind, whatever size the server declared.
+        val huge = object : okio.Source {
+            var sent = 0L
+            override fun read(sink: Buffer, byteCount: Long): Long {
+                sink.write(ByteArray(byteCount.toInt()))
+                sent += byteCount
+                return byteCount
+            }
+            override fun timeout() = okio.Timeout.NONE
+            override fun close() = Unit
+        }
+        val tooBig = cache.file("/big.mp4") { Result.success(FileDownload("big.mp4", "video/mp4", 3, huge.buffer())) }
+        assertEquals("The file is too large to play here", tooBig.exceptionOrNull()?.message)
+        assertTrue(huge.sent <= MediaCache.MAX_FILE_BYTES + 1024 * 1024)
         val failed = cache.file("/other.mp4") { Result.failure(IOException("gone")) }
         assertEquals("gone", failed.exceptionOrNull()?.message)
         assertNull(tmp.root.walkTopDown().firstOrNull { it.name.endsWith(".part") })

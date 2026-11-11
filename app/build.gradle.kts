@@ -21,8 +21,8 @@ android {
         applicationId = "app.tsukaima"
         minSdk = 29
         targetSdk = 36
-        versionCode = 34
-        versionName = "0.15.0"
+        versionCode = 35
+        versionName = "0.15.1"
         // libwebrtc (live voice) is 11.5 MB of native code per ABI; every Android 10+ phone is 64-bit ARM.
         ndk {
             abiFilters += listOf("arm64-v8a")

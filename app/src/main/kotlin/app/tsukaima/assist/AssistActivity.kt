@@ -84,7 +84,19 @@ class AssistActivity : ComponentActivity() {
             val settings by container.settings.collectAsStateWithLifecycle()
             TsukaimaTheme(darkTheme = isDarkTheme(settings?.theme), dynamicColor = settings?.materialYou == true) {
                 // Nothing until settings load (a few ms): the session to resume depends on them.
-                settings?.let { AssistContent(it) }
+                settings?.let { loaded ->
+                    // The app lock covers this sheet too: while the app is locked it shows no chat. The gesture opens
+                    // the app instead, where the lock screen asks for the unlock.
+                    val locked by container.appLock.locked.collectAsStateWithLifecycle()
+                    if (loaded.appLock && locked) {
+                        LaunchedEffect(Unit) {
+                            startActivity(Intent(this@AssistActivity, app.tsukaima.MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                            finish()
+                        }
+                    } else {
+                        AssistContent(loaded)
+                    }
+                }
             }
         }
     }

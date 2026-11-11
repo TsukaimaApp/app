@@ -355,3 +355,8 @@ The user chose from a canvas: the status-card widget (1B), the attach sheet (2A)
 - Ruling: a delivered audio or video file is fetched whole into `cacheDir/media` (named by a hash of its path, reused for an hour, 300 MB cap) and played from there — `MediaPlayer` streaming with a bearer header fails on redirects and gives no usable errors — cost if wrong: a large video waits for its whole download before it plays.
 - Ruling: search counts and steps through messages, not single occurrences; every occurrence is marked, the current message's more strongly — stepping through occurrences needs positions inside rendered Markdown — cost if wrong: a long reply with many hits is one stop.
 - Ruling: the export leaves out reasoning and tool output — it is the conversation to pass on, and tool output can hold secrets the user did not mean to share — cost if wrong: a second "full log" export.
+
+## v0.15.1
+
+- Ruling (amends v0.15.0): the app lock covers the assistant sheet; while the app is locked the gesture opens `MainActivity` and its lock screen — a security review pointed out the sheet shows a chat, which is what the lock is for — cost if wrong: one more step before a voice question when the lock is on.
+- Ruling: `MediaCache` counts bytes as it writes and stops at 120 MB per file — the declared size comes from the server and was the only check — cost if wrong: one constant.
