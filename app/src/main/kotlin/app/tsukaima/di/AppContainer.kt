@@ -288,6 +288,11 @@ class AppContainer(context: Context) {
     /** Composer text waiting for a chat that is about to open, by stored session id (a branch made to edit a message). */
     val drafts = java.util.concurrent.ConcurrentHashMap<String, String>()
 
+    /** Saved transcripts, drafts and offline messages (`filesDir/chats`), one folder per server and profile. */
+    val chatStore: app.tsukaima.data.ChatStore = app.tsukaima.data.FileChatStore(File(appContext.filesDir, "chats")) {
+        settings.value?.let { "${it.serverUrl}|${it.profile}" }.orEmpty()
+    }
+
     /** Cached copies of shared streams (`cacheDir/shared`), pruned at app start and on every share. */
     val sharedFiles = SharedFileStore(File(appContext.cacheDir, "shared"))
 
@@ -363,6 +368,7 @@ class AppContainer(context: Context) {
         notifications.signedOut()
         GatewayService.stop(appContext)
         visibleLiveSessionId.value = null
+        appScope.launch { chatStore.clear() } // saved transcripts and drafts belong to the account that left
     }
 
     private companion object {

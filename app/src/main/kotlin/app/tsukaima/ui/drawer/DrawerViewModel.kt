@@ -1,5 +1,6 @@
 package app.tsukaima.ui.drawer
 
+import app.tsukaima.data.ChatStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -117,6 +118,8 @@ class DrawerViewModel(
     private val searchDebounceMs: Long = 300,
     /** Stored session [id] was deleted from the drawer (e.g. to forget it as the share card's last chat). */
     private val onDeleted: suspend (id: String) -> Unit = {},
+    /** Keeps the list as last loaded, so the drawer has chats to open when Hermes cannot be reached at start. */
+    private val store: ChatStore = ChatStore.None,
 ) : ViewModel() {
     private val _state = MutableStateFlow(DrawerUiState())
     val state: StateFlow<DrawerUiState> = _state.asStateFlow()
@@ -157,6 +160,9 @@ class DrawerViewModel(
                     chatLimit = PAGE
                     _state.update { it.copy(sessions = emptyList(), loading = true, hasMore = false) }
                     refresh()
+                    // Until the server answers (or when it cannot), the list as last loaded.
+                    val kept = store.sessions()
+                    if (kept.isNotEmpty()) _state.update { if (it.sessions.isEmpty()) it.copy(sessions = kept, loading = false) else it }
                 }
             }
         }
@@ -250,6 +256,7 @@ class DrawerViewModel(
             .onSuccess { page ->
                 loadFailureReported = false
                 _state.update { it.copy(sessions = page.sessions, loading = false, hasMore = page.more && chatLimit < MAX_CHATS, loadingMore = false) }
+                store.saveSessions(page.sessions)
             }
             .onFailure {
                 _state.update { it.copy(loading = false, loadingMore = false) }

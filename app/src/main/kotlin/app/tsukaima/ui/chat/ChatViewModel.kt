@@ -24,6 +24,10 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.FlowPreview
+import app.tsukaima.data.ChatStore
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -164,6 +168,11 @@ class ChatViewModel(
         send = { live, shown, prompt -> startTurn(live, shown, emptyList(), fromComposer = false, prompt = prompt) },
     )
 
+    private val offline = ChatOffline(
+        backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state, storedSessionId ?: ChatStore.NEW_CHAT,
+        deliver = { text -> sendText(text) },
+    ) { "o-l${++userCounter}" }
+
     private val media = ChatMedia(backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), io, _state)
 
     /** The chat holds its history: a new chat at once, a stored one once `session.resume` has bound it. */
@@ -196,6 +205,8 @@ class ChatViewModel(
 
     init {
         storedSessionId?.let(backend::takeDraft)?.let { draft -> _state.update { it.copy(input = draft) } }
+        _state.update { it.copy(offlineSendMinutes = backend.settings.value?.offlineSendMinutes ?: it.offlineSendMinutes) }
+        if (sharing) startOffline()
         launch { backend.hermes.collect { h -> _state.update { it.copy(gatewayStatus = h.gatewayStatus()) } } }
         launch { backend.events.collect(sync::onEvent) }
         launch { backend.serverRequests.collect(sync::onRequest) }
@@ -256,6 +267,36 @@ class ChatViewModel(
         open()
     }
 
+    /**
+     * The chat's life without Hermes ([ChatOffline]): what the phone kept is loaded, the composer's text is kept as
+     * the draft, the idle transcript is saved as the copy to open offline, and messages written offline go out once
+     * Hermes is back. Not for the device-assistant sheet, which keeps nothing.
+     */
+    @OptIn(FlowPreview::class)
+    private fun startOffline() {
+        offline.start(transcript = storedSessionId != null)
+        launch {
+            backend.settings.filterNotNull().map { it.offlineSendMinutes }.distinctUntilChanged()
+                .collect { minutes -> _state.update { it.copy(offlineSendMinutes = minutes) } }
+        }
+        launch { _state.map { it.input }.distinctUntilChanged().drop(1).debounce(DRAFT_SAVE_MS).collect(offline::saveDraft) }
+        launch {
+            _state.filter { it.savedAt == null && !it.loading && it.chat.status == AgentStatus.Idle && it.chat.liveSessionId != null }
+                .mapNotNull { s -> s.chat.storedSessionId?.let { it to s.chat.items } }
+                .distinctUntilChanged()
+                .debounce(TRANSCRIPT_SAVE_MS)
+                .collect { (stored, items) -> offline.saveTranscript(stored, items) }
+        }
+        launch {
+            _state.map { it.outbox.isNotEmpty() && !it.offline && !it.loading && it.chat.liveSessionId != null }
+                .distinctUntilChanged()
+                .collect { ready -> if (ready) offline.flush() }
+        }
+    }
+
+    /** Cancel on a message that waits for the connection: it goes back to the composer. */
+    fun cancelOffline(id: String) = offline.cancel(id)
+
     // ---- lifecycle --------------------------------------------------------------------------------
 
     /** Creates or resumes the session (idempotent; retried on the next `Connected` if it failed). */
@@ -278,6 +319,7 @@ class ChatViewModel(
                     sync.syncWatermark(r.sessionId)
                 }
                 opened = true
+                _state.update { it.copy(savedAt = null) } // Hermes' history replaced the saved copy
                 history.value = ChatHistory.Loaded
                 sync.adoptRecent()
                 if (storedSessionId != null) checkArchived(storedSessionId)
@@ -382,6 +424,8 @@ class ChatViewModel(
     fun send() {
         if (!_state.value.canSend) return
         val text = _state.value.input.trim()
+        // Without Hermes the message waits on the phone ([ChatUiState.sendsOffline] let it through).
+        if (_state.value.offline) return offline.enqueue(text)
         val live = chat.liveSessionId ?: return backend.toast("Still connecting to Hermes")
         _state.value.pendingEdit?.let { row -> return edits.send(live, text, row) }
         // A slash command the server knows is run, not sent to the model ([ChatCommands]); anything else is a message.
@@ -696,7 +740,11 @@ class ChatViewModel(
         map { if (it.id == localId && it is ChatItem.UserMessage) it.copy(failed = failed, queued = queued) else it }
 
     /** Uploads picked files at once (creating the session first if needed); see [ChatAttachments]. */
-    fun attach(files: List<PickedFile>) = attachments.attach(files)
+    fun attach(files: List<PickedFile>) {
+        // A file is uploaded when picked: without Hermes there is nowhere to put it.
+        if (_state.value.offline) return backend.toast("Attachments need a connection to Hermes")
+        attachments.attach(files)
+    }
 
     fun removeAttachment(localId: String) = attachments.remove(localId)
 
@@ -940,6 +988,7 @@ class ChatViewModel(
      */
     fun openVoice(mode: VoiceMode = VoiceMode.InApp, onApprovalNeeded: () -> Unit = {}, listen: Boolean = true) {
         if (voice.ending) return backend.toast("Ending live voice…")
+        if (_state.value.offline && mode != VoiceMode.Assist) return backend.toast("Voice needs a connection to Hermes")
         if (voice.busy || voiceStart?.isActive == true) return
         if (mode == VoiceMode.Assist || !backend.liveVoiceEnabled) return voice.open(mode, onApprovalNeeded, listen)
         if (liveProbed) return openVoiceOn(liveStatus, mode, onApprovalNeeded, listen)
@@ -1219,6 +1268,7 @@ class ChatViewModel(
 
     fun delete() = finish("Deleted", "Couldn’t delete the chat") { id ->
         backend.deleteSession(id).onSuccess {
+            offline.forget(id)
             if (backend.settings.value?.lastChatId == id) backend.rememberLastChat(null)
         }
     }
@@ -1287,6 +1337,12 @@ class ChatViewModel(
          * cycle (1/2/5/10 s backoff plus the ticket round trip), so a network handoff does not end the conversation.
          */
         const val LIVE_OFFLINE_GRACE_MS = 30_000L
+
+        /** The composer's text is saved as the chat's draft once typing pauses this long. */
+        const val DRAFT_SAVE_MS = 600L
+
+        /** The idle transcript is saved as the offline copy once it has not changed for this long. */
+        const val TRANSCRIPT_SAVE_MS = 1_500L
 
         /** The status `mode` of the GPT-Live engine. */
         const val GPT_LIVE = "gpt-live"

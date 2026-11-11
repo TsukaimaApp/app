@@ -109,7 +109,9 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
                     container.settings,
                     isReachable = { container.connection.hermes.value.reachable },
                     changes = container.gateway.events.ticks(ServerChanges.SESSIONS),
+                    store = container.chatStore,
                     onDeleted = { id ->
+                        container.chatStore.forget(id)
                         if (container.settings.value?.lastChatId == id) {
                             try {
                                 container.settingsStore.update { it.copy(lastChatId = null) }

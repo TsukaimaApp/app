@@ -46,7 +46,9 @@ import app.tsukaima.ui.components.IconName
 import app.tsukaima.ui.components.TsukaimaIcon
 import app.tsukaima.ui.theme.Dimens
 import app.tsukaima.ui.theme.Motion
+import app.tsukaima.ui.theme.TsukaimaShapes
 import app.tsukaima.ui.theme.TsukaimaType
+import androidx.compose.ui.text.style.TextOverflow
 import app.tsukaima.ui.theme.tsukaima
 import java.time.ZoneId
 
@@ -163,3 +165,53 @@ private fun MarksLightPreview() = MarksPreview(dark = false)
 @Preview(name = "Transcript marks dark")
 @Composable
 private fun MarksDarkPreview() = MarksPreview(dark = true)
+
+/**
+ * The status line's place while Hermes cannot be reached: "Offline", and with [savedAt] (epoch millis) how old the
+ * transcript on screen is ("saved copy from 14:02"). A tap is the status line's ([onClick]).
+ */
+@Composable
+fun OfflineBar(savedAt: Long?, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.tsukaima
+    val context = LocalContext.current
+    val copy = remember(savedAt) {
+        savedAt?.let { savedCopyText(it, System.currentTimeMillis(), ZoneId.systemDefault(), DateFormat.is24HourFormat(context)) }
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .clip(TsukaimaShapes.row)
+            .background(colors.surfaceRaised)
+            .border(1.dp, colors.warn.copy(alpha = 0.45f), TsukaimaShapes.row)
+            .clickable(role = Role.Button, onClickLabel = "Server status", onClick = onClick)
+            .semantics(mergeDescendants = true) { contentDescription = listOfNotNull("Offline", copy).joinToString(", ") }
+            .defaultMinSize(minHeight = Dimens.hit)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        TsukaimaIcon(IconName.CloudOff, contentDescription = null, size = 18.dp, tint = colors.warn)
+        Text(
+            text = buildAnnotatedString {
+                append("Offline")
+                if (copy != null) withStyle(SpanStyle(color = colors.ink2)) { append(" · $copy") }
+            },
+            style = TsukaimaType.ui,
+            color = colors.ink1,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** "saved copy from 14:02" for a copy of today, "saved copy from yesterday 21:14", "saved copy from Tue 3 Nov 18:05". */
+internal fun savedCopyText(at: Long, now: Long, zone: ZoneId, hour24: Boolean): String {
+    val label = TranscriptRows.label(at, now, zone, hour24)
+    val time = when {
+        label.startsWith("Today ") -> label.removePrefix("Today ")
+        label.startsWith("Yesterday ") -> "yesterday " + label.removePrefix("Yesterday ")
+        else -> label
+    }
+    return "saved copy from $time"
+}

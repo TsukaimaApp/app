@@ -16,6 +16,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.longOrNull
+import app.tsukaima.data.ChatStore
 import app.tsukaima.data.HermesState
 import app.tsukaima.data.RecentIds
 import app.tsukaima.data.api.FileDownload
@@ -115,6 +116,9 @@ interface ChatBackend {
 
     /** The text left for stored session [storedId], once; null when there is none. */
     fun takeDraft(storedId: String): String? = null
+
+    /** What the phone keeps per chat for use without Hermes: saved transcript, draft, offline messages. */
+    val store: ChatStore get() = ChatStore.None
 
     /** One recorded utterance (WAV) through Hermes' speech-to-text relay (`/api/audio/transcribe`). */
     suspend fun transcribe(wav: ByteArray): Result<TranscriptionDto>
@@ -237,6 +241,7 @@ class ContainerChatBackend(private val c: AppContainer) : ChatBackend {
         c.drafts[storedId] = text
     }
     override fun takeDraft(storedId: String) = c.drafts.remove(storedId)
+    override val store get() = c.chatStore
     override suspend fun transcribe(wav: ByteArray) = c.repository.transcribe(wav)
     override fun speechInput() = c.speechInput()
     override fun speechOutput() = c.speechOutput()

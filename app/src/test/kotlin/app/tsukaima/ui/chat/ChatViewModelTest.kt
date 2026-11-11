@@ -200,6 +200,29 @@ class ChatViewModelTest {
         var decoded = 0
         override fun decodePreview(bytes: ByteArray): ImageBitmap = FakeBitmap.also { decoded++ }
 
+        /** What the phone keeps per chat, in memory. */
+        class MemoryStore : app.tsukaima.data.ChatStore {
+            val transcripts = mutableMapOf<String, app.tsukaima.domain.chat.SavedTranscript>()
+            val savedDrafts = mutableMapOf<String, String>()
+            val outboxes = mutableMapOf<String, List<app.tsukaima.domain.chat.OutboxMessage>>()
+            override suspend fun transcript(key: String) = transcripts[key]
+            override suspend fun saveTranscript(key: String, transcript: app.tsukaima.domain.chat.SavedTranscript) {
+                transcripts[key] = transcript
+            }
+            override suspend fun draft(key: String) = savedDrafts[key]
+            override suspend fun saveDraft(key: String, text: String?) {
+                if (text.isNullOrBlank()) savedDrafts.remove(key) else savedDrafts[key] = text
+            }
+            override suspend fun outbox(key: String) = outboxes[key].orEmpty()
+            override suspend fun saveOutbox(key: String, messages: List<app.tsukaima.domain.chat.OutboxMessage>) {
+                outboxes[key] = messages
+            }
+            override suspend fun forget(key: String) {
+                transcripts.remove(key); savedDrafts.remove(key); outboxes.remove(key)
+            }
+        }
+        override val store = MemoryStore()
+
         val drafts = mutableMapOf<String, String>()
         override fun putDraft(storedId: String, text: String) {
             drafts[storedId] = text
@@ -243,6 +266,7 @@ class ChatViewModelTest {
         dispatcher.scheduler.advanceUntilIdle()
         created.forEach { check(it.viewModelScope.coroutineContext.job.isCompleted) { "VM scope still running" } }
         Dispatchers.resetMain()
+        WallClock.now = System::currentTimeMillis
     }
 
     private fun backend(settings: Settings = Settings(workspace = "/srv/work", model = "m-1")) = FakeBackend(settings).apply {
@@ -1670,17 +1694,171 @@ class ChatViewModelTest {
         assertEquals(AgentStatus.Offline, s.status)
         assertEquals(2, s.chat.items.size) // cached history stays visible
 
+        // The composer still takes typing; with offline sending off, Send does nothing and the text stays.
+        assertTrue(s.typeable)
+        b.settings.value = b.settings.value?.copy(offlineSendMinutes = 0)
+        runCurrent()
         vm.setInput("hello?")
+        assertFalse(vm.state.value.canSend)
         vm.send()
-        advanceUntilIdle()
+        runCurrent()
         assertFalse("prompt.submit" in b.transport.methods())
         assertEquals("hello?", vm.state.value.input)
+        assertTrue(vm.state.value.outbox.isEmpty())
 
         // A dropped socket alone also counts as offline.
         b.hermes.value = HermesState()
         b.connection.value = ConnectionState.Reconnecting
         advanceUntilIdle()
         assertTrue(vm.state.value.offline)
+    }
+
+    // ---- 0.14: the chat without Hermes ---------------------------------------------------------------
+
+    /** The phone's clock follows the test's virtual time, so an offline message's wait can be walked through. */
+    private fun kotlinx.coroutines.test.TestScope.virtualClock(base: Long = 1_800_000_000_000L) {
+        WallClock.now = { base + testScheduler.currentTime }
+    }
+
+    @Test
+    fun aMessageWrittenOfflineWaitsAndGoesOutWhenHermesIsBack() = runTest(dispatcher) {
+        virtualClock()
+        val b = backend().apply { transport.on("session.resume", obj(resumeJson)) }
+        val vm = vm(b, stored)
+        runCurrent()
+        b.hermes.value = HermesState(reachable = false)
+        runCurrent()
+        assertTrue(vm.state.value.sendsOffline)
+
+        vm.setInput("Move it to 04:30 then.")
+        assertTrue(vm.state.value.canSend)
+        vm.send()
+        runCurrent()
+        assertEquals("", vm.state.value.input)
+        assertEquals(listOf("Move it to 04:30 then."), vm.state.value.outbox.map { it.text })
+        assertEquals(1, b.store.outboxes[stored]?.size) // survives the app being closed
+        assertFalse("prompt.submit" in b.transport.methods())
+        assertEquals(2, vm.state.value.chat.items.size) // not a transcript row yet
+
+        advanceTimeBy(60_000) // a minute later, well inside the ten the setting allows
+        b.hermes.value = HermesState()
+        runCurrent()
+        assertTrue(vm.state.value.outbox.isEmpty())
+        assertEquals("Move it to 04:30 then.", b.transport.last("prompt.submit")["text"]?.jsonPrimitive?.content)
+        assertEquals(emptyList<app.tsukaima.domain.chat.OutboxMessage>(), b.store.outboxes[stored])
+        assertTrue(b.toasts.isEmpty())
+    }
+
+    @Test
+    fun anOfflineMessagePastItsWaitReturnsToTheComposer() = runTest(dispatcher) {
+        virtualClock()
+        val b = backend().apply { transport.on("session.resume", obj(resumeJson)) }
+        val vm = vm(b, stored)
+        runCurrent()
+        b.hermes.value = HermesState(reachable = false)
+        runCurrent()
+        vm.setInput("Restart the gateway.")
+        vm.send()
+        runCurrent()
+        vm.setInput("also this")
+
+        advanceTimeBy(9 * 60_000L)
+        runCurrent()
+        assertEquals(1, vm.state.value.outbox.size)
+        advanceTimeBy(61_000L)
+        runCurrent()
+        assertTrue(vm.state.value.outbox.isEmpty())
+        assertEquals("also this\n\nRestart the gateway.", vm.state.value.input)
+        assertEquals(listOf("Still offline: your message is back in the composer"), b.toasts)
+
+        // Back online later: nothing goes out by itself.
+        b.hermes.value = HermesState()
+        runCurrent()
+        assertFalse("prompt.submit" in b.transport.methods())
+    }
+
+    @Test
+    fun cancelTakesAWaitingMessageBackToTheComposer() = runTest(dispatcher) {
+        virtualClock()
+        val b = backend().apply { transport.on("session.resume", obj(resumeJson)) }
+        val vm = vm(b, stored)
+        runCurrent()
+        b.hermes.value = HermesState(reachable = false)
+        runCurrent()
+        vm.setInput("Delete the old logs.")
+        vm.send()
+        runCurrent()
+        vm.cancelOffline(vm.state.value.outbox.single().id)
+        runCurrent()
+        assertTrue(vm.state.value.outbox.isEmpty())
+        assertEquals("Delete the old logs.", vm.state.value.input)
+        b.hermes.value = HermesState()
+        advanceTimeBy(20 * 60_000L)
+        runCurrent()
+        assertFalse("prompt.submit" in b.transport.methods())
+    }
+
+    @Test
+    fun aWaitingMessageKeptFromAnEarlierRunIsSentOrReturnedByItsAge() = runTest(dispatcher) {
+        virtualClock()
+        val now = WallClock.now()
+        val b = backend().apply {
+            transport.on("session.resume", obj(resumeJson))
+            store.outboxes[stored] = listOf(
+                app.tsukaima.domain.chat.OutboxMessage("o-old", "written an hour ago", now - 60 * 60_000L),
+                app.tsukaima.domain.chat.OutboxMessage("o-new", "written a minute ago", now - 60_000L),
+            )
+        }
+        val vm = vm(b, stored)
+        runCurrent()
+        assertEquals("written an hour ago", vm.state.value.input)
+        assertTrue(vm.state.value.outbox.isEmpty())
+        assertEquals("written a minute ago", b.transport.last("prompt.submit")["text"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun theSavedCopyShowsUntilHermesAnswersAndTheIdleTranscriptIsSaved() = runTest(dispatcher) {
+        virtualClock()
+        val gate = CompletableDeferred<Unit>()
+        val b = backend().apply {
+            transport.on("session.resume", obj(resumeJson))
+            transport.gateNext["session.resume"] = gate
+            store.transcripts[stored] = app.tsukaima.domain.chat.SavedTranscript(
+                at = 1_799_999_000_000L,
+                items = listOf(app.tsukaima.domain.chat.SavedItem("user", "h-1", "from the phone's copy", rowId = 1)),
+            )
+        }
+        val vm = vm(b, stored)
+        runCurrent()
+        assertEquals(1_799_999_000_000L, vm.state.value.savedAt)
+        assertEquals("from the phone's copy", (vm.state.value.chat.items.single() as ChatItem.UserMessage).text)
+
+        gate.complete(Unit)
+        runCurrent()
+        assertNull(vm.state.value.savedAt)
+        assertEquals(2, vm.state.value.chat.items.size)
+        advanceTimeBy(2_000)
+        runCurrent()
+        assertEquals(2, b.store.transcripts[stored]?.items?.size)
+    }
+
+    @Test
+    fun theComposerTextIsKeptAsTheChatsDraft() = runTest(dispatcher) {
+        val b = backend().apply {
+            transport.on("session.resume", obj(resumeJson))
+            store.savedDrafts[stored] = "half a thought"
+        }
+        val vm = vm(b, stored)
+        runCurrent()
+        assertEquals("half a thought", vm.state.value.input)
+        vm.setInput("half a thought, finished")
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals("half a thought, finished", b.store.savedDrafts[stored])
+        vm.send()
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertNull(b.store.savedDrafts[stored])
     }
 
     @Test

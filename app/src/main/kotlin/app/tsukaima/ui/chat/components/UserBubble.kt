@@ -33,7 +33,7 @@ private val BubbleShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, b
  * Right-aligned user message: pale lavender fill, 6dp tail corner, at most 82 % of the width. [attachments]
  * (names of files sent with it) are listed under the text in caption style. A [failed] send gets a
  * "Not sent" line with Retry and Dismiss under the bubble; a [queued] one (sent while a turn ran, waiting for it to
- * end) a "Queued" caption, a [steer] (sent into the running turn) a "Steer" caption. [onLongPress] opens the message menu (copy).
+ * end) a "Queued" caption, a [waiting] one (written offline, [onCancel] takes it back to the composer) "Sends when you are back online", a [steer] (sent into the running turn) a "Steer" caption. [onLongPress] opens the message menu (copy).
  */
 @Composable
 fun UserBubble(
@@ -43,6 +43,8 @@ fun UserBubble(
     failed: Boolean = false,
     queued: Boolean = false,
     steer: Boolean = false,
+    waiting: Boolean = false,
+    onCancel: () -> Unit = {},
     onRetry: () -> Unit = {},
     onDismiss: () -> Unit = {},
     onLongPress: (() -> Unit)? = null,
@@ -82,6 +84,13 @@ fun UserBubble(
                     Text("Steer", style = TsukaimaType.caption, color = colors.ink3, modifier = Modifier.padding(start = 4.dp))
                 }
             }
+            if (waiting) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TsukaimaIcon(IconName.Schedule, contentDescription = null, size = 14.dp, tint = colors.ink3)
+                    Text("Sends when you are back online", style = TsukaimaType.caption, color = colors.ink3, modifier = Modifier.padding(start = 4.dp, end = 4.dp))
+                    GhostButton("Cancel", onCancel, size = ButtonSize.Sm)
+                }
+            }
             if (failed) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TsukaimaIcon(IconName.Error, contentDescription = null, size = 14.dp, tint = colors.danger)
@@ -101,6 +110,7 @@ private fun UserBubblePreview(dark: Boolean) = PreviewPage(dark) {
     UserBubble("", attachments = listOf("photo.jpg"))
     UserBubble("Restart the gateway please.", failed = true)
     UserBubble("Then summarize it.", queued = true)
+    UserBubble("Move it to 04:30 then.", waiting = true)
     UserBubble("Skip the tests, only lint.", steer = true)
     UserBubble("A much longer message that should wrap well before it reaches the left edge of the screen, keeping the 82 percent cap.")
 }

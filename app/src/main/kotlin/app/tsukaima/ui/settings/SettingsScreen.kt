@@ -97,6 +97,7 @@ class SettingsActions(
     val onVoiceLanguagesOpen: () -> Unit = {},
     /** Voice processing picked: on this phone or on Hermes. */
     val onVoiceProcessing: (VoiceProcessing) -> Unit = {},
+    val onOfflineSend: (Int) -> Unit = {},
     /** The voice processing sheet opens: probe the server's STT and TTS providers for its label. */
     val onVoiceProcessingOpen: () -> Unit = {},
     /** The Live voice switch flipped. */
@@ -169,6 +170,7 @@ fun SettingsScreen(
             onVoiceLanguage = vm::setVoiceLanguage,
             onVoiceLanguagesOpen = vm::loadVoiceLanguages,
             onVoiceProcessing = vm::setVoiceProcessing,
+            onOfflineSend = vm::setOfflineSendMinutes,
             onVoiceProcessingOpen = vm::loadVoiceProviders,
             onLiveVoice = vm::setLiveVoice,
             onVoiceSectionShown = vm::loadVoiceLiveStatus,
@@ -197,6 +199,14 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
         visible = showVoiceLanguages,
         onDismiss = { showVoiceLanguages = false },
         items = voiceLanguageItems(state.voiceLanguages, state.voiceLanguage, actions.onVoiceLanguage),
+    )
+    var showOfflineSend by rememberSaveable { mutableStateOf(false) }
+    MenuSheet(
+        visible = showOfflineSend,
+        onDismiss = { showOfflineSend = false },
+        items = OFFLINE_SEND_CHOICES.map { minutes ->
+            MenuItem(offlineSendLabel(minutes), null, checked = state.offlineSendMinutes == minutes) { actions.onOfflineSend(minutes) }
+        },
     )
     var showVoiceProcessing by rememberSaveable { mutableStateOf(false) }
     MenuSheet(
@@ -461,6 +471,18 @@ fun SettingsContent(state: SettingsUiState, actions: SettingsActions, modifier: 
                 }
             }
 
+            Section("Offline") {
+                TsukaimaRow(
+                    title = "Send messages written offline",
+                    subtitle = if (state.offlineSendMinutes == 0) "Never: they stay in the composer as a draft"
+                    else "When back online within ${offlineSendLabel(state.offlineSendMinutes).lowercase()}; after that they become a draft",
+                    leading = IconName.CloudOff,
+                    trailing = { Chevron() },
+                    onClick = { showOfflineSend = true },
+                    modifier = Modifier.bleed(12.dp),
+                )
+            }
+
             Section("Theme") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(ThemeMode.Warm to "Warm", ThemeMode.Dark to "Dark", ThemeMode.System to "System").forEach { (mode, label) ->
@@ -685,3 +707,14 @@ private const val PHONE_PROCESSING = "On this phone"
 
 /** The voice processing row's subtitle while Hermes runs voice: the voice language setting does not reach it. */
 private const val SERVER_PROCESSING_NOTE = "Hermes listens and speaks · server voices follow its language settings"
+
+/** The waits offered for a message written offline, in minutes; 0 = never sent by itself. */
+internal val OFFLINE_SEND_CHOICES = listOf(0, 1, 5, 10, 30, 60)
+
+internal fun offlineSendLabel(minutes: Int): String = when {
+    minutes <= 0 -> "Never"
+    minutes == 1 -> "1 minute"
+    minutes < 60 -> "$minutes minutes"
+    minutes == 60 -> "1 hour"
+    else -> "${minutes / 60} hours"
+}

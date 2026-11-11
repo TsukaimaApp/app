@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
@@ -67,7 +68,16 @@ data class Settings(
      * "Continue last chat" on the share card goes; null skips the card.
      */
     val lastChatId: String? = null,
-)
+    /**
+     * How long a message written offline waits to be sent by itself, in minutes; after that it goes back to the
+     * composer as a draft. 0 = offline messages are never sent by themselves.
+     */
+    val offlineSendMinutes: Int = DEFAULT_OFFLINE_SEND_MINUTES,
+) {
+    companion object {
+        const val DEFAULT_OFFLINE_SEND_MINUTES = 10
+    }
+}
 
 class SettingsStore(private val dataStore: DataStore<Preferences>) {
     val settings: Flow<Settings> = dataStore.data.map { it.toSettings() }
@@ -96,6 +106,7 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
             prefs[VOICE_PROCESSING] = next.voiceProcessing.name
             prefs[LIVE_VOICE] = next.liveVoice
             prefs.putOrRemove(LAST_CHAT_ID, next.lastChatId)
+            prefs[OFFLINE_SEND_MINUTES] = next.offlineSendMinutes
             prefs.remove(LEGACY_VOICE_OUTPUT) // never shipped; its choice is not carried over
         }
     }
@@ -137,6 +148,7 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
                 ?: defaults.voiceProcessing,
             liveVoice = this[LIVE_VOICE] ?: defaults.liveVoice,
             lastChatId = this[LAST_CHAT_ID],
+            offlineSendMinutes = this[OFFLINE_SEND_MINUTES] ?: defaults.offlineSendMinutes,
         )
     }
 
@@ -162,6 +174,7 @@ class SettingsStore(private val dataStore: DataStore<Preferences>) {
         val VOICE_PROCESSING = stringPreferencesKey("voice_processing")
         val LIVE_VOICE = booleanPreferencesKey("live_voice")
         val LAST_CHAT_ID = stringPreferencesKey("last_chat_id")
+        val OFFLINE_SEND_MINUTES = intPreferencesKey("offline_send_minutes")
 
         /** 0.7.x's "Speech recognition" setting (`Phone`/`Server`): read only while [VOICE_PROCESSING] is unset. */
         val LEGACY_VOICE_RECOGNITION = stringPreferencesKey("voice_recognition")

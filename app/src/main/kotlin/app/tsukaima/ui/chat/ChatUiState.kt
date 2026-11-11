@@ -5,6 +5,7 @@ import app.tsukaima.data.api.WorkspacesDto
 import app.tsukaima.data.gateway.ApprovalChoice
 import app.tsukaima.domain.chat.AgentStatus
 import app.tsukaima.domain.chat.ChatState
+import app.tsukaima.domain.chat.OutboxMessage
 import app.tsukaima.domain.chat.SlashCatalog
 import app.tsukaima.domain.chat.SlashCommand
 import app.tsukaima.domain.voice.VoiceLanguage
@@ -86,6 +87,15 @@ data class ChatUiState(
     val voiceLanguages: List<VoiceLanguage> = emptyList(),
     /** Connection operations (op ids) with an answer in flight: their card's buttons are off ("Connecting…"). */
     val answeringConnections: Set<String> = emptySet(),
+    /** Messages written offline that wait to be sent ([ChatOffline]), oldest first; drawn under the transcript. */
+    val outbox: List<OutboxMessage> = emptyList(),
+    /**
+     * The transcript on screen is the copy saved on the phone at this time (epoch millis), not yet replaced by
+     * Hermes' history; null once it is, and for a chat that had no copy.
+     */
+    val savedAt: Long? = null,
+    /** [app.tsukaima.data.prefs.Settings.offlineSendMinutes], mirrored: 0 = offline messages are never sent by themselves. */
+    val offlineSendMinutes: Int = 0,
 ) {
     /** What the status line shows. */
     val status: AgentStatus
@@ -102,8 +112,18 @@ data class ChatUiState(
      * submit would ride along with the next turn instead) and Hermes is reachable.
      */
     val canSend: Boolean
-        get() = writable && !compacting && attachments.none { it.status == AttachmentStatus.Uploading } &&
+        get() = sendsOffline && input.isNotBlank() && attachments.isEmpty() ||
+            writable && !compacting && attachments.none { it.status == AttachmentStatus.Uploading } &&
             (input.isNotBlank() || attachments.any { it.status == AttachmentStatus.Ready })
+
+    /** The composer takes typing: always, except in an archived chat. Offline, what is typed is kept as the draft. */
+    val typeable: Boolean get() = !archived
+
+    /**
+     * Send works without Hermes: the message waits on the phone and goes out when the connection is back
+     * ([ChatOffline]). Text only (a file needs the server to take it), and not while a message is being edited.
+     */
+    val sendsOffline: Boolean get() = offline && !archived && offlineSendMinutes > 0 && pendingEdit == null
 
     /** The composer's caption while [pendingEdit] is set, else null. */
     val editCaption: String?

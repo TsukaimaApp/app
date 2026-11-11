@@ -98,6 +98,8 @@ data class SettingsUiState(
     val voiceLanguages: List<VoiceLanguage> = emptyList(),
     /** Where voice mode recognises speech and speaks replies. */
     val voiceProcessing: VoiceProcessing = VoiceProcessing.Phone,
+    /** [app.tsukaima.data.prefs.Settings.offlineSendMinutes]. */
+    val offlineSendMinutes: Int = app.tsukaima.data.prefs.Settings.DEFAULT_OFFLINE_SEND_MINUTES,
     /** The GPT-Live voice setting ([app.tsukaima.data.prefs.Settings.liveVoice]). */
     val liveVoice: Boolean = true,
     /** What the server says about GPT-Live, once asked; empty until then. */
@@ -194,6 +196,7 @@ class SettingsViewModel(
                         notifications = s.notifications,
                         voiceLanguage = s.voiceLanguage,
                         voiceProcessing = s.voiceProcessing,
+                        offlineSendMinutes = s.offlineSendMinutes,
                         liveVoice = s.liveVoice,
                         // Seed the form once; later emissions (our own writes) must not clobber typing.
                         serverUrl = if (firstLoad && it.serverUrl.isEmpty()) s.serverUrl else it.serverUrl,
@@ -304,6 +307,7 @@ class SettingsViewModel(
                     serverUrl = it.serverUrl, username = it.username, storedUrl = it.storedUrl, profile = it.profile,
                     theme = it.theme, materialYou = it.materialYou, simulateOffline = it.simulateOffline,
                     notifications = it.notifications, voiceLanguage = it.voiceLanguage, voiceLanguages = it.voiceLanguages,
+                    offlineSendMinutes = it.offlineSendMinutes,
                     lastCrash = it.lastCrash,
                 )
             }
@@ -489,6 +493,11 @@ class SettingsViewModel(
     }
 
     /** Saves where voice mode recognises speech and speaks replies; the next voice session uses it. */
+    fun setOfflineSendMinutes(minutes: Int) {
+        _state.update { it.copy(offlineSendMinutes = minutes) }
+        viewModelScope.launch { settings.update { it.copy(offlineSendMinutes = minutes) } }
+    }
+
     fun setVoiceProcessing(mode: VoiceProcessing) {
         _state.update { it.copy(voiceProcessing = mode) }
         viewModelScope.launch { settings.update { it.copy(voiceProcessing = mode) } }

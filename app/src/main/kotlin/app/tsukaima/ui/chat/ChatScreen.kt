@@ -4,6 +4,7 @@ import androidx.compose.ui.Alignment
 import app.tsukaima.ui.chat.components.LatestButton
 import app.tsukaima.ui.chat.components.StepsLine
 import app.tsukaima.ui.chat.components.TimeMark
+import app.tsukaima.ui.chat.components.OfflineBar
 import app.tsukaima.domain.chat.TranscriptRows
 import app.tsukaima.domain.chat.TranscriptRow
 import java.time.ZoneId
@@ -169,6 +170,7 @@ class ChatActions(
     val onMessageMenu: (String?) -> Unit = {},
     val onToggleReasoning: (String) -> Unit = {},
     val onToggleSteps: (String) -> Unit = {},
+    val onCancelOffline: (String) -> Unit = {},
     val onSelectText: (String?) -> Unit = {},
     val onToolOpened: () -> Unit = {},
     val onCopyMessage: (id: String, reasoning: Boolean) -> Unit = { _, _ -> },
@@ -302,6 +304,7 @@ fun ChatScreen(
             onMessageMenu = vm::showMessageMenu,
             onToggleReasoning = vm::toggleReasoning,
             onToggleSteps = vm::toggleSteps,
+            onCancelOffline = vm::cancelOffline,
             onSelectText = vm::selectText,
             onToolOpened = vm::loadToolOutputs,
             onCopyMessage = { id, reasoning ->
@@ -410,7 +413,10 @@ private fun ChatColumn(
         )
         // The user's turn: the status line is the reasoning picker. Any other state is the plain line, and closes it.
         var pickingReasoning by rememberSaveable { mutableStateOf(false) }
-        if (state.reasoningPickable) {
+        if (state.offline) {
+            // No Hermes: the line says so, and how old the transcript on screen is when it is the phone's copy.
+            OfflineBar(savedAt = state.savedAt, onClick = onStatus)
+        } else if (state.reasoningPickable) {
             ReasoningStatusLine(
                 effort = state.chat.reasoningEffort,
                 open = pickingReasoning,
@@ -436,7 +442,8 @@ private fun ChatColumn(
                 .fillMaxWidth(),
         ) {
             when {
-                state.loading -> ChatSkeleton(Modifier.padding(top = 10.dp), caption = state.chat.resumeProgress)
+                // A saved copy is shown at once; the skeleton is for a chat with nothing to show yet.
+                state.loading && state.chat.items.isEmpty() -> ChatSkeleton(Modifier.padding(top = 10.dp), caption = state.chat.resumeProgress)
                 state.empty -> EmptyChat(state.workspace?.let { ChatSync.displayPath(it, state.workspaces?.home) }, { actions.onMenu(ChatMenu.Workspace) })
                 else -> Transcript(state, actions, listState)
             }
@@ -448,8 +455,8 @@ private fun ChatColumn(
             onValueChange = actions.onInput,
             onSend = actions.onSend,
             onAttach = actions.onAttach,
-            enabled = state.writable,
-            disabledPlaceholder = if (state.archived && !state.offline) "This chat is archived" else "Hermes is unreachable",
+            enabled = state.typeable,
+            disabledPlaceholder = "This chat is archived",
             canSend = state.canSend,
             attachments = state.attachments,
             onRemoveAttachment = actions.onRemoveAttachment,
@@ -484,8 +491,9 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
             .collect { (scrolling, canScrollForward) -> if (scrolling) follow = !canScrollForward }
     }
     val tail = transcriptTailKey(items)
-    LaunchedEffect(rows.size, tail) {
-        if (follow && rows.isNotEmpty()) listState.scrollToItem(rows.size) // the end spacer: bottom of the last item
+    val count = rows.size + state.outbox.size
+    LaunchedEffect(count, tail) {
+        if (follow && count > 0) listState.scrollToItem(count) // the end spacer: bottom of the last item
     }
     // What was last when the reader left the bottom: anything after it is new to them (the Latest button's dot).
     var leftAt by remember { mutableStateOf(tail) }
@@ -504,6 +512,10 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
                     is TranscriptRow.Steps -> StepsLine(row, onToggle = { actions.onToggleSteps(row.id) })
                 }
             }
+            // Written offline, not sent yet: under everything Hermes has.
+            items(state.outbox, key = { it.id }, contentType = { "outbox" }) { message ->
+                UserBubble(message.text, waiting = true, onCancel = { actions.onCancelOffline(message.id) })
+            }
             item(key = "end") { Spacer(Modifier.height(10.dp)) }
         }
         LatestButton(
@@ -511,7 +523,7 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
             unseen = tail != leftAt,
             onClick = {
                 follow = true
-                scope.launch { listState.animateScrollToItem(rows.size) }
+                scope.launch { listState.animateScrollToItem(count) }
             },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
