@@ -88,3 +88,53 @@ class TranscriptUiTest : ComposeUiTest() {
         compose.onNodeWithText("Compare the start times.").assertExists()
     }
 }
+
+/** The 0.14 chat without Hermes, and the background-process chip. */
+class AwayUiTest : ComposeUiTest() {
+    private val items = listOf(
+        ChatItem.UserMessage("u1", "Why does it fail on Sundays?", rowId = 1),
+        ChatItem.AssistantMessage("a1", "The snapshot holds the lock.", streaming = false, reasoning = null),
+    )
+
+    @Test
+    fun `offline the bar says so, the composer still types and a waiting message can be cancelled`() {
+        val cancelled = mutableListOf<String>()
+        setThemed {
+            ChatContent(
+                state = ChatUiState(
+                    chat = ChatState(items = items, status = app.tsukaima.domain.chat.AgentStatus.Offline),
+                    isNew = false, savedAt = System.currentTimeMillis(), offlineSendMinutes = 10,
+                    outbox = listOf(app.tsukaima.domain.chat.OutboxMessage("o1", "Move it to 04:30 then.", 1)),
+                ),
+                showMenu = false, onDrawer = {}, onStatus = {},
+                actions = ChatActions(onCancelOffline = { cancelled += it }),
+            )
+        }
+        compose.onNodeWithContentDescription("Offline, saved copy from", substring = true).assertHeightIsAtLeast(44.dp)
+        compose.onNodeWithText("Move it to 04:30 then.").assertExists()
+        compose.onNodeWithText("Sends when you are back online").assertExists()
+        compose.onNodeWithText("Cancel").performClick()
+        assertEquals(listOf("o1"), cancelled)
+        compose.onNodeWithText("Hermes is unreachable").assertDoesNotExist()
+    }
+
+    @Test
+    fun `running background commands show as a chip that opens their list`() {
+        var opened = 0
+        setThemed {
+            ChatContent(
+                state = ChatUiState(
+                    chat = ChatState(items = items, liveSessionId = "live"), isNew = false,
+                    processes = listOf(
+                        app.tsukaima.ui.chat.ProcessRow("p1", "npm run build", running = true),
+                        app.tsukaima.ui.chat.ProcessRow("p2", "sleep 300", running = false, exitCode = -15),
+                    ),
+                ),
+                showMenu = false, onDrawer = {}, onStatus = {},
+                actions = ChatActions(onProcesses = { opened++ }),
+            )
+        }
+        compose.onNodeWithContentDescription("1 running in the background").assertHeightIsAtLeast(44.dp).performClick()
+        assertEquals(1, opened)
+    }
+}

@@ -1,5 +1,6 @@
 package app.tsukaima.notifications
 
+import app.tsukaima.diagnostics.BackgroundLog
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -45,6 +46,7 @@ class GatewayService : Service() {
             )
         } catch (e: RuntimeException) { // ForegroundServiceStartNotAllowedException and friends
             Log.w(TAG, "gateway service: cannot go foreground", e)
+            BackgroundLog.note(this, "service could not go foreground: ${e::class.java.simpleName}")
             stopSelf(startId)
             return START_NOT_STICKY
         }
@@ -55,16 +57,19 @@ class GatewayService : Service() {
             container.background.inForeground.first { it }
             stopSelf(lastStartId) // back in the foreground: the connection already polls normally
         }
+        BackgroundLog.note(this, "service started (start $startId)")
         container.notifications.startBackground()
         return START_NOT_STICKY
     }
 
     /** Android 15 caps `dataSync` time; when it runs out, stop and let the app go quiet. */
     override fun onTimeout(startId: Int, fgsType: Int) {
+        BackgroundLog.note(this, "service time limit reached (type $fgsType)")
         stopSelf() // the system's limit: end this instance whatever its starts
     }
 
     override fun onDestroy() {
+        BackgroundLog.note(this, if (container.background.inForeground.value) "service stopped: app in foreground" else "service destroyed in the background")
         scope?.cancel()
         scope = null
         watcher = null
@@ -90,6 +95,7 @@ class GatewayService : Service() {
             true
         } catch (e: RuntimeException) {
             Log.w(TAG, "gateway service: start refused", e)
+            BackgroundLog.note(context, "service start refused: ${e::class.java.simpleName}")
             false
         }
     }

@@ -81,12 +81,19 @@ internal fun StatusDot(visual: StatusVisual) {
  * right end in caption type.
  */
 @Composable
-fun StatusLine(status: AgentStatus, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null, meter: String? = null) {
+fun StatusLine(
+    status: AgentStatus,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    meter: String? = null,
+    /** Shown at the line's end in the meter's place (the background-process chip). */
+    trailing: (@Composable () -> Unit)? = null,
+) {
     val colors = MaterialTheme.tsukaima
     val visual = statusVisual(status, colors)
     Row(
         modifier = modifier
-            .then(if (meter != null) Modifier.fillMaxWidth() else Modifier)
+            .then(if (meter != null || trailing != null) Modifier.fillMaxWidth() else Modifier)
             .then(
                 if (onClick != null) {
                     Modifier.heightIn(min = Dimens.hit).clickable(role = Role.Button, onClick = onClick)
@@ -105,9 +112,9 @@ fun StatusLine(status: AgentStatus, modifier: Modifier = Modifier, onClick: (() 
             color = colors.ink2,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = if (meter != null) Modifier.weight(1f) else Modifier,
+            modifier = if (meter != null || trailing != null) Modifier.weight(1f) else Modifier,
         )
-        if (meter != null) Text(meter, style = TsukaimaType.caption, color = colors.ink3, maxLines = 1)
+        if (trailing != null) trailing() else if (meter != null) Text(meter, style = TsukaimaType.caption, color = colors.ink3, maxLines = 1)
     }
 }
 

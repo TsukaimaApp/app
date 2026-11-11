@@ -136,6 +136,8 @@ fun ReasoningStatusLine(
     lead: String = "Hermes is listening,",
     onClick: (() -> Unit)? = null,
     meter: String? = null,
+    /** Shown at the line's end in the meter's place (the background-process chip). */
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     val colors = MaterialTheme.tsukaima
     val strength = reasoningStrength(effort)
@@ -283,7 +285,7 @@ fun ReasoningStatusLine(
             }
         }
         }
-        if (meter != null) Text(meter, style = TsukaimaType.caption, color = colors.ink3, maxLines = 1)
+        if (trailing != null) trailing() else if (meter != null) Text(meter, style = TsukaimaType.caption, color = colors.ink3, maxLines = 1)
     }
 }
 

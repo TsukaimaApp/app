@@ -38,6 +38,21 @@ val REASONING_LEVELS: List<Pair<String, String>> = listOf(
  */
 data class SubagentWatch(val id: String, val tail: String? = null, val available: Boolean = false)
 
+/**
+ * A background command as the sheet shows it. [since]: when it started on the phone's clock (epoch millis, from
+ * the server's uptime), for the running time; [tail]: the end of its output, kept up by its output events;
+ * [stopping]: Stop was tapped and has not answered yet.
+ */
+data class ProcessRow(
+    val id: String,
+    val command: String,
+    val running: Boolean,
+    val since: Long? = null,
+    val tail: String = "",
+    val exitCode: Int? = null,
+    val stopping: Boolean = false,
+)
+
 data class ChatUiState(
     val chat: ChatState = ChatState(),
     val loading: Boolean = false,
@@ -87,6 +102,10 @@ data class ChatUiState(
     val voiceLanguages: List<VoiceLanguage> = emptyList(),
     /** Connection operations (op ids) with an answer in flight: their card's buttons are off ("Connecting…"). */
     val answeringConnections: Set<String> = emptySet(),
+    /** The commands the agent left running in the background, and the ones that ended lately ([ChatProcesses]). */
+    val processes: List<ProcessRow> = emptyList(),
+    /** The "Running in the background" sheet is open. */
+    val processSheet: Boolean = false,
     /** Messages written offline that wait to be sent ([ChatOffline]), oldest first; drawn under the transcript. */
     val outbox: List<OutboxMessage> = emptyList(),
     /**
@@ -143,6 +162,9 @@ data class ChatUiState(
     /** The slash commands to suggest above the composer for what is typed (none while a message is being edited). */
     val commandMatches: List<SlashCommand>
         get() = if (pendingEdit != null || !writable) emptyList() else commands?.matches(input).orEmpty()
+
+    /** How many background commands are running now: the status line's "2 running". */
+    val runningProcesses: Int get() = processes.count { it.running }
 
     /** A new chat with nothing in it yet (shows the working-directory picker). */
     val empty: Boolean get() = isNew && chat.items.isEmpty() && !loading

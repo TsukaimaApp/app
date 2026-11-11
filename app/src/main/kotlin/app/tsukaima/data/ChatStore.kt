@@ -49,14 +49,16 @@ interface ChatStore {
 }
 
 /**
- * [ChatStore] as one JSON file per chat under [root]`/<scope>/`, where [scope] names the server and profile in use
- * (another server's chats are another folder). Files are app-private and not encrypted: they hold what the chat
- * screen shows. Writes go through a temp file and a rename, one at a time.
+ * [ChatStore] as one JSON file per chat under [root]`/<scope>/`. [scope] names the server, profile and signed-in
+ * user (another account's chats are another folder); null while nobody is signed in, when nothing is read or
+ * written. Files are app-private and not encrypted: they hold what the chat screen shows. Writes go through a temp
+ * file and a rename, one at a time. [clear] wins over every write that started before it: a chat still open at
+ * sign-out cannot put its transcript back.
  */
 class FileChatStore(
     private val root: File,
     private val io: CoroutineDispatcher = Dispatchers.IO,
-    private val scope: () -> String,
+    private val scope: () -> String?,
 ) : ChatStore {
     @Serializable
     private data class Kept(val transcript: SavedTranscript? = null, val draft: String? = null, val outbox: List<OutboxMessage> = emptyList())
@@ -64,10 +66,15 @@ class FileChatStore(
     private val json = Json { ignoreUnknownKeys = true }
     private val lock = Mutex()
 
-    private fun file(key: String) = File(File(root, hash(scope())), hash(key) + ".json")
+    /** Bumped by [clear]; a write that began under an older value is dropped. */
+    @Volatile
+    private var generation = 0
+
+    private fun dir(): File? = scope()?.let { File(root, hash(it)) }
+    private fun file(key: String): File? = dir()?.let { File(it, hash(key) + ".json") }
 
     private fun read(key: String): Kept = try {
-        file(key).takeIf { it.isFile }?.let { json.decodeFromString(Kept.serializer(), it.readText()) } ?: Kept()
+        file(key)?.takeIf { it.isFile }?.let { json.decodeFromString(Kept.serializer(), it.readText()) } ?: Kept()
     } catch (e: Exception) {
         Log.w("Tsukaima", "chat store: unreadable entry dropped", e)
         Kept()
@@ -75,26 +82,35 @@ class FileChatStore(
 
     private suspend fun <T> get(key: String, pick: (Kept) -> T): T = withContext(io) { lock.withLock { pick(read(key)) } }
 
-    private suspend fun change(key: String, block: (Kept) -> Kept) = withContext(io) {
-        lock.withLock {
-            try {
-                val next = block(read(key))
-                val target = file(key)
-                if (next == Kept()) {
-                    target.delete()
-                } else {
-                    target.parentFile?.mkdirs()
-                    val temp = File(target.parentFile, target.name + ".tmp")
-                    temp.writeText(json.encodeToString(Kept.serializer(), next))
-                    if (!temp.renameTo(target)) {
-                        target.delete()
-                        temp.renameTo(target)
-                    }
+    /** Runs [write] under the lock unless [clear] ran since the caller asked, or nobody is signed in. */
+    private suspend fun writing(write: (File) -> Unit) {
+        val asked = generation
+        withContext(io) {
+            lock.withLock {
+                val dir = dir()
+                if (asked != generation || dir == null) return@withLock
+                try {
+                    dir.mkdirs()
+                    write(dir)
+                } catch (e: Exception) {
+                    Log.w("Tsukaima", "chat store: write failed", e)
                 }
-            } catch (e: Exception) {
-                Log.w("Tsukaima", "chat store: write failed", e)
             }
-            Unit
+        }
+    }
+
+    private suspend fun change(key: String, block: (Kept) -> Kept) = writing { dir ->
+        val next = block(read(key))
+        val target = File(dir, hash(key) + ".json")
+        if (next == Kept()) {
+            target.delete()
+        } else {
+            val temp = File(dir, target.name + ".tmp")
+            temp.writeText(json.encodeToString(Kept.serializer(), next))
+            if (!temp.renameTo(target)) {
+                target.delete()
+                temp.renameTo(target)
+            }
         }
     }
 
@@ -104,12 +120,12 @@ class FileChatStore(
     override suspend fun saveDraft(key: String, text: String?) = change(key) { it.copy(draft = text?.takeIf(String::isNotBlank)) }
     override suspend fun outbox(key: String) = get(key) { it.outbox }
     override suspend fun saveOutbox(key: String, messages: List<OutboxMessage>) = change(key) { it.copy(outbox = messages) }
-    private fun sessionsFile() = File(File(root, hash(scope())), "sessions.json")
 
     override suspend fun sessions(): List<SessionDto> = withContext(io) {
         lock.withLock {
             try {
-                sessionsFile().takeIf { it.isFile }?.let { json.decodeFromString(ListSerializer(SessionDto.serializer()), it.readText()) }.orEmpty()
+                dir()?.let { File(it, SESSIONS) }?.takeIf { it.isFile }
+                    ?.let { json.decodeFromString(ListSerializer(SessionDto.serializer()), it.readText()) }.orEmpty()
             } catch (e: Exception) {
                 Log.w("Tsukaima", "chat store: unreadable session list dropped", e)
                 emptyList()
@@ -117,25 +133,25 @@ class FileChatStore(
         }
     }
 
-    override suspend fun saveSessions(sessions: List<SessionDto>) = withContext(io) {
-        lock.withLock {
-            try {
-                val target = sessionsFile()
-                target.parentFile?.mkdirs()
-                target.writeText(json.encodeToString(ListSerializer(SessionDto.serializer()), sessions.take(MAX_SESSIONS)))
-            } catch (e: Exception) {
-                Log.w("Tsukaima", "chat store: session list not saved", e)
-            }
-            Unit
-        }
+    override suspend fun saveSessions(sessions: List<SessionDto>) = writing { dir ->
+        File(dir, SESSIONS).writeText(json.encodeToString(ListSerializer(SessionDto.serializer()), sessions.take(MAX_SESSIONS)))
     }
 
-    override suspend fun forget(key: String) = withContext(io) { lock.withLock { file(key).delete() }; Unit }
-    override suspend fun clear() = withContext(io) { lock.withLock { root.deleteRecursively() }; Unit }
+    override suspend fun forget(key: String) = withContext(io) { lock.withLock { file(key)?.delete() }; Unit }
+
+    /** Every account's folder goes, not only the one in scope: after a sign-out nothing of anyone stays. */
+    override suspend fun clear() = withContext(io) {
+        lock.withLock {
+            generation++
+            root.deleteRecursively()
+        }
+        Unit
+    }
 
     private companion object {
         /** The drawer's first page: what a start without Hermes lists. */
         const val MAX_SESSIONS = 100
+        const val SESSIONS = "sessions.json"
     }
 
     private fun hash(text: String): String =

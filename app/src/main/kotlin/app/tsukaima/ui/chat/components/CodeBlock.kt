@@ -1,5 +1,7 @@
 package app.tsukaima.ui.chat.components
 
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import android.content.ClipData
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -40,7 +42,8 @@ import app.tsukaima.ui.theme.tsukaima
 private const val CopiedMs = 1500L
 
 /**
- * Warm-dark code well with a language label and a Copy action. [readOnly] makes the code
+ * Warm-dark code well with a language label, a Wrap switch for long lines and a Copy action (repeated at the end
+ * of a block of [LONG_CODE_LINES] lines or more). [readOnly] makes the code
  * text selectable in place (long-press), for tool output where the whole-block Copy is too coarse.
  */
 @Composable
@@ -62,6 +65,13 @@ fun CodeBlock(
             copies = 0
         }
     }
+    val copy: () -> Unit = {
+        scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("code", code))) }
+        copies++
+    }
+    // Long lines scroll sideways until Wrap is tapped; the choice is this block's.
+    var wrap by rememberSaveable { mutableStateOf(false) }
+    val long = remember(code) { code.count { it == '\n' } + 1 >= LONG_CODE_LINES }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -79,28 +89,9 @@ fun CodeBlock(
                 style = TsukaimaType.label,
                 color = colors.codeInk.copy(alpha = 0.55f),
             )
-            Row(
-                modifier = Modifier
-                    .clickable(role = Role.Button, onClickLabel = "Copy code") {
-                        scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("code", code))) }
-                        copies++
-                    }
-                    .heightIn(min = Dimens.hit)
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                TsukaimaIcon(
-                    if (copied) IconName.Check else IconName.ContentCopy,
-                    contentDescription = null, // the "Copy"/"Copied" label beside it says it
-                    size = 16.dp,
-                    tint = colors.codeInk.copy(alpha = 0.75f),
-                )
-                Text(
-                    text = if (copied) "Copied" else "Copy",
-                    style = TsukaimaType.caption,
-                    color = colors.codeInk.copy(alpha = 0.75f),
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CodeAction(if (wrap) "Unwrap" else "Wrap", null, onClickLabel = if (wrap) "Scroll long lines sideways" else "Wrap long lines") { wrap = !wrap }
+                CodeAction(if (copied) "Copied" else "Copy", if (copied) IconName.Check else IconName.ContentCopy, onClickLabel = "Copy code", onClick = copy)
             }
         }
         val body: @Composable () -> Unit = {
@@ -108,14 +99,43 @@ fun CodeBlock(
                 text = code,
                 style = TsukaimaType.mono,
                 color = colors.codeInk,
-                softWrap = false,
+                softWrap = wrap,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 12.dp),
+                    .then(if (wrap) Modifier else Modifier.horizontalScroll(rememberScrollState()))
+                    .padding(start = 14.dp, end = 14.dp, top = 4.dp, bottom = if (long) 0.dp else 12.dp),
             )
         }
         if (readOnly) SelectionContainer { body() } else body()
+        // A block longer than the screen: Copy is at its end too, where the reader finishes.
+        if (long) {
+            Row(Modifier.fillMaxWidth().padding(end = 6.dp), horizontalArrangement = Arrangement.End) {
+                CodeAction(if (copied) "Copied" else "Copy", if (copied) IconName.Check else IconName.ContentCopy, onClickLabel = "Copy code", onClick = copy)
+            }
+        }
+    }
+}
+
+/** A code block of at least this many lines repeats Copy at its end. */
+internal const val LONG_CODE_LINES = 16
+
+/** One text action of a code block's header or footer, in the code well's ink, with a 44dp touch target. */
+@Composable
+private fun CodeAction(label: String, icon: IconName?, onClickLabel: String, onClick: () -> Unit) {
+    val colors = MaterialTheme.tsukaima
+    Row(
+        modifier = Modifier
+            .clickable(role = Role.Button, onClickLabel = onClickLabel, onClick = onClick)
+            .heightIn(min = Dimens.hit)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        if (icon != null) {
+            // The label beside it says what it does.
+            TsukaimaIcon(icon, contentDescription = null, size = 16.dp, tint = colors.codeInk.copy(alpha = 0.75f))
+        }
+        Text(label, style = TsukaimaType.caption, color = colors.codeInk.copy(alpha = 0.75f))
     }
 }
 

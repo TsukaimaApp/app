@@ -168,6 +168,8 @@ class ChatViewModel(
         send = { live, shown, prompt -> startTurn(live, shown, emptyList(), fromComposer = false, prompt = prompt) },
     )
 
+    private val processes = ChatProcesses(session, backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state)
+
     private val offline = ChatOffline(
         backend, CoroutineScope(viewModelScope.coroutineContext + dispatcher), _state, storedSessionId ?: ChatStore.NEW_CHAT,
         deliver = { text -> sendText(text) },
@@ -205,10 +207,14 @@ class ChatViewModel(
 
     init {
         storedSessionId?.let(backend::takeDraft)?.let { draft -> _state.update { it.copy(input = draft) } }
-        _state.update { it.copy(offlineSendMinutes = backend.settings.value?.offlineSendMinutes ?: it.offlineSendMinutes) }
-        if (sharing) startOffline()
+        if (sharing) {
+            _state.update { it.copy(offlineSendMinutes = backend.settings.value?.offlineSendMinutes ?: it.offlineSendMinutes) }
+            startOffline()
+        }
         launch { backend.hermes.collect { h -> _state.update { it.copy(gatewayStatus = h.gatewayStatus()) } } }
         launch { backend.events.collect(sync::onEvent) }
+        launch { backend.events.collect(processes::onEvent) }
+        if (sharing) processes.start()
         launch { backend.serverRequests.collect(sync::onRequest) }
         launch { backend.connection.collect(::onConnection) }
         // A card that settled (or left the transcript) has nothing in flight any more.
@@ -293,6 +299,13 @@ class ChatViewModel(
                 .collect { ready -> if (ready) offline.flush() }
         }
     }
+
+    /** The status line's "2 running" was tapped. */
+    fun openProcesses() = processes.openSheet()
+    fun closeProcesses() = processes.closeSheet()
+
+    /** Stop on one background command in the sheet. */
+    fun stopProcess(id: String) = processes.stop(id)
 
     /** Cancel on a message that waits for the connection: it goes back to the composer. */
     fun cancelOffline(id: String) = offline.cancel(id)

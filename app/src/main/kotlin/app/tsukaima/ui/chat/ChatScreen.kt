@@ -5,6 +5,8 @@ import app.tsukaima.ui.chat.components.LatestButton
 import app.tsukaima.ui.chat.components.StepsLine
 import app.tsukaima.ui.chat.components.TimeMark
 import app.tsukaima.ui.chat.components.OfflineBar
+import app.tsukaima.ui.chat.components.ProcessChip
+import app.tsukaima.ui.chat.components.ProcessSheet
 import app.tsukaima.domain.chat.TranscriptRows
 import app.tsukaima.domain.chat.TranscriptRow
 import java.time.ZoneId
@@ -171,6 +173,9 @@ class ChatActions(
     val onToggleReasoning: (String) -> Unit = {},
     val onToggleSteps: (String) -> Unit = {},
     val onCancelOffline: (String) -> Unit = {},
+    val onProcesses: () -> Unit = {},
+    val onProcessesClose: () -> Unit = {},
+    val onProcessStop: (String) -> Unit = {},
     val onSelectText: (String?) -> Unit = {},
     val onToolOpened: () -> Unit = {},
     val onCopyMessage: (id: String, reasoning: Boolean) -> Unit = { _, _ -> },
@@ -305,6 +310,9 @@ fun ChatScreen(
             onToggleReasoning = vm::toggleReasoning,
             onToggleSteps = vm::toggleSteps,
             onCancelOffline = vm::cancelOffline,
+            onProcesses = vm::openProcesses,
+            onProcessesClose = vm::closeProcesses,
+            onProcessStop = vm::stopProcess,
             onSelectText = vm::selectText,
             onToolOpened = vm::loadToolOutputs,
             onCopyMessage = { id, reasoning ->
@@ -413,6 +421,9 @@ private fun ChatColumn(
         )
         // The user's turn: the status line is the reasoning picker. Any other state is the plain line, and closes it.
         var pickingReasoning by rememberSaveable { mutableStateOf(false) }
+        // Commands the agent left running: the chip takes the context meter's place on the line.
+        val chip: (@Composable () -> Unit)? =
+            if (state.runningProcesses > 0) ({ ProcessChip(state.runningProcesses, actions.onProcesses) }) else null
         if (state.offline) {
             // No Hermes: the line says so, and how old the transcript on screen is when it is the phone's copy.
             OfflineBar(savedAt = state.savedAt, onClick = onStatus)
@@ -423,9 +434,10 @@ private fun ChatColumn(
                 onToggle = { pickingReasoning = !pickingReasoning },
                 onClick = onStatus,
                 meter = state.chat.usage?.shortMeter,
+                trailing = chip,
             )
         } else {
-            StatusLine(state.status, onClick = onStatus, meter = state.chat.usage?.meter)
+            StatusLine(state.status, onClick = onStatus, meter = state.chat.usage?.meter, trailing = chip)
         }
         ReasoningPanel(
             open = pickingReasoning && state.reasoningPickable,
@@ -720,6 +732,7 @@ private fun ChatSheets(state: ChatUiState, actions: ChatActions, overflow: List<
     val messageMenu = messageItems(state, actions)
     MenuSheet(messageMenu.isNotEmpty(), { actions.onMessageMenu(null) }, messageMenu)
     state.chat.items.firstOrNull { it.id == state.selecting }?.let { SelectTextView(it, onClose = { actions.onSelectText(null) }) }
+    if (state.processSheet) ProcessSheet(state.processes, canAct = !state.offline, onDismiss = actions.onProcessesClose, onStop = actions.onProcessStop)
     state.subagent?.let { watch ->
         (state.chat.items.firstOrNull { it.id == watch.id } as? ChatItem.Subagent)?.let { item ->
             SubagentView(item, watch, canAct = !state.offline, onClose = actions.onSubagentClose, onStop = actions.onSubagentStop, onSteer = actions.onSubagentSteer)

@@ -3,7 +3,7 @@
 Native Android client (Kotlin + Jetpack Compose) for a self-hosted [Hermes Agent](https://github.com/NousResearch/hermes-agent).
 Chat with your agent, browse sessions, manage cron jobs, and get actionable notifications from your phone.
 
-Version **0.13.0** (versionCode 31). Changes per release: [`CHANGELOG.md`](CHANGELOG.md).
+Version **0.14.0** (versionCode 32). Changes per release: [`CHANGELOG.md`](CHANGELOG.md).
 
 Runs on Android 10+ phones and tablets with a 64-bit ARM processor (arm64-v8a only: the live voice engine’s native
 WebRTC library would add 7–25 MB per extra ABI, and every Android 10+ phone is 64-bit ARM). The APK is about 18 MB.
@@ -18,6 +18,10 @@ WebRTC library would add 7–25 MB per extra ABI, and every Android 10+ phone is
 - A transcript made for reading: reasoning as a margin note ("Thought for 12s", two lines until tapped), earlier
   turns' tool calls folded to one line ("6 steps · 1 failed"), time marks between messages, how long each tool
   ran, and a **Latest** button when you have scrolled up
+- **Works without a connection**: chats open from a copy kept on the phone, drafts are kept per chat, and a message
+  written offline is sent when Hermes is back (within a wait you set, 10 minutes by default; after that it is a draft)
+- **Background commands**: "2 running" in the status line lists what the agent left running, with live output and
+  Stop per command
 - **Retry** a failed send from its bubble; long-press a message to **copy** its text or reasoning
 - **Edit** a sent message or **Regenerate** a reply (long-press): Hermes rewinds the chat to that point and runs
   the turn again

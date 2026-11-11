@@ -3,6 +3,45 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.14.0 — 2026-11-11 (versionCode 32)
+
+Not checked on a phone.
+
+### Added
+- **The chat opens without Hermes.** The phone keeps a copy of each chat you have opened and of the chat list.
+  With no connection, the drawer lists your chats and a chat shows its copy under a bar that reads "Offline · saved
+  copy from 14:02". Messages, reasoning and finished tool rows are kept; approval cards, notices and the task list
+  are not. The copy is replaced by Hermes' history as soon as the connection is back. Signing out deletes every
+  copy.
+- **Write while offline.** The composer stays usable without a connection. A message you send waits under the chat
+  ("Sends when you are back online", with Cancel) and goes out by itself when Hermes is reachable again. If that
+  takes longer than 10 minutes the message stops waiting and returns to the composer as a draft, with a notice.
+  Settings › Offline sets the wait: Never, 1, 5, 10 or 30 minutes, or 1 hour. Never keeps every offline message as
+  a draft. Text only: attachments and voice need a connection. A message waits only while its chat is open or the
+  app is alive; one whose wait ran out while the app was closed is a draft when you open the chat.
+- **Drafts are kept per chat.** What you typed is still in the composer after you switch chats, or after Android
+  closes the app.
+- **Commands the agent left running.** While background commands run, the status line shows "2 running" in place of
+  the context meter. Tap it for the list: each command with its running time and last output line, Output for its
+  live output, and Stop for that command alone. A command that ended lately stays listed ("Finished", "Exit 1",
+  "Stopped").
+- **Code blocks**: Wrap switches long lines between wrapping and sideways scrolling, per block. A block of 16 lines
+  or more has a second Copy at its end.
+- Problem reports include a "Background connection" section: when the background service started, when Android's
+  time limit or a kill ended it, and when the app process began. It holds no message text.
+
+### Changed
+- The notification for a reply that finished in the background names the background work that caused it
+  ("Background Process Finished: npm run build") when Hermes reported one. Before, it always read "Hermes finished
+  the task".
+- With no connection the status line is the Offline bar; before, it read "Can't reach Hermes" and the composer was
+  disabled with "Hermes is unreachable".
+
+### Not done
+- Recovery after Android ends the background connection (its time limit on Android 15, or a kill). The app still
+  goes quiet until you open it. The new report section is there to find out when and why that happens on a real
+  phone before the behaviour is changed.
+
 ## 0.13.0 — 2026-11-11 (versionCode 31)
 
 Not checked on a phone.

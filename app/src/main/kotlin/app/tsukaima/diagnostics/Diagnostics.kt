@@ -133,6 +133,7 @@ object Diagnostics {
         settings = settings,
         device = DeviceInfo.current(versionName, versionCode),
         crash = lastCrash(ctx),
+        background = BackgroundLog.read(ctx),
         pid = Process.myPid(),
         logcat = ::runLogcat,
         clock = System::currentTimeMillis,
@@ -144,6 +145,7 @@ object Diagnostics {
         device: DeviceInfo,
         crash: CrashRecord?,
         pid: Int,
+        background: String = "",
         logcat: (Int) -> String,
         clock: () -> Long,
     ): String = buildString {
@@ -168,6 +170,9 @@ object Diagnostics {
             appendLine()
             appendLine(crash.stack.trimEnd())
         }
+        appendLine()
+        appendLine("== Background connection (newest last) ==")
+        appendLine(background.ifBlank { "Nothing recorded" })
         appendLine()
         appendLine("== Logcat (this process, last $LOGCAT_LINES lines) ==")
         val log = try {

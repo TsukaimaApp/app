@@ -140,6 +140,18 @@ class GatewaySession(private val transport: RpcTransport, private val profile: (
         (rpc("subagent.steer", JsonObject(subagentParams(sessionId, subagentId) + ("text" to JsonPrimitive(text))))["status"] as? JsonPrimitive)
             ?.takeIf { it !is JsonNull }?.content
 
+    /** The background processes live session [sessionId] owns (`process.list`), running and recently exited. */
+    suspend fun processList(sessionId: String): List<ProcessEntry> =
+        decode<ProcessList>("process.list", rpc("process.list", buildJsonObject { put("session_id", sessionId) })).processes
+
+    /**
+     * Stops one background process (`process.kill`); returns its `status`: `killed`, `already_exited`, `not_found`
+     * or `error`. A process the session does not own is an error 4044.
+     */
+    suspend fun processKill(sessionId: String, processId: String): String? =
+        (rpc("process.kill", buildJsonObject { put("session_id", sessionId); put("process_id", processId) })["status"] as? JsonPrimitive)
+            ?.takeIf { it !is JsonNull }?.content
+
     private fun subagentParams(sessionId: String, subagentId: String) = buildJsonObject {
         put("session_id", sessionId)
         put("subagent_id", subagentId)

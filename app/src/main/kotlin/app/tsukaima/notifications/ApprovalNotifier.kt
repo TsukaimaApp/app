@@ -208,11 +208,15 @@ object ApprovalNotifier {
         )
     }
 
-    fun forTaskDone(title: String?, sessionId: String = ""): NotificationSpec = NotificationSpec(
+    /**
+     * A reply finished while the app was in the background. [finished] is the background work Hermes reported done
+     * just before ("Background Process Finished: npm run build"): the text then names it.
+     */
+    fun forTaskDone(title: String?, sessionId: String = "", finished: String? = null): NotificationSpec = NotificationSpec(
         Channels.AGENT,
         taskId(sessionId),
         title?.takeIf { it.isNotBlank() } ?: TASK_DONE,
-        TASK_DONE,
+        finished?.let { cap(CommandText.reveal(it).text, FINISHED_MAX) }?.takeIf { it.isNotBlank() } ?: TASK_DONE,
     )
 
     /** Only for [AgentStatus.Stopped] and [AgentStatus.Offline]; null for any other state. */
@@ -229,6 +233,9 @@ object ApprovalNotifier {
         NotificationSpec(Channels.SERVICE, SERVICE_ID, "Tsukaima", "Listening for Hermes", ongoing = true)
 
     private const val TASK_DONE = "Hermes finished the task"
+
+    /** A finished-work line is cut to this many characters in a notification. */
+    private const val FINISHED_MAX = 120
 
     private fun safe(raw: String): String = cap(CommandText.reveal(raw).text, MAX_PAIRING_FIELD)
 

@@ -288,9 +288,10 @@ class AppContainer(context: Context) {
     /** Composer text waiting for a chat that is about to open, by stored session id (a branch made to edit a message). */
     val drafts = java.util.concurrent.ConcurrentHashMap<String, String>()
 
-    /** Saved transcripts, drafts and offline messages (`filesDir/chats`), one folder per server and profile. */
+    /** Saved transcripts, drafts and offline messages (`filesDir/chats`), one folder per server, user and profile. */
     val chatStore: app.tsukaima.data.ChatStore = app.tsukaima.data.FileChatStore(File(appContext.filesDir, "chats")) {
-        settings.value?.let { "${it.serverUrl}|${it.profile}" }.orEmpty()
+        // Signed out (or not set up yet): no scope, so nothing is read or written.
+        settings.value?.takeIf { it.onboarded && it.serverUrl.isNotBlank() }?.let { "${it.serverUrl}|${it.username}|${it.profile}" }
     }
 
     /** Cached copies of shared streams (`cacheDir/shared`), pruned at app start and on every share. */

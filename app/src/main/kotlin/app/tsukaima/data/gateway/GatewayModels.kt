@@ -33,6 +33,25 @@ data class TranscriptMessage(
             ?: (reasoningContent as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
 }
 
+/**
+ * One row of `process.list`: a command the agent started in the background (`terminal` with `background: true`).
+ * [id] is the process id `process.kill` takes (`proc_…`; the wire calls it `session_id`). [status] is `running` or
+ * `exited`; an exited process stays listed for a while with its [exitCode]. [outputTail] is the end of its output.
+ */
+@Serializable
+data class ProcessEntry(
+    @SerialName("session_id") val id: String,
+    val command: String = "",
+    val status: String = "running",
+    @SerialName("uptime_seconds") val uptimeSeconds: Long? = null,
+    @SerialName("output_tail") val outputTail: String? = null,
+    @SerialName("exit_code") val exitCode: Int? = null,
+    @SerialName("completion_reason") val completionReason: String? = null,
+)
+
+@Serializable
+data class ProcessList(val processes: List<ProcessEntry> = emptyList())
+
 /** `subagent.tail`: the end of a child's live transcript; [truncated] when older lines were cut off. */
 @Serializable
 data class SubagentTail(

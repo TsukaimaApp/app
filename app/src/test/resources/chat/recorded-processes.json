@@ -1,0 +1,415 @@
+{
+ "note": "Recorded 2026-11-11 on the local test Hermes v0.23.1: two background terminal calls (a tick loop with notify_on_complete, and `sleep 300`), process.list snapshots, process.kill, and the events up to the turn the finished loop started by itself.",
+ "live": "0e9ab9b8",
+ "snaps": {
+  "submit1": {
+   "status": "streaming",
+   "user_row_id": 359
+  },
+  "list1": {
+   "processes": [
+    {
+     "session_id": "proc_204faf6518cc",
+     "command": "for i in 1 2 3 4 5 6 7 8; do echo tick $i; sleep 4; done",
+     "cwd": "/home/user",
+     "pid": 2276333,
+     "owner_task_id": "20261111_151157_6257ac",
+     "started_at": "2026-11-11T15:12:19",
+     "uptime_seconds": 3,
+     "status": "running",
+     "output_preview": "tick 1\n",
+     "notify_on_complete": true,
+     "output_tail": "tick 1\n"
+    },
+    {
+     "session_id": "proc_561857b3f0c1",
+     "command": "sleep 300",
+     "cwd": "/home/user",
+     "pid": 2276353,
+     "owner_task_id": "20261111_151157_6257ac",
+     "started_at": "2026-11-11T15:12:19",
+     "uptime_seconds": 3,
+     "status": "running",
+     "output_preview": "",
+     "output_tail": ""
+    }
+   ]
+  },
+  "list2": {
+   "processes": [
+    {
+     "session_id": "proc_204faf6518cc",
+     "command": "for i in 1 2 3 4 5 6 7 8; do echo tick $i; sleep 4; done",
+     "cwd": "/home/user",
+     "pid": 2276333,
+     "owner_task_id": "20261111_151157_6257ac",
+     "started_at": "2026-11-11T15:12:19",
+     "uptime_seconds": 11,
+     "status": "running",
+     "output_preview": "tick 1\ntick 2\ntick 3\n",
+     "notify_on_complete": true,
+     "output_tail": "tick 1\ntick 2\ntick 3\n"
+    },
+    {
+     "session_id": "proc_561857b3f0c1",
+     "command": "sleep 300",
+     "cwd": "/home/user",
+     "pid": 2276353,
+     "owner_task_id": "20261111_151157_6257ac",
+     "started_at": "2026-11-11T15:12:19",
+     "uptime_seconds": 11,
+     "status": "running",
+     "output_preview": "",
+     "output_tail": ""
+    }
+   ]
+  },
+  "kill": {
+   "status": "killed",
+   "session_id": "proc_561857b3f0c1",
+   "completion_reason": "killed",
+   "termination_source": "process.kill",
+   "output": ""
+  },
+  "kill_again": {
+   "status": "already_exited",
+   "command": "sleep 300",
+   "exit_code": -15,
+   "completion_reason": "killed",
+   "termination_source": "process.kill",
+   "output": ""
+  },
+  "kill_unknown": {
+   "__error__": {
+    "code": 4044,
+    "message": "no such process: proc_nope"
+   }
+  },
+  "list3": {
+   "processes": [
+    {
+     "session_id": "proc_561857b3f0c1",
+     "command": "sleep 300",
+     "cwd": "/home/user",
+     "pid": 2276353,
+     "owner_task_id": "20261111_151157_6257ac",
+     "started_at": "2026-11-11T15:12:19",
+     "uptime_seconds": 14,
+     "status": "exited",
+     "output_preview": "",
+     "exit_code": -15,
+     "exited_at": 1794406350.78101,
+     "completion_reason": "killed",
+     "output_tail": ""
+    },
+    {
+     "session_id": "proc_204faf6518cc",
+     "command": "for i in 1 2 3 4 5 6 7 8; do echo tick $i; sleep 4; done",
+     "cwd": "/home/user",
+     "pid": 2276333,
+     "owner_task_id": "20261111_151157_6257ac",
+     "started_at": "2026-11-11T15:12:19",
+     "uptime_seconds": 14,
+     "status": "running",
+     "output_preview": "tick 1\ntick 2\ntick 3\ntick 4\n",
+     "notify_on_complete": true,
+     "output_tail": "tick 1\ntick 2\ntick 3\ntick 4\n"
+    }
+   ]
+  },
+  "list4": {
+   "processes": [
+    {
+     "session_id": "proc_561857b3f0c1",
+     "command": "sleep 300",
+     "cwd": "/home/user",
+     "pid": 2276353,
+     "owner_task_id": "20261111_151157_6257ac",
+     "started_at": "2026-11-11T15:12:19",
+     "uptime_seconds": 38,
+     "status": "exited",
+     "output_preview": "",
+     "exit_code": -15,
+     "exited_at": 1794406350.78101,
+     "completion_reason": "killed",
+     "output_tail": ""
+    },
+    {
+     "session_id": "proc_204faf6518cc",
+     "command": "for i in 1 2 3 4 5 6 7 8; do echo tick $i; sleep 4; done",
+     "cwd": "/home/user",
+     "pid": 2276333,
+     "owner_task_id": "20261111_151157_6257ac",
+     "started_at": "2026-11-11T15:12:19",
+     "uptime_seconds": 38,
+     "status": "exited",
+     "output_preview": "tick 1\ntick 2\ntick 3\ntick 4\ntick 5\ntick 6\ntick 7\ntick 8\n",
+     "notify_on_complete": true,
+     "exit_code": 0,
+     "exited_at": 1794406371.3886063,
+     "completion_reason": "exited",
+     "output_tail": "tick 1\ntick 2\ntick 3\ntick 4\ntick 5\ntick 6\ntick 7\ntick 8\n"
+    }
+   ]
+  }
+ },
+ "events": [
+  {
+   "type": "message.start",
+   "session_id": "0e9ab9b8",
+   "seq": 2,
+   "payload": {
+    "turn_id": "77a2e7cfe8aa4ff29cbd23f6549a9a68"
+   }
+  },
+  {
+   "type": "tool.start",
+   "session_id": "0e9ab9b8",
+   "seq": 9,
+   "payload": {
+    "tool_id": "call_97b7fd835ce14d5c9c9a4d97",
+    "name": "terminal",
+    "context": "for i in 1 2 3 4 5 6 7 8 + 3 commands",
+    "args": {
+     "background": true,
+     "command": "for i in 1 2 3 4 5 6 7 8; do echo tick $i; sleep 4; done",
+     "notify": true
+    }
+   }
+  },
+  {
+   "type": "tool.complete",
+   "session_id": "0e9ab9b8",
+   "seq": 10,
+   "payload": {
+    "tool_id": "call_97b7fd835ce14d5c9c9a4d97",
+    "name": "terminal",
+    "args": {
+     "background": true,
+     "command": "for i in 1 2 3 4 5 6 7 8; do echo tick $i; sleep 4; done",
+     "notify": true
+    },
+    "duration_s": 0.20786714553833008,
+    "result": {
+     "output": "Background process started",
+     "session_id": "proc_204faf6518cc",
+     "pid": 2276333,
+     "exit_code": 0,
+     "error": null,
+     "notify_on_complete": true
+    }
+   }
+  },
+  {
+   "type": "tool.start",
+   "session_id": "0e9ab9b8",
+   "seq": 11,
+   "payload": {
+    "tool_id": "call_1f5f7e92990a4442a491348b",
+    "name": "terminal",
+    "context": "sleep 300",
+    "args": {
+     "background": true,
+     "command": "sleep 300"
+    }
+   }
+  },
+  {
+   "type": "agent.terminal.output",
+   "session_id": "0e9ab9b8",
+   "seq": 12,
+   "payload": {
+    "process_id": "proc_204faf6518cc",
+    "chunk": "tick 1\n"
+   }
+  },
+  {
+   "type": "tool.complete",
+   "session_id": "0e9ab9b8",
+   "seq": 13,
+   "payload": {
+    "tool_id": "call_1f5f7e92990a4442a491348b",
+    "name": "terminal",
+    "args": {
+     "background": true,
+     "command": "sleep 300"
+    },
+    "duration_s": 0.13449835777282715,
+    "result": {
+     "output": "Background process started",
+     "session_id": "proc_561857b3f0c1",
+     "pid": 2276353,
+     "exit_code": 0,
+     "error": null,
+     "hint": "background=true without notify_on_complete=true means this process runs SILENTLY — you will not be told when it exits. If this is a bounded task (test suite, build, CI poller, deploy, anything with a defined end), you almost certainly wanted notify_on_complete=true so the system pings you on exit. Re-launch with notify_on_complete=true, or call process(action='poll') / process(action='wait') yourself to learn the outcome. Only ignore this hint for genuine long-lived processes that never exit (servers, watchers, daemons)."
+    }
+   }
+  },
+  {
+   "type": "message.complete",
+   "session_id": "0e9ab9b8",
+   "seq": 19,
+   "payload": {
+    "text": "started",
+    "usage": {
+     "model": "deepseek-v4.1-flash-1017",
+     "input": 14747,
+     "output": 150,
+     "reasoning": 2,
+     "prompt": 30363,
+     "completion": 150,
+     "total": 30513,
+     "calls": 2,
+     "context_used": 15374,
+     "context_max": 1000000,
+     "context_percent": 2,
+     "context_source": "provider_usage",
+     "context_estimated": false,
+     "compressions": 0,
+     "cache_hit_pct": 51,
+     "avg_latency_s": 10.9,
+     "avg_tps": 6.9,
+     "active_subagents": 0
+    },
+    "status": "complete",
+    "persisted_turn": {
+     "row_ids": [
+      359,
+      360,
+      361,
+      362,
+      363
+     ],
+     "complete": true,
+     "user_row_id": 359,
+     "user_row_ids": [
+      359
+     ],
+     "final_assistant_row_id": 363
+    }
+   }
+  },
+  {
+   "type": "agent.terminal.output",
+   "session_id": "0e9ab9b8",
+   "seq": 21,
+   "payload": {
+    "process_id": "proc_204faf6518cc",
+    "chunk": "tick 2\n"
+   }
+  },
+  {
+   "type": "agent.terminal.output",
+   "session_id": "0e9ab9b8",
+   "seq": 22,
+   "payload": {
+    "process_id": "proc_204faf6518cc",
+    "chunk": "tick 3\n"
+   }
+  },
+  {
+   "type": "agent.terminal.output",
+   "session_id": "0e9ab9b8",
+   "seq": 23,
+   "payload": {
+    "process_id": "proc_204faf6518cc",
+    "chunk": "tick 4\n"
+   }
+  },
+  {
+   "type": "agent.terminal.output",
+   "session_id": "0e9ab9b8",
+   "seq": 24,
+   "payload": {
+    "process_id": "proc_204faf6518cc",
+    "chunk": "tick 5\n"
+   }
+  },
+  {
+   "type": "agent.terminal.output",
+   "session_id": "0e9ab9b8",
+   "seq": 25,
+   "payload": {
+    "process_id": "proc_204faf6518cc",
+    "chunk": "tick 6\n"
+   }
+  },
+  {
+   "type": "agent.terminal.output",
+   "session_id": "0e9ab9b8",
+   "seq": 26,
+   "payload": {
+    "process_id": "proc_204faf6518cc",
+    "chunk": "tick 7\n"
+   }
+  },
+  {
+   "type": "agent.terminal.output",
+   "session_id": "0e9ab9b8",
+   "seq": 27,
+   "payload": {
+    "process_id": "proc_204faf6518cc",
+    "chunk": "tick 8\n"
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "0e9ab9b8",
+   "seq": 28,
+   "payload": {
+    "kind": "process",
+    "text": "Background Process Finished: for i in 1 2 3 4 5 6 7 8; do echo tick $i; sleep 4; done"
+   }
+  },
+  {
+   "type": "message.start",
+   "session_id": "0e9ab9b8",
+   "seq": 29,
+   "payload": {
+    "turn_id": "010b6c641f6946ab91e5f9d910147faa"
+   }
+  },
+  {
+   "type": "message.complete",
+   "session_id": "0e9ab9b8",
+   "seq": 62,
+   "payload": {
+    "text": "Tick loop finished (exit 0, all 8 ticks). `sleep 300` is still running silently — no notification expected for it.",
+    "usage": {
+     "model": "deepseek-v4.1-flash-1017",
+     "input": 15380,
+     "output": 234,
+     "reasoning": 56,
+     "prompt": 45844,
+     "completion": 234,
+     "total": 46078,
+     "calls": 3,
+     "context_used": 15481,
+     "context_max": 1000000,
+     "context_percent": 2,
+     "context_source": "provider_usage",
+     "context_estimated": false,
+     "compressions": 0,
+     "cache_hit_pct": 66,
+     "avg_latency_s": 7.8,
+     "avg_tps": 10.0,
+     "active_subagents": 0
+    },
+    "status": "complete",
+    "persisted_turn": {
+     "row_ids": [
+      364,
+      365
+     ],
+     "complete": true,
+     "user_row_id": 364,
+     "user_row_ids": [
+      364
+     ],
+     "final_assistant_row_id": 365
+    },
+    "reasoning": "The tick loop finished. The sleep 300 is presumably still running. Just acknowledge briefly.\n\nShould I verify? The notification says exit 0 with all 8 ticks. Brief reply is fine. Maybe check second process still running — not necessary. Keep it short."
+   }
+  }
+ ]
+}

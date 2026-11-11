@@ -18,6 +18,7 @@ class TsukaimaApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Diagnostics.install(this) // first: a crash anywhere below is recorded for the next launch
+        app.tsukaima.diagnostics.BackgroundLog.note(this, "process started")
         container = AppContainer(this)
         Channels.register(this)
         container.notifications.start()

@@ -616,3 +616,31 @@ most one per 500 ms per call (contract only; not recorded). `reasoning.available
 response whose provider did not stream it, cut to 500 characters; not sent when `reasoning.delta` carried it
 (0.22 sent the answer text here). `session.reclaimed {session_id, stored_session_id, reason}`: a broadcast when the
 server drops a live session (`idle_timeout`, `lru_evict`, `ws_orphan_reap`).
+
+### v0.14.0 — background processes (verified live against v0.23.1, 2026-11-11)
+
+Recording: `app/src/test/resources/chat/recorded-processes.json` (two `terminal` calls with `background: true`, list
+snapshots, a kill, and the turn the finished loop started).
+
+**List.** `process.list {session_id*}` → `{processes: [...]}`: the background processes the live session owns. A
+row: `session_id` (the **process** id, `proc_…`; not a chat session), `command`, `cwd`, `pid`, `status`
+(`running` | `exited`), `uptime_seconds`, `started_at` (local time, no zone: the app uses `uptime_seconds`),
+`output_preview` (last 200 chars), `output_tail`, `notify_on_complete` (only when set), and once exited `exit_code`,
+`exited_at`, `completion_reason` (`exited` | `killed`). An exited process stays listed for a while. No event says a
+process started or ended, so the app reads the list when a session is bound, after each turn, on the lines below,
+and every 3 s while its sheet is open.
+
+**Kill.** `process.kill {session_id*, process_id*}` → `{status, session_id?, command?, exit_code?, completion_reason?,
+termination_source?, output?}`. `status`: `killed`; `already_exited` (seen with `exit_code: -15` after a kill);
+an id the session does not own → error `4044 "no such process: …"`. It stops that process only.
+
+**Output.** Event `agent.terminal.output {process_id, chunk}` on the owning live session, one per write, also after
+the turn has ended (it has a `seq` like any session event). `terminal.close {process_id}` is declared but was not
+sent when a process exited or was killed.
+
+**Finish.** With `notify_on_complete: true` the end of a process sends
+`status.update {kind:"process", text:"Background Process Finished: <command>"}` and then Hermes starts a turn by
+itself (`message.start` … `message.complete`), in which the agent reports the result. Without it the process ends
+silently: only `process.list` shows it. The other `process` lines are "Subagent Task Completed: …" (same pattern)
+and "Resuming interrupted turn…" (no finished work). The app keeps the last such line per live session and uses it
+as the text of that turn's "finished" notification.

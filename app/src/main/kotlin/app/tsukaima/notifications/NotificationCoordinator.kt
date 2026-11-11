@@ -97,6 +97,9 @@ class NotificationCoordinator(
     fun onBackground(replay: List<Frame.ServerRequest>): List<NotificationSpec> =
         replay.mapNotNull { onServerRequest(it, foreground = false) }
 
+    /** The background work Hermes last reported finished, by live session id, until that session's next reply. */
+    private val backgroundDone = bounded<String>(32)
+
     /** The posted approval for [srqId], to re-post when an answer from its button was not sent. */
     @Synchronized
     fun approvalSpec(srqId: String): NotificationSpec? = postedApprovals[srqId]
@@ -125,10 +128,20 @@ class NotificationCoordinator(
             ev.payload.str("session_id")?.takeIf { ev.sessionId.isNotEmpty() }?.let { storedByLive[ev.sessionId] = it }
             emptyList()
         }
-        "message.complete" -> if (foreground || ev.payload.str("status") == "error" || !prefs().replies) {
+        // "Background Process Finished: npm run build", "Subagent Task Completed: …": Hermes then starts a turn by
+        // itself, and that turn's notification says what finished instead of the plain "finished the task".
+        "status.update" -> {
+            val text = ev.payload.str("text")
+            if (ev.payload.str("kind") == "process" && text != null && !text.startsWith(RESUMING)) backgroundDone[ev.sessionId] = text
             emptyList()
-        } else {
-            listOf(NotificationCommand.Post(ApprovalNotifier.forTaskDone(titles[ev.sessionId], ev.sessionId)))
+        }
+        "message.complete" -> {
+            val done = backgroundDone.remove(ev.sessionId)
+            if (foreground || ev.payload.str("status") == "error" || !prefs().replies) {
+                emptyList()
+            } else {
+                listOf(NotificationCommand.Post(ApprovalNotifier.forTaskDone(titles[ev.sessionId], ev.sessionId, done)))
+            }
         }
         "connection.request" -> listOfNotNull(onConnectionRequest(ev, foreground, visibleSession))
         "connection.update" -> if ((ev.payload["settled"] as? JsonPrimitive)?.booleanOrNull == true) {
@@ -226,6 +239,9 @@ class NotificationCoordinator(
         (this[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
 
     private companion object {
+        /** The one `process` status line that reports no finished work (`session_auto_continue.py`). */
+        const val RESUMING = "Resuming"
+
         /** `last_status` values of a failed run (Hermes `cron/jobs.py` `_record_run_outcome`; `ok` is success). */
         val FAILURE = setOf("error", "failed", "failure", "delivery_failed", "blocked_config", "timeout")
 
