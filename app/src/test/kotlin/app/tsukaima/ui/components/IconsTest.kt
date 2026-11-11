@@ -32,6 +32,7 @@ class IconsTest {
         "push_pin", // v0.11.0: the drawer's Pin / Unpin
         "arrow_downward", "auto_awesome", "checklist", // v0.13.0: Latest button, reasoning block, folded steps
         "notifications", "palette", "vertical_split", // v0.14.1: the Settings list and its two-column switch
+        "search", "share", "photo_camera", "location_on", "lock", "pause", // v0.15.0: chat search, export, attach sheet, app lock, audio card
     )
 
     @Test

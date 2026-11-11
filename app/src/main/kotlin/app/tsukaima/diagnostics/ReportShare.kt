@@ -37,3 +37,26 @@ internal fun writeReport(cacheDir: File, text: String, at: Long): File {
     dir.listFiles()?.forEach { it.delete() }
     return File(dir, "tsukaima-report-$at.txt").apply { writeText(text) }
 }
+
+/**
+ * Shares a chat exported as Markdown: writes [text] to `cache/exports/<name>` (off the main thread; earlier exports
+ * are deleted) and opens the share sheet with it as a `text/markdown` attachment.
+ */
+suspend fun shareExport(ctx: Context, name: String, text: String) {
+    val file = withContext(Dispatchers.IO) {
+        val dir = File(ctx.cacheDir, "exports").apply { mkdirs() }
+        dir.listFiles()?.forEach { it.delete() }
+        File(dir, name).apply { writeText(text) }
+    }
+    val uri = FileProvider.getUriForFile(ctx, fileProviderAuthority(ctx), file)
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = "text/markdown"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        putExtra(Intent.EXTRA_SUBJECT, name.removeSuffix(".md"))
+        clipData = ClipData.newRawUri(file.name, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    val chooser = Intent.createChooser(send, "Export chat")
+    if (ctx !is Activity) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    ctx.startActivity(chooser)
+}

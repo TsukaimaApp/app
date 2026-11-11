@@ -1,5 +1,13 @@
 package app.tsukaima.ui.chat
 
+import androidx.compose.runtime.mutableIntStateOf
+import app.tsukaima.ui.chat.components.SearchMark
+import app.tsukaima.ui.chat.components.LocalChatSearch
+import app.tsukaima.ui.chat.components.ChatSearchBar
+import app.tsukaima.diagnostics.shareExport
+import app.tsukaima.domain.chat.ChatExport
+import app.tsukaima.domain.chat.ChatSearch
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import app.tsukaima.ui.chat.components.LatestButton
 import app.tsukaima.ui.chat.components.StepsLine
@@ -176,6 +184,8 @@ class ChatActions(
     val onProcesses: () -> Unit = {},
     val onProcessesClose: () -> Unit = {},
     val onProcessStop: (String) -> Unit = {},
+    /** "Export chat": share the conversation as a Markdown file. */
+    val onExport: () -> Unit = {},
     val onSelectText: (String?) -> Unit = {},
     val onToolOpened: () -> Unit = {},
     val onCopyMessage: (id: String, reasoning: Boolean) -> Unit = { _, _ -> },
@@ -211,6 +221,8 @@ fun ChatScreen(
     onDeleted: () -> Unit,
     visibleSession: MutableStateFlow<String?>? = null,
     onOpenSession: (String) -> Unit = {},
+    /** Open with voice mode starting (the Voice shortcut, the widget's mic): once, not again after a rotation. */
+    startVoice: Boolean = false,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     // While resumed, this chat's live session is "on screen": its approvals show here, not as notifications.
@@ -230,6 +242,17 @@ fun ChatScreen(
     val context = LocalContext.current
     val mic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) vm.openVoice() else vm.voiceDenied()
+    }
+    var voiceStarted by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(startVoice) {
+        if (startVoice && !voiceStarted) {
+            voiceStarted = true
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                vm.openVoice()
+            } else {
+                mic.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
     }
     LaunchedEffect(vm) { vm.closed.collect { onDeleted() } }
     LaunchedEffect(vm) { vm.branched.collect { onOpenSession(it) } }
@@ -313,6 +336,19 @@ fun ChatScreen(
             onProcesses = vm::openProcesses,
             onProcessesClose = vm::closeProcesses,
             onProcessStop = vm::stopProcess,
+            onExport = {
+                val chat = vm.state.value.chat
+                val text = ChatExport.markdown(chat.title, chat.items, ZoneId.systemDefault())
+                scope.launch {
+                    try {
+                        shareExport(context, ChatExport.fileName(chat.title), text)
+                    } catch (c: kotlinx.coroutines.CancellationException) {
+                        throw c
+                    } catch (_: Exception) {
+                        vm.exportFailed()
+                    }
+                }
+            },
             onSelectText = vm::selectText,
             onToolOpened = vm::loadToolOutputs,
             onCopyMessage = { id, reasoning ->
@@ -347,7 +383,8 @@ fun ChatContent(
     actions: ChatActions,
     listState: LazyListState = rememberLazyListState(),
 ) {
-    val overflow = overflowItems(state, actions)
+    val search = remember { ChatSearchState() }
+    val overflow = overflowItems(state, actions, onSearch = { search.open = true })
     val voiceOpen = state.voice != null
     val composerFocus = remember { FocusRequester() }
     var focusPending by remember { mutableStateOf(false) }
@@ -387,7 +424,7 @@ fun ChatContent(
                 },
             )
         } else {
-            ChatColumn(state, showMenu, onDrawer, onStatus, actions, listState, overflow, composerFocus)
+            ChatColumn(state, showMenu, onDrawer, onStatus, actions, listState, overflow, composerFocus, search)
         }
     }
     ChatSheets(state, actions, overflow)
@@ -403,22 +440,37 @@ private fun ChatColumn(
     listState: LazyListState,
     overflow: List<MenuItem>,
     composerFocus: FocusRequester,
+    search: ChatSearchState,
 ) {
     val colors = MaterialTheme.tsukaima
+    val found = remember(state.chat.items, search.query, search.open) { if (search.open) ChatSearch.matches(state.chat.items, search.query) else emptyList() }
     Column(
         Modifier
             .fillMaxSize()
             .background(colors.surfacePage)
             .imePadding(),
     ) {
-        ChatTopBar(
-            modelLabel = state.model ?: "Model",
-            onMenu = onDrawer,
-            showMenu = showMenu,
-            onModel = { actions.onMenu(ChatMenu.Model) },
-            onMore = { if (overflow.isNotEmpty()) actions.onMenu(ChatMenu.Overflow) },
-            moreEnabled = overflow.isNotEmpty(),
-        )
+        if (search.open) {
+            BackHandler { search.close() }
+            ChatSearchBar(
+                query = search.query,
+                onQuery = { search.query = it; search.index = 0 },
+                position = if (found.isEmpty()) 0 else search.index.coerceIn(0, found.lastIndex) + 1,
+                total = found.size,
+                onPrevious = { if (found.isNotEmpty()) search.index = (search.index.coerceIn(0, found.lastIndex) - 1 + found.size) % found.size },
+                onNext = { if (found.isNotEmpty()) search.index = (search.index.coerceIn(0, found.lastIndex) + 1) % found.size },
+                onClose = { search.close() },
+            )
+        } else {
+            ChatTopBar(
+                modelLabel = state.model ?: "Model",
+                onMenu = onDrawer,
+                showMenu = showMenu,
+                onModel = { actions.onMenu(ChatMenu.Model) },
+                onMore = { if (overflow.isNotEmpty()) actions.onMenu(ChatMenu.Overflow) },
+                moreEnabled = overflow.isNotEmpty(),
+            )
+        }
         // The user's turn: the status line is the reasoning picker. Any other state is the plain line, and closes it.
         var pickingReasoning by rememberSaveable { mutableStateOf(false) }
         // Commands the agent left running: the chip takes the context meter's place on the line.
@@ -457,7 +509,7 @@ private fun ChatColumn(
                 // A saved copy is shown at once; the skeleton is for a chat with nothing to show yet.
                 state.loading && state.chat.items.isEmpty() -> ChatSkeleton(Modifier.padding(top = 10.dp), caption = state.chat.resumeProgress)
                 state.empty -> EmptyChat(state.workspace?.let { ChatSync.displayPath(it, state.workspaces?.home) }, { actions.onMenu(ChatMenu.Workspace) })
-                else -> Transcript(state, actions, listState)
+                else -> Transcript(state, actions, listState, searchQuery = search.query.takeIf { search.open }, searchAt = found.getOrNull(search.index.coerceIn(0, maxOf(found.lastIndex, 0))))
             }
         }
         if (state.archived) ArchivedBanner(onUnarchive = actions.onUnarchive)
@@ -486,7 +538,14 @@ private fun ChatColumn(
 }
 
 @Composable
-private fun Transcript(state: ChatUiState, actions: ChatActions, listState: LazyListState) {
+private fun Transcript(
+    state: ChatUiState,
+    actions: ChatActions,
+    listState: LazyListState,
+    /** The open search's query (null: no search) and the id of the row it stands on. */
+    searchQuery: String? = null,
+    searchAt: String? = null,
+) {
     val items = state.chat.items
     val media = remember(state.mediaState, actions) {
         MediaHost(
@@ -495,7 +554,8 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
         )
     }
     val zone = remember { ZoneId.systemDefault() }
-    val rows = remember(items, state.chat.openSteps, zone) { TranscriptRows.build(items, state.chat.openSteps, zone) }
+    // A search reaches into folded steps: they are all shown while it is open.
+    val rows = remember(items, state.chat.openSteps, zone, searchQuery != null) { TranscriptRows.build(items, state.chat.openSteps, zone, unfold = searchQuery != null) }
     // Follow the bottom while the user is there; a manual scroll up stops following until they come back.
     var follow by rememberSaveable { mutableStateOf(true) }
     LaunchedEffect(listState) {
@@ -506,6 +566,14 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
     val count = rows.size + state.outbox.size
     LaunchedEffect(count, tail) {
         if (follow && count > 0) listState.scrollToItem(count) // the end spacer: bottom of the last item
+    }
+    // The search moved to another match: bring its row into view, and stop following the bottom.
+    LaunchedEffect(searchAt, searchQuery) {
+        val at = rows.indexOfFirst { it.key == searchAt }
+        if (searchQuery != null && at >= 0) {
+            follow = false
+            listState.animateScrollToItem(at)
+        }
     }
     // What was last when the reader left the bottom: anything after it is new to them (the Latest button's dot).
     var leftAt by remember { mutableStateOf(tail) }
@@ -519,7 +587,14 @@ private fun Transcript(state: ChatUiState, actions: ChatActions, listState: Lazy
         ) {
             items(rows, key = { it.key }, contentType = { if (it is TranscriptRow.Item) it.item::class else it::class }) { row ->
                 when (row) {
-                    is TranscriptRow.Item -> TranscriptItem(row.item, state, actions, media)
+                    is TranscriptRow.Item ->
+                        if (searchQuery == null) {
+                            TranscriptItem(row.item, state, actions, media)
+                        } else {
+                            CompositionLocalProvider(LocalChatSearch provides SearchMark(searchQuery, current = row.item.id == searchAt)) {
+                                TranscriptItem(row.item, state, actions, media)
+                            }
+                        }
                     is TranscriptRow.TimeMark -> TimeMark(row.at, zone)
                     is TranscriptRow.Steps -> StepsLine(row, onToggle = { actions.onToggleSteps(row.id) })
                 }
@@ -571,7 +646,9 @@ internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatAct
                 item.reasoning.takeIf { revealed == null },
                 media = media,
                 onLongPress = { actions.onMessageMenu(item.id) }.takeIf { !streaming },
-                reasoningOpen = ChatReducer.reasoningOpen(state.chat, item),
+                // A match that is only in the reasoning has to be readable: the search's row shows all of it.
+                reasoningOpen = ChatReducer.reasoningOpen(state.chat, item) ||
+                    LocalChatSearch.current?.let { it.current && ChatSearch.onlyInReasoning(item, it.query) } == true,
                 onToggleReasoning = { actions.onToggleReasoning(item.id) },
                 model = item.model,
                 thoughtFrom = item.thoughtFrom,
@@ -634,7 +711,7 @@ internal fun transcriptTailKey(items: List<ChatItem>): Pair<String, Int>? =
  * A brand-new chat with no stored id yet offers only what works without one (Stop, and Copy session ID — the live
  * id — once a live session exists); empty disables the button rather than opening a sheet that does nothing.
  */
-internal fun overflowItems(state: ChatUiState, actions: ChatActions): List<MenuItem> {
+internal fun overflowItems(state: ChatUiState, actions: ChatActions, onSearch: (() -> Unit)? = null): List<MenuItem> {
     val running = state.chat.status.running
     val stop = MenuItem("Stop", IconName.Stop, onClick = actions.onStop).takeIf { running && !state.offline }
     val copy = MenuItem("Copy session ID", IconName.ContentCopy, onClick = actions.onCopyId)
@@ -653,12 +730,18 @@ internal fun overflowItems(state: ChatUiState, actions: ChatActions): List<MenuI
     } else {
         emptyList()
     }
+    // Both work on what is on screen, so they need no connection.
+    val hasText = state.chat.items.any { it is ChatItem.UserMessage || it is ChatItem.AssistantMessage }
+    val find = onSearch?.takeIf { hasText }?.let { MenuItem("Search in chat", IconName.Search, onClick = it) }
+    val export = MenuItem("Export chat", IconName.Share, onClick = actions.onExport).takeIf { hasText }
     if (state.chat.storedSessionId == null) {
-        return listOfNotNull(stop) + sides + listOfNotNull(reasoning, compact, copy.takeIf { state.chat.liveSessionId != null })
+        return listOfNotNull(stop) + sides + listOfNotNull(reasoning, compact, find, export, copy.takeIf { state.chat.liveSessionId != null })
     }
     return listOfNotNull(stop) + sides + listOfNotNull(
         reasoning,
         compact,
+        find,
+        export,
         MenuItem("Rename", IconName.Edit) { actions.onDialog(ChatDialog.Rename) },
         if (state.archived) {
             MenuItem("Unarchive", IconName.Unarchive, onClick = actions.onUnarchive)
@@ -885,3 +968,16 @@ private fun ChatOfflineLight() =
 @Composable
 private fun ChatOfflineDark() =
     ChatPreview(true, ChatUiState(chat = previewOffline, model = "Hermes 4 · 405B"))
+
+/** The open chat's search: whether its bar is shown, what is typed, and which match it stands on. */
+class ChatSearchState {
+    var open by mutableStateOf(false)
+    var query by mutableStateOf("")
+    var index by mutableIntStateOf(0)
+
+    fun close() {
+        open = false
+        query = ""
+        index = 0
+    }
+}

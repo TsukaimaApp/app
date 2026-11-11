@@ -80,7 +80,7 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * A notification tap or button asked for a screen; only the known screens are accepted, and a chat's
+     * A notification tap or button, a launcher shortcut or the widget asked for a screen; only the known screens are accepted, and a chat's
      * session id only if it is a plausible stored id ([DeepLink.sessionId]).
      */
     private fun handleOpenScreen(intent: Intent?) {
@@ -88,7 +88,8 @@ class MainActivity : ComponentActivity() {
         val session = DeepLink.sessionId(intent.getStringExtra(DeepLink.EXTRA_SESSION_ID))
         when (screen) {
             ApprovalNotifier.SCREEN_CHAT -> (application as TsukaimaApp).container.openScreen.value = OpenScreen(screen, session)
-            ApprovalNotifier.SCREEN_SETTINGS -> (application as TsukaimaApp).container.openScreen.value = OpenScreen(screen)
+            ApprovalNotifier.SCREEN_SETTINGS, ApprovalNotifier.SCREEN_NEW_CHAT, ApprovalNotifier.SCREEN_VOICE ->
+                (application as TsukaimaApp).container.openScreen.value = OpenScreen(screen)
         }
         // Not again on recreation.
         intent.removeExtra(ApprovalNotifier.EXTRA_OPEN_SCREEN)

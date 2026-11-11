@@ -180,6 +180,8 @@ private fun LoadedShell(container: AppContainer, vm: AppViewModel, firstSettings
                     if (!alreadyOpen) navController.navigateTop(Route.Chat.create(session))
                 }
                 ApprovalNotifier.SCREEN_SETTINGS -> navController.navigate(Route.Settings.path) { launchSingleTop = true }
+                ApprovalNotifier.SCREEN_NEW_CHAT -> navController.navigateTop(Route.Chat.create())
+                ApprovalNotifier.SCREEN_VOICE -> navController.navigateTop(Route.Chat.create(voice = true))
             }
         }
     }

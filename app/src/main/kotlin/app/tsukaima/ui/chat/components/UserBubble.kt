@@ -67,7 +67,7 @@ fun UserBubble(
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                if (text.isNotBlank() || attachments.isEmpty()) Text(text = text, style = TsukaimaType.body, color = colors.ink1)
+                if (text.isNotBlank() || attachments.isEmpty()) Text(text = searchMarked(text), style = TsukaimaType.body, color = colors.ink1)
                 attachments.forEach { name ->
                     Text(name, style = TsukaimaType.caption, color = colors.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }

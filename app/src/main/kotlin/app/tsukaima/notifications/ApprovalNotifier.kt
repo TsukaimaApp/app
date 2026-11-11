@@ -50,6 +50,12 @@ object ApprovalNotifier {
     const val SCREEN_CHAT = "chat"
     const val SCREEN_SETTINGS = "settings"
 
+    /** A launcher shortcut or the widget: a new, empty chat. */
+    const val SCREEN_NEW_CHAT = "new_chat"
+
+    /** A launcher shortcut or the widget's mic: a new chat with voice mode starting. */
+    const val SCREEN_VOICE = "voice"
+
     /** Lock-screen stand-in for private notifications: no command, name or title leaks. */
     const val PUBLIC_TITLE = "Hermes needs your attention"
 

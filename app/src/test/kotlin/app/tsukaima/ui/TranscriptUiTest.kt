@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.dp
 import app.tsukaima.domain.chat.ChatItem
 import app.tsukaima.domain.chat.ChatState
@@ -136,5 +137,36 @@ class AwayUiTest : ComposeUiTest() {
         }
         compose.onNodeWithContentDescription("1 running in the background").assertHeightIsAtLeast(44.dp).performClick()
         assertEquals(1, opened)
+    }
+}
+
+/** 0.15: search inside the open chat. */
+class ChatSearchUiTest : ComposeUiTest() {
+    private val items = listOf(
+        ChatItem.UserMessage("u1", "Why does the backup fail on Sundays?", rowId = 1),
+        ChatItem.AssistantMessage("a1", "The snapshot holds the lock.", streaming = false, reasoning = null),
+        ChatItem.UserMessage("u2", "Which lock file is it?", rowId = 2),
+    )
+
+    @Test
+    fun `Search in chat turns the top bar into a search that counts and steps through matches`() {
+        setThemed {
+            ChatContent(
+                state = ChatUiState(chat = ChatState(items = items, liveSessionId = "live", storedSessionId = "s1"), isNew = false, menu = app.tsukaima.ui.chat.ChatMenu.Overflow),
+                showMenu = false, onDrawer = {}, onStatus = {}, actions = ChatActions(),
+            )
+        }
+        compose.onNodeWithText("Search in chat").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Search this chat").assertExists()
+        compose.onNode(androidx.compose.ui.test.hasSetTextAction() and androidx.compose.ui.test.hasContentDescription("Search this chat"))
+            .performTextInput("lock")
+        compose.onNodeWithText("1 of 2").assertExists()
+        compose.onNodeWithContentDescription("Next match").performClick()
+        compose.onNodeWithText("2 of 2").assertExists()
+        compose.onNodeWithContentDescription("Next match").performClick()
+        compose.onNodeWithText("1 of 2").assertExists()
+        compose.onNodeWithContentDescription("Close search").performClick()
+        compose.onNodeWithContentDescription("Search this chat").assertDoesNotExist()
     }
 }

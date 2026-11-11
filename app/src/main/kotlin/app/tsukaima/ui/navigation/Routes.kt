@@ -11,9 +11,13 @@ sealed class Route(val path: String) {
     data object Status : Route("status")
 
     /** A chat. `session` is the stored Hermes session id; absent means a new chat. */
-    data object Chat : Route("chat?$ARG_SESSION={$ARG_SESSION}") {
-        fun create(session: String? = null): String =
-            if (session == null) "chat" else "chat?$ARG_SESSION=${Uri.encode(session)}"
+    data object Chat : Route("chat?$ARG_SESSION={$ARG_SESSION}&$ARG_VOICE={$ARG_VOICE}") {
+        /** [voice]: the chat opens with voice mode starting (the Voice shortcut, the widget's mic). */
+        fun create(session: String? = null, voice: Boolean = false): String = when {
+            session != null -> "chat?$ARG_SESSION=${Uri.encode(session)}"
+            voice -> "chat?$ARG_VOICE=true"
+            else -> "chat"
+        }
     }
 
     data object Cron : Route("cron")
@@ -29,5 +33,6 @@ sealed class Route(val path: String) {
     companion object {
         const val ARG_SESSION = "session"
         const val ARG_ID = "id"
+        const val ARG_VOICE = "voice"
     }
 }

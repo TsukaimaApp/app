@@ -19,6 +19,7 @@ class TsukaimaApp : Application() {
         super.onCreate()
         Diagnostics.install(this) // first: a crash anywhere below is recorded for the next launch
         app.tsukaima.diagnostics.BackgroundLog.note(this, "process started")
+        Shortcuts.publish(this)
         container = AppContainer(this)
         Channels.register(this)
         container.notifications.start()

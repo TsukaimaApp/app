@@ -96,7 +96,7 @@ fun CodeBlock(
         }
         val body: @Composable () -> Unit = {
             Text(
-                text = code,
+                text = searchMarked(code),
                 style = TsukaimaType.mono,
                 color = colors.codeInk,
                 softWrap = wrap,

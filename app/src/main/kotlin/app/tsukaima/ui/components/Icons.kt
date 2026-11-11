@@ -40,6 +40,12 @@ import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.VerticalSplit
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.PhotoCamera
+import androidx.compose.material.icons.rounded.LocationOn
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderZip
 import androidx.compose.material.icons.rounded.Forum
@@ -200,6 +206,12 @@ enum class IconName(val symbol: String) {
     Notifications("notifications"),
     Palette("palette"),
     VerticalSplit("vertical_split"),
+    Search("search"),
+    Share("share"),
+    PhotoCamera("photo_camera"),
+    LocationOn("location_on"),
+    Lock("lock"),
+    Pause("pause"),
 }
 
 /** Pure lookup, safe from JVM unit tests (no Android context involved). */
@@ -213,6 +225,12 @@ fun iconFor(name: IconName): ImageVector = when (name) {
     IconName.Notifications -> Icons.Rounded.Notifications
     IconName.Palette -> Icons.Rounded.Palette
     IconName.VerticalSplit -> Icons.Rounded.VerticalSplit
+    IconName.Search -> Icons.Rounded.Search
+    IconName.Share -> Icons.Rounded.Share
+    IconName.PhotoCamera -> Icons.Rounded.PhotoCamera
+    IconName.LocationOn -> Icons.Rounded.LocationOn
+    IconName.Lock -> Icons.Rounded.Lock
+    IconName.Pause -> Icons.Rounded.Pause
     IconName.Add -> Icons.Rounded.Add
     IconName.ArrowUpward -> Icons.Rounded.ArrowUpward
     IconName.ArrowBack -> Icons.AutoMirrored.Rounded.ArrowBack

@@ -109,7 +109,7 @@ private fun TableCell(spans: List<MdSpan>, align: MdAlign?, header: Boolean) {
     val style = if (header) TsukaimaType.ui.copy(fontWeight = FontWeight.SemiBold) else TsukaimaType.ui
     val math = rememberMathContent(spans, style, colors.ink1)
     Text(
-        text = remember(spans, colors, math.keys) { markdownInline(spans, colors, math = math.keys) },
+        text = searchMarked(remember(spans, colors, math.keys) { markdownInline(spans, colors, math = math.keys) }),
         style = style,
         inlineContent = math,
         color = colors.ink1,

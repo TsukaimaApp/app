@@ -153,7 +153,7 @@ private fun InlineTextAt(
     val colors = MaterialTheme.tsukaima
     val math = rememberMathContent(spans, style, colors.ink1, maxWidth)
     Text(
-        text = rememberInline(spans, colors, caret, math.keys),
+        text = searchMarked(rememberInline(spans, colors, caret, math.keys)),
         style = style,
         color = colors.ink1,
         inlineContent = if (math.isEmpty()) caretContent else caretContent + math,

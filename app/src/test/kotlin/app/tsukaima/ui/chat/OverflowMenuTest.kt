@@ -45,13 +45,13 @@ class OverflowMenuTest {
     fun compactBetweenTurnsAndUnarchiveForAnArchivedChat() {
         val stored = ChatState(liveSessionId = "d4fb0dea", storedSessionId = "20261020_010916_48c967", items = turn)
         assertEquals(
-            listOf("Reasoning", "Compact context", "Rename", "Archive", "Copy session ID", "Delete session"),
+            listOf("Reasoning", "Compact context", "Export chat", "Rename", "Archive", "Copy session ID", "Delete session"),
             labels(stored),
         )
         assertTrue("not mid-turn", "Compact context" !in labels(stored.copy(status = AgentStatus.Replying)))
         assertTrue("not twice", "Compact context" !in labels(stored, compacting = true))
         // Archived: read-only, so no live-session entries, and Unarchive instead of Archive.
-        assertEquals(listOf("Rename", "Unarchive", "Copy session ID", "Delete session"), labels(stored, archived = true))
+        assertEquals(listOf("Export chat", "Rename", "Unarchive", "Copy session ID", "Delete session"), labels(stored, archived = true))
         assertEquals("Reasoning · Low", labels(stored.copy(reasoningEffort = "low")).first())
     }
 

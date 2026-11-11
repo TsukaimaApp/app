@@ -1075,6 +1075,9 @@ class ChatViewModel(
     /** The microphone permission was refused. */
     fun voiceDenied() = backend.toast("Microphone access is needed for voice mode")
 
+    /** The share sheet for an exported chat could not open. */
+    fun exportFailed() = backend.toast("Couldn’t export the chat")
+
     override fun onCleared() {
         voiceStart?.cancel()
         voice.dispose()

@@ -106,6 +106,10 @@ fun TsukaimaNavHost(
                     nullable = true
                     defaultValue = null
                 },
+                navArgument(Route.ARG_VOICE) {
+                    type = NavType.BoolType
+                    defaultValue = false
+                },
             ),
         ) { entry ->
             val session = entry.arguments?.getString(Route.ARG_SESSION)
@@ -122,6 +126,7 @@ fun TsukaimaNavHost(
                 onDeleted = { navController.navigateTop(Route.Chat.create()) },
                 visibleSession = container.visibleLiveSessionId,
                 onOpenSession = { navController.navigateTop(Route.Chat.create(it)) },
+                startVoice = entry.arguments?.getBoolean(Route.ARG_VOICE) == true,
             )
         }
         composable(Route.Cron.path) {

@@ -45,9 +45,10 @@ object TranscriptRows {
      * [items] as rows. Earlier turns fold each run of [MIN_STEPS] or more steps into a [TranscriptRow.Steps] line
      * (unfolded when its id is in [openSteps]); the current turn, everything from the last message the user sent as
      * a turn of its own, is never folded, so nothing moves while the agent works. A [TranscriptRow.TimeMark] goes
-     * above a user message that starts a new day in [zone] or follows the previous one by [GAP_MS].
+     * above a user message that starts a new day in [zone] or follows the previous one by [GAP_MS]. [unfold] shows
+     * every group's steps (search has to reach them).
      */
-    fun build(items: List<ChatItem>, openSteps: Set<String>, zone: ZoneId): List<TranscriptRow> {
+    fun build(items: List<ChatItem>, openSteps: Set<String>, zone: ZoneId, unfold: Boolean = false): List<TranscriptRow> {
         val current = items.indexOfLast { it is ChatItem.UserMessage && !it.steer && !it.queued }.let { if (it < 0) 0 else it }
         val rows = ArrayList<TranscriptRow>(items.size + 4)
         var lastAt: Long? = null
@@ -60,7 +61,7 @@ object TranscriptRows {
                 val run = items.subList(i, end)
                 if (run.size >= MIN_STEPS && run.none { it.isLive() }) {
                     val key = "steps-${run.first().id}"
-                    val open = key in openSteps
+                    val open = unfold || key in openSteps
                     rows += TranscriptRow.Steps(
                         key, run.size, run.count { it is ChatItem.ToolCall },
                         run.count { it is ChatItem.ToolCall && it.status == ToolStatus.Failed }, open,

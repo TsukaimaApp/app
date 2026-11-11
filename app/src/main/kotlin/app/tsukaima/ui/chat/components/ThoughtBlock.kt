@@ -88,7 +88,7 @@ fun ThoughtBlock(
             TsukaimaIcon(IconName.ExpandMore, contentDescription = null, size = 16.dp, tint = colors.ink3, modifier = Modifier.rotate(rotation))
         }
         when {
-            open -> Text(text.trim(), style = TsukaimaType.thought, color = colors.ink2)
+            open -> Text(searchMarked(text.trim()), style = TsukaimaType.thought, color = colors.ink2)
             live -> NewestLines(TranscriptRows.tail(text, TAIL_CHARS), FOLDED_LINES)
             else -> Text(text.trim(), style = TsukaimaType.thought, color = colors.ink2, maxLines = FOLDED_LINES, overflow = TextOverflow.Ellipsis)
         }
