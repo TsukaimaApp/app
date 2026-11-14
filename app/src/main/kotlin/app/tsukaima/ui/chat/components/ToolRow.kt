@@ -67,7 +67,8 @@ import kotlinx.serialization.json.JsonPrimitive
  * Slim expandable row for a tool call: quiet by default, output on tap. [margin] is its outer spacing (none in the
  * assist sheet). A `vision_analyze` row shows the image it looked at under the header ([ToolImage]) when [media] is
  * given. The open row's arguments and output are selectable (a long press starts a selection; the header keeps the
- * tap). [onOpened] runs when a row is open whose output the history did not carry ([ChatItem.ToolCall.outputPending]).
+ * tap). [onOpened] runs when a row is open whose output the history did not carry ([ChatItem.ToolCall.outputPending]);
+ * [onToggle] when a tap opens (true) or folds it.
  */
 @Composable
 fun ToolRow(
@@ -76,6 +77,7 @@ fun ToolRow(
     margin: PaddingValues = PaddingValues(horizontal = Dimens.gutter, vertical = 6.dp),
     media: MediaHost? = null,
     onOpened: () -> Unit = {},
+    onToggle: (open: Boolean) -> Unit = {},
 ) {
     val colors = MaterialTheme.tsukaima
     var open by rememberSaveable(item.id) { mutableStateOf(false) }
@@ -100,7 +102,10 @@ fun ToolRow(
                 .fillMaxWidth()
                 .defaultMinSize(minHeight = Dimens.hit)
                 .pressWash(source)
-                .clickable(interactionSource = source, indication = null, role = Role.Button) { open = !open }
+                .clickable(interactionSource = source, indication = null, role = Role.Button) {
+                    open = !open
+                    onToggle(open)
+                }
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),

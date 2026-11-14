@@ -3,6 +3,19 @@
 All notable changes to Tsukaima. Versions follow `versionName` in `app/build.gradle.kts`. Decisions behind each
 release are in [`docs/superpowers/2026-10-20-build-rulings.md`](docs/superpowers/2026-10-20-build-rulings.md).
 
+## 0.15.3 — 2026-11-14 (versionCode 37)
+
+Not checked on a phone.
+
+### Fixed
+- Tool rows, reasoning and folded steps open and fold while the chat follows a streaming reply. Each new line moved
+  the row from under the finger before the tap finished, and the tap was lost. The transcript now holds still while
+  a finger is on it and catches up when the finger lifts.
+- A row opened while the chat follows stays where it was tapped: following pauses, and Latest goes back to the
+  bottom. Before, the next line of the reply pushed the opened row up, out of view when its content was long.
+- Following no longer switches itself off when the transcript pins itself to the bottom; only the reader's own
+  scrolling decides it.
+
 ## 0.15.2 — 2026-11-11 (versionCode 36)
 
 Not checked on a phone.

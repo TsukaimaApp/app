@@ -48,6 +48,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -642,14 +646,26 @@ private fun Transcript(
     val rows = remember(items, state.chat.openSteps, zone, searchQuery != null) { TranscriptRows.build(items, state.chat.openSteps, zone, unfold = searchQuery != null) }
     // Follow the bottom while the user is there; a manual scroll up stops following until they come back.
     var follow by rememberSaveable { mutableStateOf(true) }
+    // A finger on the transcript holds it still: a row that moved from under the finger would lose its tap.
+    var held by remember { mutableStateOf(false) }
+    // Unfolding a row is reading it: the row stays where it was tapped, and Latest leads back to the bottom.
+    val unfolded = { follow = false }
+    // Set while the transcript pins itself to the bottom: only the reader's own scrolling decides [follow].
+    val pinning = remember { booleanArrayOf(false) }
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
-            .collect { (scrolling, canScrollForward) -> if (scrolling) follow = !canScrollForward }
+            .collect { (scrolling, canScrollForward) -> if (scrolling && !pinning[0]) follow = !canScrollForward }
     }
     val tail = transcriptTailKey(items)
     val count = rows.size + state.outbox.size
-    LaunchedEffect(count, tail) {
-        if (follow && count > 0) listState.scrollToItem(count) // the end spacer: bottom of the last item
+    LaunchedEffect(count, tail, held) {
+        if (!follow || held || count == 0) return@LaunchedEffect
+        pinning[0] = true
+        try {
+            listState.scrollToItem(count) // the end spacer: bottom of the last item
+        } finally {
+            pinning[0] = false
+        }
     }
     // The search moved to another match: bring its row into view, and stop following the bottom.
     LaunchedEffect(searchAt, searchQuery) {
@@ -666,21 +682,41 @@ private fun Transcript(
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        held = true
+                        try {
+                            do {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                            } while (event.changes.any { it.pressed })
+                        } finally {
+                            held = false
+                        }
+                    }
+                },
             contentPadding = PaddingValues(top = 6.dp),
         ) {
             items(rows, key = { it.key }, contentType = { if (it is TranscriptRow.Item) it.item::class else it::class }) { row ->
                 when (row) {
                     is TranscriptRow.Item ->
                         if (searchQuery == null) {
-                            TranscriptItem(row.item, state, actions, media)
+                            TranscriptItem(row.item, state, actions, media, onUnfold = unfolded)
                         } else {
                             CompositionLocalProvider(LocalChatSearch provides SearchMark(searchQuery, current = row.item.id == searchAt)) {
-                                TranscriptItem(row.item, state, actions, media)
+                                TranscriptItem(row.item, state, actions, media, onUnfold = unfolded)
                             }
                         }
                     is TranscriptRow.TimeMark -> TimeMark(row.at, zone)
-                    is TranscriptRow.Steps -> StepsLine(row, onToggle = { actions.onToggleSteps(row.id) })
+                    is TranscriptRow.Steps -> StepsLine(
+                        row,
+                        onToggle = {
+                            if (row.id !in state.chat.openSteps) unfolded()
+                            actions.onToggleSteps(row.id)
+                        },
+                    )
                 }
             }
             // Written offline, not sent yet: under everything Hermes has.
@@ -705,10 +741,11 @@ private fun Transcript(
 
 /**
  * One transcript row with the chat's own components and callbacks; shared by the chat and the voice screen. With
- * [revealed] (voice mode, [VoiceState.revealed]) a reply shows only what was spoken so far ([voiceText]).
+ * [revealed] (voice mode, [VoiceState.revealed]) a reply shows only what was spoken so far ([voiceText]). [onUnfold]
+ * runs when a tap opens a tool row or the reasoning.
  */
 @Composable
-internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatActions, media: MediaHost, revealed: Map<String, Int>? = null) {
+internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatActions, media: MediaHost, revealed: Map<String, Int>? = null, onUnfold: () -> Unit = {}) {
     when (item) {
         is ChatItem.UserMessage -> UserBubble(
             item.text,
@@ -733,13 +770,16 @@ internal fun TranscriptItem(item: ChatItem, state: ChatUiState, actions: ChatAct
                 // A match that is only in the reasoning has to be readable: the search's row shows all of it.
                 reasoningOpen = ChatReducer.reasoningOpen(state.chat, item) ||
                     LocalChatSearch.current?.let { it.current && ChatSearch.onlyInReasoning(item, it.query) } == true,
-                onToggleReasoning = { actions.onToggleReasoning(item.id) },
+                onToggleReasoning = {
+                    if (!ChatReducer.reasoningOpen(state.chat, item)) onUnfold()
+                    actions.onToggleReasoning(item.id)
+                },
                 model = item.model,
                 thoughtFrom = item.thoughtFrom,
                 thoughtMs = item.thoughtMs,
             )
         }
-        is ChatItem.ToolCall -> ToolRow(item, media = media, onOpened = actions.onToolOpened)
+        is ChatItem.ToolCall -> ToolRow(item, media = media, onOpened = actions.onToolOpened, onToggle = { if (it) onUnfold() })
         is ChatItem.Subagent -> SubagentRow(item, onWatch = { actions.onSubagentOpen(item.id) }.takeIf { item.subagentId != null })
         is ChatItem.Approval -> ApprovalCard(
             item = item,
